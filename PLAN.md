@@ -327,47 +327,58 @@ signed-debuggable AAB.
 support without a Mac and a device is exactly the mistake this project already
 made once with Windows and macOS.
 
-### Phase 8 status: where this actually stopped
+### Phase 8 status: Android done
 
-Android is **structurally working and empirically partial**. Recorded honestly so
-the next person does not repeat the work or over-trust it.
+Android works. Verified on an emulator (Android 14, Chromium WebView 113) by
+`kiln-android/example/verify.sh`, which installs the APK, launches it, and asserts
+that the webview attached, that a command round-tripped into Rust, and that the
+process did not crash.
 
-**Working, verified on an emulator (Android 14, Chromium WebView 113):**
+**Working:**
 
-- `kiln` compiles for `aarch64-linux-android` (9 warnings, no errors).
-- `kiln-android` compiles: JNI entry points, activity-create hook, `invoke` bridge.
-- A real APK builds (7.0 MB debug, includes `lib/arm64-v8a/libkiln_example.so` and
-  `assets/index.html`).
-- The APK installs and launches. The activity reaches `onCreate`, `android_main`
-  runs, `WryActivity` creates a WebView, and Chromium starts its processes.
-- No crash, no `UnsatisfiedLinkError`, activity stays resumed.
+- `kiln` compiles for `aarch64-linux-android` and `x86_64-linux-android`.
+- `kiln-android` provides the JNI entry points, the activity-create hook, and the
+  `invoke` bridge.
+- A real APK builds for either ABI, installs, and launches.
+- The page loads through the custom protocol, `kiln.invoke` reaches the registry,
+  and handlers run — the same envelope and security policy as desktop.
+- No crash; the activity stays resumed.
 
-**Not yet working:**
+**Six things that were genuinely subtle, in the order they bit:**
 
-- The page does not finish loading its asset. `with_asset_loader` registers the
-  interceptor, but the document never arrives, so no `invoke` reaches Rust (the
-  Rust-side `KILN_ROUNDTRIP` log never fires). The last thing confirmed is
-  Chromium starting; the first thing unconfirmed is whether the asset URL
-  (`http://kiln.localhost/index.html`) is intercepted at all.
+1. **The WebView was never attached.** wry creates it and calls
+   `onWebViewCreate`, but deliberately leaves installation to the app. A WebView
+   that exists and is never added to the content view paints nothing and looks
+   exactly like "the page failed to load". `setContentView(webView)` in that hook
+   is required.
+2. **`AppCompatActivity` demands an AppCompat theme.** wry's `WryActivity` extends
+   it, so a platform theme crashes at `onPostCreate` with "You need to use a
+   Theme.AppCompat theme". A `Theme.AppCompat.DayNight.NoActionBar` descendant is
+   mandatory.
+3. **`android_main` must not be called from `onCreate`.** tao invokes it itself
+   from `onFirstActivityCreate`, which runs when the process lifecycle starts
+   (after `onCreate` returns). Calling it manually starts the loop twice, and does
+   it before stdout is routed to logcat.
+4. **Navigation policy refused every Android URL.** wry rewrites
+   `kiln://localhost/x` to `http://kiln.localhost/x`, so the app's own origin is
+   spelled differently there. The policy now recognises both and still refuses
+   lookalikes.
+5. **CSP blocked the bridge.** `connect-src` listed `kiln:` only; on Android the
+   page is http, so `invoke` was refused outright. Android gets its own policy
+   with `connect-src 'self'`, and the shim uses a relative URL.
+6. **wry's generated Kotlin needs a lot of scaffolding** before it compiles: the
+   Kotlin plugin, `androidx.webkit`, `appcompat`, `activity`, `lifecycle-process`,
+   `android.useAndroidX=true`, and `buildConfig true`. None of it is optional and
+   none of it is documented in one place.
 
-**What was learned the hard way, worth keeping:**
+Two more, from wiring tao and wry together:
 
-1. tao's `android_binding!` expands to a block, so it must be invoked *inside* a
-   function, not at module scope. `#[no_mangle]` items still export from there.
-2. tao and wry each generate a JNI class, and both must be spelled the same way:
-   `$domain` = all but the last package segment, `$package` = the last. The
-   `$activity` name must be `Rust`, because that is the class wry's Kotlin
-   declares.
-3. The Kotlin plugin, `androidx.webkit`, `androidx.appcompat`,
-   `androidx.activity`, `androidx.lifecycle`, `android.useAndroidX=true` and
-   `buildConfig true` are all required before wry's generated Kotlin compiles.
-   None of this is optional and none of it is documented in one place.
-4. `MainActivity` must extend wry's `WryActivity`, and the Rust library must be
-   loaded before `super.onCreate` reaches it.
+- tao's `android_binding!` expands to a block, so it must be invoked *inside* a
+  function; `#[no_mangle]` items still export from there.
+- Both macros take the package split as `$domain` (all but the last segment) and
+  `$package` (the last), and `$activity` must be `Rust` because that is the class
+  wry's Kotlin declares.
 
-**Next concrete step:** verify the asset loader intercepts, e.g. by pointing the
-webview at `data:` with a trivial inline page to separate "webview works" from
-"asset serving works". That is a bounded debugging session, not a redesign.
-
-**iOS:** not started. It shares the transport seam but needs an Xcode project and
-a Mac.
+**Not done:** iOS. It shares the transport seam but needs an Xcode project, the
+Apple SDK, and a Mac to build on. Claiming it works without that would repeat the
+mistake this project already made once with Windows and macOS.

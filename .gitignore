@@ -14,3 +14,6 @@ dist-package/
 kiln-android/example/target/
 kiln-android/example/app/build/
 kiln-android/example/app/.gradle/
+kiln-android/example/app/src/main/java/com/kiln/example/*.kt
+kiln-android/example/app/src/main/java/com/kiln/example/proguard-wry.pro
+kiln-android/example/app/src/main/jniLibs/

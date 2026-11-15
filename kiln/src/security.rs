@@ -8,6 +8,11 @@
 /// The origin pages are served from in production.
 pub const APP_ORIGIN: &str = "kiln://localhost";
 
+/// On Android there is no custom-scheme interception, so wry rewrites
+/// `kiln://localhost/x` to `http://kiln.localhost/x` and intercepts that instead.
+/// The page therefore *is* the app's own origin, it just spells it differently.
+pub const ANDROID_APP_ORIGIN: &str = "http://kiln.localhost";
+
 /// Whether `url` may be loaded in the app's webview.
 ///
 /// Allowed:
@@ -26,7 +31,9 @@ pub fn navigation_allowed(url: &str, dev_origin: Option<&str>) -> bool {
             return true;
         }
     }
-    url == APP_ORIGIN || url.starts_with(&format!("{APP_ORIGIN}/"))
+    [APP_ORIGIN, ANDROID_APP_ORIGIN]
+        .iter()
+        .any(|origin| url == *origin || url.starts_with(&format!("{origin}/")))
 }
 
 /// The Content-Security-Policy served with every response.
@@ -40,6 +47,20 @@ pub fn navigation_allowed(url: &str, dev_origin: Option<&str>) -> bool {
 /// eval-based module loader, and `ws:` for the reload channel. That relaxation
 /// is scoped to the dev origin, never to a shipped app.
 fn csp(dev: bool) -> &'static str {
+    if cfg!(target_os = "android") {
+        // Android has no custom-scheme interception: wry serves the app from
+        // http://kiln.localhost, so `invoke` is a same-origin http request.
+        // `connect-src 'self'` covers it, and nothing else is allowed.
+        return "default-src 'self'; \
+         script-src 'self' 'unsafe-inline'; \
+         style-src 'self' 'unsafe-inline'; \
+         img-src 'self' data: blob:; \
+         font-src 'self' data:; \
+         connect-src 'self'; \
+         object-src 'none'; \
+         base-uri 'none'; \
+         form-action 'none'";
+    }
     if dev {
         "default-src 'self'; \
          script-src 'self' 'unsafe-inline' 'unsafe-eval' kiln:; \
@@ -102,6 +123,18 @@ mod tests {
         // A naive starts_with("kiln://localhost") would wrongly allow these.
         assert!(!navigation_allowed("kiln://localhost.evil.com/", None));
         assert!(!navigation_allowed("kiln://localhost@evil.com/", None));
+    }
+
+    #[test]
+    fn the_android_rewritten_origin_is_still_the_app() {
+        // wry serves the page from this origin on Android; refusing it would
+        // block the app's own first navigation.
+        assert!(navigation_allowed("http://kiln.localhost/index.html", None));
+        assert!(navigation_allowed("http://kiln.localhost/", None));
+        // It must not become a hole: other http hosts stay refused.
+        assert!(!navigation_allowed("http://kiln.localhost.evil.com/", None));
+        assert!(!navigation_allowed("http://example.com/", None));
+        assert!(!navigation_allowed("http://kiln.localhost@evil.com/", None));
     }
 
     #[test]

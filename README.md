@@ -280,7 +280,7 @@ kiln package --icon icon.png
 | macOS x86_64 / arm64 | `cargo check` clean | CI | WKWebView |
 | FreeBSD | CI (VM) | CI (VM) | GTK 3 + WebKit2GTK, same code path as Linux |
 | NetBSD | `cargo check` | graph only | unverified at runtime |
-| Android arm64 | yes | partial | launches and renders a WebView; asset loading unfinished |
+| Android arm64 / x86_64 | yes | yes (emulator, CI) | JNI bridge, same commands and security policy |
 
 BSD works because wry and tao already treat it as a webkitgtk/GTK platform: two
 things blocked it (tao's default `dbus` feature and a Linux-only `gtk`
@@ -288,8 +288,15 @@ dependency) and both are fixed. The remaining cost is that the `-sys` crates nee
 GTK and WebKit installed on the *target*, so it builds and runs on BSD, not as a
 cross-compile from Linux.
 
-Android is documented in `PLAN.md` with exactly what works and what does not.
-Mandatory: CI installs `webkit2gtk` and tests both BSD branches.
+Android is a separate crate, `kiln-android`, because the platform is genuinely
+different: the activity owns the event loop, `invoke` arrives over JNI rather than a
+custom scheme, and the page's origin is spelled `http://kiln.localhost`. The
+envelope, registry, allowlist and security policy are shared with desktop through a
+transport seam, so app code is identical. `kiln-android/example/verify.sh` installs
+the APK on an emulator and asserts the webview attached, a command round-tripped
+into Rust, and the process did not crash; CI runs it.
+
+iOS is not supported.
 
 `cargo check` for Windows and macOS runs in this repo. macOS cannot be *fully*
 compiled off a Mac (its Objective-C shims need the Apple SDK), so `ci.yml`

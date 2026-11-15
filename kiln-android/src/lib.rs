@@ -120,6 +120,29 @@ macro_rules! register_jni {
     };
 }
 
+/// Write a line to logcat via the platform logger.
+///
+/// `liblog` is part of the NDK, so this needs no extra crate. Kept private and
+/// tiny: it exists so Android bootstrap diagnostics are visible at the point where
+/// stdout is not yet wired up.
+pub fn log(message: &str) {
+    __android_log(message);
+}
+
+fn __android_log(message: &str) {
+    extern "C" {
+        fn __android_log_write(prio: i32, tag: *const u8, text: *const u8) -> i32;
+    }
+    const ANDROID_LOG_INFO: i32 = 4;
+    let tag = b"Kiln\0";
+    let mut text = message.as_bytes().to_vec();
+    text.push(0);
+    // SAFETY: both pointers are NUL-terminated and outlive the call.
+    unsafe {
+        __android_log_write(ANDROID_LOG_INFO, tag.as_ptr(), text.as_ptr());
+    }
+}
+
 /// The activity-create hook passed to tao's binding.
 ///
 /// tao hands over the JNI environment and activity reference; wry needs those to
@@ -130,6 +153,9 @@ pub fn on_activity_create(
     looper: &::ndk::looper::ThreadLooper,
     activity: ::jni::objects::GlobalRef,
 ) {
+    // Route through logcat directly: at this point tao has not yet redirected
+    // stdout to the log pipe, so `println!` would vanish.
+    __android_log(package);
     // SAFETY: this is the hook wry documents for exactly this call, on the thread
     // where the looper is local. tao passes the package name it stored from the
     // macro's `$domain`/`$package`, which is what wry's Kotlin classes are keyed on.

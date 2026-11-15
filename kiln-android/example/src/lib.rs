@@ -20,6 +20,14 @@ pub extern "C" fn Java_com_kiln_example_MainActivity_android_1main(
     android_main();
 }
 
+#[no_mangle]
+pub extern "C" fn Java_com_kiln_example_MainActivity_nativeEntry(
+    _env: jni::JNIEnv,
+    _class: jni::objects::JClass,
+) {
+    android_main();
+}
+
 fn android_main() {
     // Installs the JNI entry points the activity calls. Inside the function on
     // purpose: tao's macro expands to a block, which module scope rejects.
@@ -32,7 +40,9 @@ fn android_main() {
                 let name = payload.get("name").and_then(Value::as_str).unwrap_or("world");
                 // Logged on the Rust side so a headless run can prove the command
                 // actually executed, not merely that the page rendered.
-                println!("KILN_ROUNDTRIP command=greet name={name}");
+                // Logged on the Rust side so a headless run can prove the command
+                // actually executed, not merely that the page rendered.
+                kiln_android::log(&format!("greet invoked with name={name}"));
                 Ok(json!(format!("Hello from Android, {name}!")))
             }),
     );

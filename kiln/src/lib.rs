@@ -97,7 +97,7 @@ const SHIM: &str = include_str!("shim.js");
 /// to `http://kiln.localhost` and intercepts it. The shim must use the rewritten
 /// form there or its `fetch` never reaches the handler.
 #[cfg(target_os = "android")]
-const INVOKE_BASE: &str = "http://kiln.localhost/__kiln/";
+const INVOKE_BASE: &str = "/__kiln/";
 /// Reached through the custom protocol in both modes, so the page's own origin
 /// never matters on desktop.
 #[cfg(not(target_os = "android"))]
@@ -577,25 +577,6 @@ fn build_factory(
         let protocol_handle = handle.clone();
         let protocol_origin = dev_origin.clone();
 
-        // Android has no way to intercept a custom scheme into the APK, so the
-        // page comes from wry's WebViewAssetLoader instead. The shim, navigation
-        // policy and invoke path are unchanged: only the asset source differs.
-        #[cfg(target_os = "android")]
-        {
-            let _ = (&protocol_registry, &protocol_handle, &protocol_origin);
-            use wry::WebViewBuilderExtAndroid;
-            return WebViewBuilder::new()
-                .with_devtools(false)
-                .with_initialization_script(&shim)
-                .with_navigation_handler(move |url| {
-                    security::navigation_allowed(&url, nav_origin.as_deref())
-                })
-                .with_asset_loader(SCHEME.to_owned())
-                .with_url(target);
-        }
-
-        #[cfg(not(target_os = "android"))]
-        {
         let builder = WebViewBuilder::new()
             // Debug builds always have devtools; a release build gets them only
             // with the `devtools` feature (or `full`).
@@ -630,7 +611,6 @@ fn build_factory(
                 })
             }
             None => builder,
-        }
         }
     })
 }

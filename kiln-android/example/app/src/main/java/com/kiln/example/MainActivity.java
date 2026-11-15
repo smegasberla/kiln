@@ -1,14 +1,28 @@
 package com.kiln.example;
 
-import android.os.Bundle;
 import android.util.Log;
+import android.view.ViewGroup;
+import android.webkit.WebView;
 
 /**
  * The activity the OS launches.
  *
- * <p>wry's {@code WryActivity} owns the WebView and the lifecycle forwarding, so
- * this subclass adds only what Kiln needs: loading the Rust library and calling
- * the native entry point once.
+ * <p>Two things belong here and nowhere else:
+ *
+ * <ol>
+ *   <li>Loading the Rust library. It has to happen before the activity's super
+ *       {@code onCreate} reaches wry's {@code Rust.onCreate}, so it is a static
+ *       initialiser.
+ *   <li>Attaching the WebView. wry creates the view and hands it to
+ *       {@code onWebViewCreate}, but deliberately does not install it: the app owns
+ *       its layout. A WebView that is created and never attached paints nothing
+ *       and looks exactly like a page that failed to load.
+ * </ol>
+ *
+ * <p>Note what is <em>not</em> here: calling {@code android_main}. tao invokes the
+ * app's entry point itself, from {@code onFirstActivityCreate}, which runs when the
+ * process lifecycle starts (after {@code onCreate} returns). Calling it here too
+ * would start the event loop twice and before stdout is wired to logcat.
  */
 public class MainActivity extends WryActivity {
     private static final String TAG = "Kiln";
@@ -17,15 +31,12 @@ public class MainActivity extends WryActivity {
         System.loadLibrary("kiln_example");
     }
 
-    /** Native entry point, exported by kiln_android::register_jni!. */
-    public static native void android_main();
-
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        Log.i(TAG, "MainActivity.onCreate");
-        super.onCreate(savedInstanceState);
-        Log.i(TAG, "calling android_main");
-        android_main();
-        Log.i(TAG, "android_main returned");
+    public void onWebViewCreate(WebView webView) {
+        Log.i(TAG, "onWebViewCreate: attaching the webview");
+        setContentView(webView);
+        webView.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
     }
 }

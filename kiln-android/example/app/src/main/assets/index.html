@@ -28,6 +28,7 @@
       const result = document.getElementById("result");
       // Report to logcat so `adb logcat` is enough to verify a headless run.
       const say = (tag, text) => console.log("KILN_CHECK " + tag + " " + text);
+      document.title = "KILN_TITLE_LOADED";
       window.addEventListener("load", () => {
         // Auto-invoke on load so a headless run needs no input events.
         setTimeout(async () => {
