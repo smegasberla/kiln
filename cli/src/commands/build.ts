@@ -9,6 +9,7 @@ import {
   writeAssetTable,
 } from "../pipeline.ts";
 import { boolFlag, stringFlag, type Args } from "../args.ts";
+import { checkParity } from "../parity.ts";
 
 export async function build(args: Args): Promise<number> {
   ensureToolchain();
@@ -16,6 +17,13 @@ export async function build(args: Args): Promise<number> {
   const release = !boolFlag(args, "debug");
 
   console.log(`kiln build: ${p.config.name}`);
+
+  // The frontend is shared across platforms, so a command registered on only one
+  // shell is a runtime failure on the other. Report it here rather than at launch.
+  const parity = checkParity(p.root);
+  if (!parity.ok) {
+    console.warn(`  warning: command parity between desktop and android: ${parity.message}`);
+  }
   await bundle(p, true);
   const count = writeAssetTable(p);
   console.log(`  embedded ${count} frontend file(s)`);

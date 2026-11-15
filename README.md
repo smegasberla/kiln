@@ -288,11 +288,16 @@ dependency) and both are fixed. The remaining cost is that the `-sys` crates nee
 GTK and WebKit installed on the *target*, so it builds and runs on BSD, not as a
 cross-compile from Linux.
 
+`kiln init` scaffolds both shells, so a project already contains its Android
+Gradle project and activity: nothing under `android/` is generated at build time
+except the Kotlin that wry writes, which is git-ignored.
+
 Android is a separate crate, `kiln-android`, because the platform is genuinely
-different: the activity owns the event loop, `invoke` arrives over JNI rather than a
-custom scheme, and the page's origin is spelled `http://kiln.localhost`. The
-envelope, registry, allowlist and security policy are shared with desktop through a
-transport seam, so app code is identical. `kiln-android/example/verify.sh` installs
+different. The activity owns the event loop, and `invoke` cannot use the custom
+protocol: `WebResourceRequest` carries no body, so wry would deliver every payload
+as `null`. Android therefore uses wry's IPC handler and resolves the page's promise
+from Rust. The envelope, registry, allowlist and security policy are shared through
+a transport seam, so app code is identical. `kiln-android/example/verify.sh` installs
 the APK on an emulator and asserts the webview attached, a command round-tripped
 into Rust, and the process did not crash; CI runs it.
 
@@ -315,6 +320,8 @@ cd cli && bun install && bun run build     # -> cli/dist/kiln (compiled, no Bun 
 kiln init myapp
 cd myapp
 kiln dev                                   # Bun dev server + Rust shell
+kiln android build                         # APK, no Gradle files to write
+kiln android run                           # install and follow logs
 kiln build --size                          # release binary with the frontend inside
 kiln package --icon icon.png               # AppImage / .app / .zip
 kiln doctor                                # toolchain and project checks

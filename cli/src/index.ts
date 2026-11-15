@@ -5,12 +5,13 @@
  *  produces a Rust binary with no JS runtime inside.
  */
 
-import { parseArgs } from "./args.ts";
+import { parseArgs, type Args } from "./args.ts";
 import { init } from "./commands/init.ts";
 import { dev } from "./commands/dev.ts";
 import { build } from "./commands/build.ts";
 import { doctor } from "./commands/doctor.ts";
 import { runPackage } from "./commands/package.ts";
+import * as android from "./commands/android.ts";
 
 const HELP = `kiln - minimal desktop apps with a Rust shell and a Bun toolchain
 
@@ -22,6 +23,8 @@ Commands
   dev            run the Bun dev server and launch the shell against it
   build          bundle the frontend and compile the release binary
   package        build, then wrap the binary in a platform installer
+  android build  cross-compile and package an APK
+  android run    install and launch on a device or emulator
   doctor         check the toolchain and report what is missing
 
 Options
@@ -33,6 +36,8 @@ Options
   --out <path>   build: copy the binary somewhere
   --icon <path>  package: application icon (256x256 PNG or .icns)
   --identifier   package: reverse-DNS id (default: derived from the app name)
+  --package      init: Android package name (default: com.kiln.<app>)
+  --abi          android build: arm64-v8a (default), x86_64, armeabi-v7a
   --json         doctor: machine-readable output
   -h, --help     show this help
 
@@ -68,6 +73,24 @@ switch (args.command) {
   case "package":
     code = await runPackage(args);
     break;
+  case "android": {
+    // `kiln android <subcommand>`: the second positional names the action.
+    const sub = args.positionals[0];
+    const rest: Args = { ...args, command: sub ?? "help", positionals: args.positionals.slice(1) };
+    switch (sub) {
+      case "build":
+        code = await android.build(rest);
+        break;
+      case "run":
+        code = await android.runOnDevice(rest);
+        break;
+      default:
+        console.error("kiln android: expected `build` or `run`\n");
+        console.log(HELP);
+        code = 1;
+    }
+    break;
+  }
   default:
     console.error(`kiln: unknown command \`${args.command}\`\n`);
     console.log(HELP);

@@ -1,0 +1,19 @@
+node_modules
+dist
+dist-package
+
+# Rust build output
+native/target
+android/target
+
+# Android build output and everything wry generates at build time. None of it is
+# source: the Kotlin classes are written by wry's build script.
+android/app/build
+android/app/.gradle
+android/app/local.properties
+android/app/src/main/jniLibs
+android/app/src/main/java/**/*.kt
+android/app/src/main/java/**/proguard-wry.pro
+
+.DS_Store
+*.swp

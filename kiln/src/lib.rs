@@ -116,6 +116,8 @@ pub(crate) enum UserEvent {
     Menu(String),
     /// An out-of-band signal, e.g. "open devtools".
     Signal(String),
+    /// Run a script in every window (used to resolve bridge promises).
+    Eval(String),
 }
 
 /// A handle passed to command handlers. Cheap to clone, safe to send to other
@@ -203,6 +205,15 @@ impl AppHandle {
             return Err(Error::Runtime("no registry attached".to_owned()));
         };
         parse_envelope(&commands.dispatch(self, method, payload))
+    }
+
+    /// Evaluate a script in every window, on the UI thread.
+    ///
+    /// Commands answered from a worker thread must not touch a webview directly,
+    /// so the script is queued as a user event like any other emit.
+    pub(crate) fn eval_all(&self, script: &str) {
+        let Some(proxy) = &self.proxy else { return };
+        let _ = proxy.send_event(UserEvent::Eval(script.to_owned()));
     }
 
     /// Open devtools on every window. Needs the `devtools` feature in release
@@ -547,6 +558,13 @@ impl App {
                     #[cfg(not(feature = "menu"))]
                     let _ = &id;
                 }
+                Event::UserEvent(UserEvent::Eval(script)) => {
+                    for entry in open.values() {
+                        if let Err(error) = entry.webview.evaluate_script(&script) {
+                            eprintln!("kiln: eval failed: {error}");
+                        }
+                    }
+                }
                 Event::UserEvent(UserEvent::Signal(signal)) => {
                     if signal == "devtools" {
                         for entry in open.values() {
@@ -598,6 +616,15 @@ fn build_factory(
                     )
                 },
             )
+            .with_ipc_handler({
+                // Only Android sends bridge messages; on desktop this handler is
+                // present but the shim never uses it.
+                let registry = Arc::clone(&registry);
+                let handle = handle.clone();
+                move |request: Request<String>| {
+                    serve_bridge(&registry, &handle, request.body().as_str());
+                }
+            })
             .with_url(target);
 
         match &ready {
@@ -720,6 +747,9 @@ fn build_webview(builder: WebViewBuilder<'_>, window: &Window) -> Result<WebView
 /// The allowlist is computed in Rust and injected as JSON, so the page side never
 /// guesses which origins are legitimate.
 fn build_shim(dev_origin: Option<&str>) -> String {
+    // Android's WebResourceRequest carries no body, so a protocol POST cannot
+    // deliver a payload there; wry's IPC handler is the only option.
+    let bridge = cfg!(target_os = "android");
     let mut origins = vec![APP_ORIGIN.to_owned()];
     if let Some(dev) = dev_origin {
         origins.push(dev.to_owned());
@@ -730,6 +760,8 @@ fn build_shim(dev_origin: Option<&str>) -> String {
     let allowed = serde_json::to_string(&origins).unwrap_or_else(|_| "[]".to_owned());
     SHIM.replace("__INVOKE_BASE__", INVOKE_BASE)
         .replace("__ALLOWED_ORIGINS__", &allowed)
+        .replace("__BRIDGE__", if bridge { "true" } else { "false" })
+        .replace("__PLATFORM__", platform_name())
 }
 
 /// The parts of the shell that do not depend on a desktop window loop.
@@ -786,6 +818,40 @@ pub mod transport {
         let payload = value.get("payload").cloned().unwrap_or(Value::Null);
         Ok((method, payload))
     }
+}
+
+/// Answer a bridge message: parse `{id, method, payload}`, run the command, then
+/// resolve the page's promise by evaluating `__kiln_resolve(id, envelope)`.
+///
+/// Used on Android, where a custom-protocol POST cannot carry a body. The
+/// envelope is identical to the protocol transport, so a command behaves the same
+/// on both platforms.
+fn serve_bridge(registry: &Arc<Registry>, handle: &AppHandle, message: &str) {
+    let parsed: Value = match serde_json::from_str(message) {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("kiln: bridge message is not valid JSON");
+            return;
+        }
+    };
+
+    let id = parsed.get("id").cloned().unwrap_or(Value::Null);
+    let Some(method) = parsed.get("method").and_then(Value::as_str).map(str::to_owned) else {
+        eprintln!("kiln: bridge message has no method");
+        return;
+    };
+    let payload = parsed.get("payload").cloned().unwrap_or(Value::Null);
+
+    let script_handle = handle.clone();
+    registry.dispatch_deferred(handle, &method, payload, move |body| {
+        // `body` is already an envelope; hand it to the page as JSON, not as a
+        // string, so the shim does not have to parse twice.
+        let script = format!(
+            "window.__kiln_resolve&&window.__kiln_resolve({}, {})",
+            id, body
+        );
+        script_handle.eval_all(&script);
+    });
 }
 
 /// Serve one request, replying through wry's async responder so async commands
@@ -885,6 +951,42 @@ fn json_error(
         .status(status)
         .body(Cow::Owned(body.into_bytes()))
         .unwrap()
+}
+
+/// The platform name the page receives as `kiln.platform`.
+///
+/// Shared frontend code uses it to hide affordances that cannot work: a second
+/// window on Android, a file dialog on a platform without one, and so on.
+pub fn platform_name() -> &'static str {
+    #[cfg(target_os = "android")]
+    {
+        "android"
+    }
+    #[cfg(target_os = "ios")]
+    {
+        "ios"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "windows"
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "macos"
+    }
+    #[cfg(any(
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))]
+    {
+        "bsd"
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "linux"
+    }
 }
 
 fn dev_url() -> Option<String> {

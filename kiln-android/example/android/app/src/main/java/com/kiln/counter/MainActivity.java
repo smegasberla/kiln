@@ -1,0 +1,42 @@
+package com.kiln.counter;
+
+import android.util.Log;
+import android.view.ViewGroup;
+import android.webkit.WebView;
+
+/**
+ * The activity Android launches.
+ *
+ * <p>Two things belong here, and both are easy to get wrong:
+ *
+ * <ol>
+ *   <li>Loading the Rust library. It must happen before the activity's super
+ *       {@code onCreate} reaches wry's native setup, so it is a static
+ *       initialiser.
+ *   <li>Attaching the WebView. wry creates the view and hands it to
+ *       {@code onWebViewCreate}, but leaves installation to the app because only
+ *       the app knows its layout. A WebView that is created but never added to the
+ *       content view paints nothing, which looks exactly like a page that failed
+ *       to load.
+ * </ol>
+ *
+ * <p>Do not call the native entry point from {@code onCreate}: tao invokes it
+ * itself from {@code onFirstActivityCreate}, which runs once the process
+ * lifecycle starts. Calling it twice starts the event loop twice.
+ */
+public class MainActivity extends WryActivity {
+    private static final String TAG = "Kiln";
+
+    static {
+        System.loadLibrary("counter");
+    }
+
+    @Override
+    public void onWebViewCreate(WebView webView) {
+        Log.i(TAG, "attaching the webview");
+        setContentView(webView);
+        webView.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+}

@@ -34,9 +34,15 @@ slowButton.addEventListener("click", async () => {
   }
 });
 
-settingsButton.addEventListener("click", () => {
-  window.kiln.invoke("open_settings").catch(() => {});
-});
+// A second window is a desktop capability. Rather than offer a button that errors
+// on Android, hide it: the page is shared, the affordances are not.
+if (window.kiln.platform === "android" || window.kiln.platform === "ios") {
+  settingsButton.hidden = true;
+} else {
+  settingsButton.addEventListener("click", () => {
+    window.kiln.invoke("open_settings").catch((error) => show("error: " + error.message));
+  });
+}
 
 // Menu clicks arrive as events, so a native menu needs no extra wiring here.
 window.kiln.listen<{ id: string }>("menu", (event) => show(`menu: ${event.id}`));

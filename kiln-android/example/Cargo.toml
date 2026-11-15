@@ -1,20 +1,3 @@
-[package]
-name = "kiln-android-example"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-name = "kiln_example"
-crate-type = ["cdylib"]
-
-[dependencies]
-kiln-android = { path = ".." }
-kiln = { path = "../../kiln" }
-# Required by tao's android_binding! macro, which expands to items in the app crate.
-tao = { version = "0.37", default-features = false }
-wry = { version = "0.57" }
-jni = "0.21"
-
 [workspace]
-
-
+members = ["android", "native"]
+resolver = "2"

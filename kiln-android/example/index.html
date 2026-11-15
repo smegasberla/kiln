@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Counter</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Counter</h1>
+      <p class="hint">A native command round-trip: TypeScript calls Rust, Rust returns data.</p>
+      <form id="greet">
+        <input id="name" value="world" autocomplete="off" spellcheck="false" />
+        <button type="submit">Invoke</button>
+      </form>
+      <p id="result" aria-live="polite">waiting</p>
+      <div class="row">
+        <button id="slow" type="button" class="ghost">Slow async task</button>
+        <button id="settings" type="button" class="ghost">Open settings window</button>
+      </div>
+    </main>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

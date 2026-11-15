@@ -1,0 +1,237 @@
+/** `kiln android <build|run|verify>`: the Android half of a Kiln project.
+ *
+ *  Kept separate from `kiln build` because the toolchain is entirely different:
+ *  cross-compile with the NDK, stage the `.so`, then let Gradle package it. The
+ *  project already contains its Gradle files, so nothing here generates
+ *  configuration at build time.
+ */
+
+import { existsSync, mkdirSync, copyFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { boolFlag, stringFlag, type Args } from "../args.ts";
+import { bundle, writeAssetTable } from "../pipeline.ts";
+import { requireProject, type Project } from "../project.ts";
+import { checkParity } from "../parity.ts";
+import { run } from "../proc.ts";
+
+/** ABIs Kiln builds, and the Rust target + NDK compiler prefix for each. */
+const ABIS: Record<string, { target: string; clang: string }> = {
+  "arm64-v8a": { target: "aarch64-linux-android", clang: "aarch64-linux-android" },
+  "x86_64": { target: "x86_64-linux-android", clang: "x86_64-linux-android" },
+  "armeabi-v7a": { target: "armv7-linux-androideabi", clang: "armv7a-linux-androideabi" },
+};
+
+export const DEFAULT_API = 26;
+
+export function androidDir(project: Project): string {
+  return join(project.root, "android");
+}
+
+/** The NDK toolchain, or a message saying what to install. */
+export function ndkToolchain(ndk: string | undefined): string {
+  if (!ndk) {
+    throw new Error(
+      "no Android NDK found. Set ANDROID_NDK_HOME, or install one with\n" +
+        "  sdkmanager 'ndk;27.0.12077973'",
+    );
+  }
+  const bin = join(ndk, "toolchains", "llvm", "prebuilt", "linux-x86_64", "bin");
+  if (!existsSync(bin)) {
+    throw new Error(`NDK at ${ndk} has no llvm toolchain (looked in ${bin})`);
+  }
+  return bin;
+}
+
+/** Read `[lib] name` from the Android crate so the `.so` name is never guessed. */
+export function androidLibName(project: Project): string {
+  const manifest = join(androidDir(project), "Cargo.toml");
+  if (!existsSync(manifest)) {
+    throw new Error(`no Android crate at ${manifest}; run kiln init in this project`);
+  }
+  const text = require("node:fs").readFileSync(manifest, "utf8") as string;
+  const match = /\[lib\][\s\S]*?name\s*=\s*"([^"]+)"/.exec(text);
+  if (!match) {
+    throw new Error(`${manifest} has no [lib] name; the APK has nothing to load`);
+  }
+  return match[1]!;
+}
+
+export async function build(args: Args): Promise<number> {
+  const project = requireProject();
+  const abi = stringFlag(args, "abi") ?? "arm64-v8a";
+  const abiSpec = ABIS[abi];
+  if (!abiSpec) {
+    throw new Error(`unknown --abi ${abi} (choose ${Object.keys(ABIS).join(", ")})`);
+  }
+
+  const sdk = process.env.ANDROID_HOME ?? process.env.ANDROID_SDK_ROOT;
+  const ndk = process.env.ANDROID_NDK_HOME ?? process.env.ANDROID_NDK_ROOT;
+  const toolchain = ndkToolchain(ndk);
+  const lib = androidLibName(project);
+  const android = androidDir(project);
+  const api = Number(stringFlag(args, "api") ?? DEFAULT_API);
+
+  const clang = join(toolchain, `${abiSpec.clang}${api}-clang`);
+  if (!existsSync(clang)) throw new Error(`no compiler at ${clang}`);
+
+  // A command registered on only one shell fails at runtime on the other, with
+  // "unknown command". Catch it at build time instead.
+  const parity = checkParity(project.root);
+  if (!parity.ok) {
+    console.error(`kiln: command parity problem between desktop and android\n  ${parity.message}`);
+    return 1;
+  }
+  console.log(`  ${parity.message}`);
+
+  // The frontend must be bundled before it can be embedded.
+  console.log(`kiln android build: ${project.config.name} (${abi})`);
+  await bundle(project, true);
+  writeAssetTable(project, android);
+
+  const env = {
+    ...process.env,
+    ANDROID_HOME: sdk,
+    ANDROID_NDK_HOME: ndk,
+    // wry's build script generates the Kotlin classes the app compiles against.
+    WRY_ANDROID_PACKAGE: readPackage(project),
+    WRY_ANDROID_LIBRARY: lib,
+    WRY_ANDROID_KOTLIN_FILES_OUT_DIR: kotlinOutDir(project),
+    [`CC_${abiSpec.target.replace(/-/g, "_")}`]: clang,
+    [`AR_${abiSpec.target.replace(/-/g, "_")}`]: join(toolchain, "llvm-ar"),
+    [`CARGO_TARGET_${abiSpec.target.replace(/-/g, "_").toUpperCase()}_LINKER`]: clang,
+  };
+
+  await run(["cargo", "build", "--release", "--target", abiSpec.target], {
+    cwd: android,
+    env,
+  });
+
+  const so = join(
+    android,
+    "target",
+    abiSpec.target,
+    "release",
+    `lib${lib}.so`,
+  );
+  if (!statSync(so, { throwIfNoEntry: false })) {
+    throw new Error(`cargo finished but ${so} is missing`);
+  }
+
+  const jni = join(android, "app", "src", "main", "jniLibs", abi);
+  mkdirSync(jni, { recursive: true });
+  copyFileSync(so, join(jni, `lib${lib}.so`));
+  console.log(`  staged ${abi}/lib${lib}.so`);
+
+  await run(["gradle", "assembleDebug", "--no-daemon", "-q"], { cwd: join(android, "app") });
+
+  const apk = findApk(project);
+  if (!apk) throw new Error("Gradle finished but no APK was produced");
+  const mb = (statSync(apk).size / 1048576).toFixed(1);
+  console.log(`\n  ${apk} (${mb} MB)`);
+  return 0;
+}
+
+export async function runOnDevice(args: Args): Promise<number> {
+  const project = requireProject();
+  const adb = adbPath();
+
+  const apk = findApk(project);
+  if (!apk) {
+    console.error("kiln: no APK yet; run `kiln android build` first");
+    return 1;
+  }
+
+  const pkg = readPackage(project);
+  console.log(`kiln android run: ${pkg}`);
+  await run([adb, "install", "-r", apk], { silent: true });
+  await run([adb, "shell", "am", "force-stop", pkg], { silent: true });
+  await run([adb, "logcat", "-c"], { silent: true });
+  await run([
+    adb,
+    "shell",
+    "am",
+    "start",
+    "-n",
+    `${pkg}/.MainActivity`,
+  ], { silent: true });
+
+  console.log("  launched. logs:\n");
+  const logs = Bun.spawn([adb, "logcat", "-s", "Kiln:*", "RustStdoutStderr:*"], {
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  process.on("SIGINT", () => {
+    logs.kill();
+    process.exit(0);
+  });
+  await logs.exited;
+  return boolFlag(args, "wait") ? 0 : 0;
+}
+
+/** Locate the built APK without hardcoding the Gradle output layout beyond what
+ *  is documented. */
+export function findApk(project: Project): string | null {
+  const base = join(androidDir(project), "app", "build", "outputs", "apk");
+  if (!existsSync(base)) return null;
+  const stack = [base];
+  while (stack.length > 0) {
+    const dir = stack.pop()!;
+    for (const entry of require("node:fs").readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(full);
+      else if (entry.name.endsWith(".apk")) return full;
+    }
+  }
+  return null;
+}
+
+/** The Android package, read from the generated Gradle file. */
+export function readPackage(project: Project): string {
+  const gradle = join(androidDir(project), "app", "build.gradle");
+  const text = existsSync(gradle) ? require("node:fs").readFileSync(gradle, "utf8") : "";
+  const match = /namespace\s+['"]([^'"]+)['"]/.exec(text as string);
+  if (!match) throw new Error(`${gradle} has no namespace; cannot derive the package`);
+  return match[1]!;
+}
+
+/** Where wry should write its generated Kotlin: beside the package's sources. */
+function kotlinOutDir(project: Project): string {
+  const pkg = readPackage(project);
+  return join(
+    androidDir(project),
+    "app",
+    "src",
+    "main",
+    "java",
+    ...pkg.split("."),
+  );
+}
+
+function adbPath(): string {
+  const sdk = process.env.ANDROID_HOME ?? process.env.ANDROID_SDK_ROOT ?? "";
+  const candidate = join(sdk, "platform-tools", "adb");
+  if (existsSync(candidate)) return candidate;
+  const found = Bun.which("adb");
+  if (found) return found;
+  throw new Error("no adb found. Install platform-tools or set ANDROID_HOME");
+}
+
+/** Write a `.gitignore` entry list for the Android tree, so a scaffolded project
+ *  never commits build output or generated Kotlin. */
+export function androidGitignore(): string {
+  return [
+    "build/",
+    ".gradle/",
+    "target/",
+    "app/src/main/jniLibs/",
+    "app/src/main/java/**/*.kt",
+    "app/src/main/java/**/proguard-wry.pro",
+    "local.properties",
+    "",
+  ].join("\n");
+}
+
+/** Used by `kiln init`; exported so a test can assert the shape. */
+export function writeAndroidGitignore(project: Project): void {
+  writeFileSync(join(androidDir(project), ".gitignore"), androidGitignore());
+}

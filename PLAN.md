@@ -379,6 +379,32 @@ Two more, from wiring tao and wry together:
   `$package` (the last), and `$activity` must be `Rust` because that is the class
   wry's Kotlin declares.
 
+### Phase 8b: scaffolding and the three bugs it exposed
+
+`kiln init` now generates the Android project too, so an app has one frontend and
+two shells with no Gradle or Java written by hand. While testing a scaffolded app
+three real bugs surfaced, all of them invisible on desktop:
+
+1. **`slow_task` and `open_settings` were missing on Android.** The frontend is
+   shared, so it called commands only the desktop crate registered. Fixed in the
+   template, and guarded: `kiln build` and `kiln android build` now compare the two
+   crates' registered commands and fail on a mismatch. Two of the parity tests
+   caught the checker itself counting a commented-out registration.
+2. **`open_settings` did nothing on Android.** It now returns an error explaining
+   that second windows are desktop-only, and the page hides the button when
+   `kiln.platform` is `android` rather than offering something that cannot work.
+3. **Arguments were silently dropped — the important one.** wry's Android custom
+   protocol builds its request with `request_builder.body(Vec::new())`: an empty
+   body, always, because `WebResourceRequest` has no body API at all. Every
+   `invoke` payload arrived as `null`, so the handler fell back to `"world"`.
+   Fixed by using wry's IPC handler on Android (`window.ipc.postMessage`) and
+   resolving the page's promise from Rust via `evaluate_script`. The envelope is
+   identical, so only the transport differs.
+
+All three are verified on an emulator by driving the real bridge and reading the
+result: `slow={"slept_ms":40}`, `greet=Hello, PAYLOAD-OK!`, and an explicit error
+for `open_settings`.
+
 **Not done:** iOS. It shares the transport seam but needs an Xcode project, the
 Apple SDK, and a Mac to build on. Claiming it works without that would repeat the
 mistake this project already made once with Windows and macOS.

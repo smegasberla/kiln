@@ -153,13 +153,17 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # GitHub's runners are x86_64, so the emulator needs an x86_64 APK even
-      # though arm64 is what ships. build.sh takes the ABI as an argument.
-      - name: Build the APK for x86_64
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Scaffold a project and build it for x86_64
         env:
-          ABI: x86_64
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.0.12077973
-        run: ./kiln-android/example/build.sh
+        run: |
+          bun cli/src/index.ts init /tmp/app --name "CI App"
+          cd /tmp/app
+          bun "$GITHUB_WORKSPACE/cli/src/index.ts" android build --abi x86_64
 
       - name: Boot the emulator and verify
         uses: reactivecircus/android-emulator-runner@v2
@@ -168,7 +172,12 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          script: ./kiln-android/example/verify.sh
+          script: |
+            adb install -r /tmp/app/android/app/build/outputs/apk/debug/*.apk
+            adb shell am start -n com.kiln.ci_app/.MainActivity
+            sleep 15
+            adb logcat -d -s Kiln:* || true
+            adb logcat -d | grep -q "FATAL EXCEPTION" && exit 1 || exit 0
 
   macos:
     name: macOS (build, test)

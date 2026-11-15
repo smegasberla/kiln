@@ -30,14 +30,50 @@ export async function doctor(args: Args): Promise<number> {
     detail: cargo ?? "not found on PATH; install Rust",
   });
 
-  const webkit = process.platform !== "linux" || hasWebkit();
-  checks.push({
-    name: "system webview",
-    ok: webkit,
-    detail: webkit ? "available" : "webkit2gtk-4.1 not found (install webkit2gtk-4.1)",
-  });
+  // Linux and the BSDs both use GTK + WebKit2GTK; the package names differ, so the
+  // hint says which one to install rather than a generic message.
+  const gtkPlatform = ["linux", "freebsd", "netbsd", "openbsd", "dragonfly"].includes(
+    process.platform,
+  );
+  if (gtkPlatform) {
+    const webkit = hasWebkit();
+    checks.push({
+      name: "system webview",
+      ok: webkit,
+      detail: webkit
+        ? "webkit2gtk found"
+        : `webkit2gtk not found (${webkitPackageHint(process.platform)})`,
+    });
+    checks.push({
+      name: "pkg-config",
+      ok: Boolean(Bun.which("pkg-config")),
+      detail: Bun.which("pkg-config") ?? "missing; needed to link GTK and WebKit",
+    });
+  } else {
+    checks.push({
+      name: "system webview",
+      ok: true,
+      detail: process.platform === "android" ? "provided by the system WebView" : "built in",
+    });
+  }
 
+  // Android is a separate toolchain, so report it only when the project has one.
   const project = findProject();
+  if (project && existsSync(join(project.root, "android", "Cargo.toml"))) {
+    const ndk = process.env.ANDROID_NDK_HOME ?? process.env.ANDROID_NDK_ROOT;
+    checks.push({
+      name: "android NDK",
+      ok: Boolean(ndk) && existsSync(ndk!),
+      detail: ndk ?? "ANDROID_NDK_HOME not set (only needed for kiln android)",
+    });
+    const adb = Bun.which("adb");
+    checks.push({
+      name: "adb",
+      ok: Boolean(adb),
+      detail: adb ?? "not on PATH (only needed for kiln android run)",
+    });
+  }
+
   checks.push({
     name: "project",
     ok: Boolean(project),
@@ -68,6 +104,20 @@ export async function doctor(args: Args): Promise<number> {
   }
 
   return checks.every((c) => c.ok) ? 0 : 1;
+}
+
+/** The package name for WebKit2GTK on this platform. */
+export function webkitPackageHint(platform: string): string {
+  switch (platform) {
+    case "freebsd":
+      return "pkg install webkit2gtk41";
+    case "netbsd":
+    case "openbsd":
+    case "dragonfly":
+      return "install webkit2gtk from pkgsrc";
+    default:
+      return "install webkit2gtk-4.1";
+  }
 }
 
 function hasWebkit(): boolean {

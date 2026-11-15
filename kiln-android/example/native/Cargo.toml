@@ -1,0 +1,17 @@
+[package]
+name = "counter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# `full` turns on the native menu bar, file dialogs, update checks, and devtools
+# in release builds. Remove `features` to get the minimal shell.
+kiln = { path = "/home/smegasberla/Documenti/_Games_and_Projects/Kiln/kiln", features = ["full"] }
+
+[workspace]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

@@ -23,11 +23,16 @@ export async function bundle(project: Project, minify: boolean): Promise<void> {
 }
 
 /** Regenerate `native/src/assets.rs` from the current `dist/`. */
-export function writeAssetTable(project: Project): number {
-  const crate = crateDir(project);
+/** Generate the asset table for one crate.
+ *
+ *  `crate` defaults to the desktop crate; the Android crate passes its own path so
+ *  both platforms embed the same bundled frontend from their own `src/assets.rs`.
+ */
+export function writeAssetTable(project: Project, crate?: string): number {
+  const dir = crate ?? crateDir(project);
   const outDir = join(project.root, OUT_DIR);
-  const target = join(crate, "src", "assets.rs");
-  const { entries, source } = assetTable(outDir, join(crate, "src"));
+  const target = join(dir, "src", "assets.rs");
+  const { entries, source } = assetTable(outDir, join(dir, "src"));
   writeFileSync(target, source);
   return entries;
 }
