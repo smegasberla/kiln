@@ -7,6 +7,12 @@
 //! Predefined items are used wherever possible because they carry the platform's
 //! own labels and shortcuts, which is also what makes Cmd-C and Ctrl-C work in the
 //! webview without any key handling of ours.
+//!
+//! Android has no menu bar and no system edit shortcuts to borrow: the platform
+//! expects a navigation drawer or an overflow button, both of which are app
+//! chrome rather than OS chrome. So the same `MenuGroup`s are kept and handed to
+//! the activity, which shows them as a `PopupMenu`; nothing is attached to the
+//! window, and `accelerator` is documentation only there.
 
 use crate::WindowOptions;
 
@@ -65,11 +71,36 @@ impl MenuGroup {
     }
 }
 
+/// The groups as the activity renders them: a title and its items per group.
+///
+/// JSON rather than a JNI call per field, because the activity builds a
+/// `PopupMenu` out of this and has no reason to know what a `MenuGroup` is.
+#[cfg(target_os = "android")]
+pub fn to_json(groups: &[MenuGroup]) -> serde_json::Value {
+    serde_json::json!(
+        groups
+            .iter()
+            .map(|group| {
+                serde_json::json!({
+                    "title": group.title,
+                    "items": group
+                        .items
+                        .iter()
+                        .map(|item| serde_json::json!({ "id": item.id, "label": item.label }))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect::<Vec<_>>()
+    )
+}
+
 /// A built menu, kept alive for as long as the app runs.
+#[cfg(not(target_os = "android"))]
 pub struct MenuHandle {
     pub(crate) menu: muda::Menu,
 }
 
+#[cfg(not(target_os = "android"))]
 impl MenuHandle {
     /// Attach the menu to a window.
     ///
@@ -107,10 +138,45 @@ impl MenuHandle {
     }
 }
 
+/// A built menu on Android, which is the groups themselves.
+///
+/// There is nothing to build: a `PopupMenu` is constructed per display, from the
+/// activity, when the app asks for it. Keeping the groups here means an app can
+/// declare one menu and get the platform's own presentation on both.
+#[cfg(target_os = "android")]
+pub struct MenuHandle {
+    groups: Vec<MenuGroup>,
+}
+
+#[cfg(target_os = "android")]
+impl MenuHandle {
+    /// No-op: Android menus are not attached to anything.
+    pub fn attach(&self, _window: &tao::window::Window) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// The declared groups, for the activity to render.
+    pub fn groups(&self) -> &[MenuGroup] {
+        &self.groups
+    }
+}
+
 /// Create a menu with the platform-standard edit items plus the given groups.
 ///
 /// `app_name` is used for the macOS application menu's title, About item, and
 /// Quit item; other platforms use it only to label the quit entry.
+#[cfg(target_os = "android")]
+pub fn build(_app_name: &str, groups: &[MenuGroup]) -> Result<MenuHandle, String> {
+    Ok(MenuHandle {
+        groups: groups.to_vec(),
+    })
+}
+
+/// Create a menu with the platform-standard edit items plus the given groups.
+///
+/// `app_name` is used for the macOS application menu's title, About item, and
+/// Quit item; other platforms use it only to label the quit entry.
+#[cfg(not(target_os = "android"))]
 pub fn build(app_name: &str, groups: &[MenuGroup]) -> Result<MenuHandle, String> {
     use muda::{Menu, MenuItem as MudaItem, PredefinedMenuItem, Submenu};
 
@@ -176,6 +242,10 @@ pub fn build(app_name: &str, groups: &[MenuGroup]) -> Result<MenuHandle, String>
 }
 
 /// Parse an accelerator string, tolerating the two spellings muda accepts.
+///
+/// Android has no accelerators: a `PopupMenu` shows labels only, so the strings
+/// stay as documentation instead of becoming key bindings.
+#[cfg(not(target_os = "android"))]
 fn parse_accelerator(text: &str) -> Option<muda::accelerator::Accelerator> {
     use std::str::FromStr;
     muda::accelerator::Accelerator::from_str(text).ok()
@@ -235,6 +305,7 @@ mod tests {
         assert_eq!(accels[0], ("save".to_owned(), "CmdOrCtrl+S".to_owned()));
     }
 
+    #[cfg(not(target_os = "android"))]
     #[test]
     fn shortcut_strings_parse() {
         assert!(parse_accelerator("CmdOrCtrl+S").is_some());
@@ -254,5 +325,21 @@ mod tests {
         let options = window_options("Settings");
         assert_eq!(options.title.as_deref(), Some("Settings"));
         assert!(options.entry.is_none());
+    }
+
+    #[test]
+    fn a_menu_builds_on_every_platform() {
+        // Desktop wraps the groups in a native menu; Android keeps them for the
+        // activity to render. Either way declaring one menu must not fail.
+        assert!(build("Kiln", &[group()]).is_ok());
+    }
+
+    #[cfg(target_os = "android")]
+    #[test]
+    fn android_keeps_the_groups_for_the_activity() {
+        let built = build("Kiln", &[group()]).expect("a menu should build");
+        assert_eq!(built.groups().len(), 1);
+        assert_eq!(built.groups()[0].title, "File");
+        assert_eq!(built.groups()[0].items[0].id, "save");
     }
 }

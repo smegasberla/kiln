@@ -12,44 +12,75 @@
 //! Payload accepts `title`, `file_name`, `directory`, and `filters` as
 //! `[{"name": "Images", "extensions": ["png"]}]`. Returning `null` on cancel is
 //! deliberate: it is the one shape a caller can branch on without catching.
+//!
+//! Desktop goes through `rfd`, which blocks the calling thread. Android has no
+//! `rfd`: the picker is an Android intent started by the activity, so the request
+//! is described as JSON, handed to the activity, and the answer comes back as the
+//! same JSON shape. Both entry points are async, so neither blocks the window.
 
-use serde_json::{json, Value};
+use serde_json::Value;
+
+#[cfg(any(not(target_os = "android"), test))]
+use serde_json::json;
 
 use crate::Registry;
 
 /// Register every dialog command.
 ///
-/// These run on worker threads (`add_async`) because `rfd` blocks the calling
-/// thread until the user closes the dialog. Running them inline would freeze the
-/// window for as long as the dialog is open.
+/// These are registered async (`add_async`) even though nothing here blocks:
+/// the desktop backend blocks the worker thread it runs on, and the Android
+/// backend parks that thread on a channel until the activity answers. Registering
+/// them synchronously would hold the UI thread for the same interval.
 pub fn register(registry: &mut Registry) {
-    registry.add_async("dialog.open", |_app, payload| {
-        let dialog = build(&payload);
-        Ok(dialog.pick_file().map(|p| json!({ "path": path_string(&p) })).unwrap_or(Value::Null))
-    });
+    registry.add_async("dialog.open", |_app, payload| open(&payload, "open"));
+    registry.add_async("dialog.open_many", |_app, payload| open(&payload, "open_many"));
+    registry.add_async("dialog.save", |_app, payload| open(&payload, "save"));
+    registry.add_async("dialog.folder", |_app, payload| open(&payload, "folder"));
+}
 
-    registry.add_async("dialog.open_many", |_app, payload| {
-        let dialog = build(&payload);
-        Ok(dialog
-            .pick_files()
-            .map(|paths| json!({ "paths": paths.iter().map(|p| path_string(p)).collect::<Vec<_>>() }))
-            .unwrap_or(Value::Null))
-    });
+/// One dialog command, from payload to the reply the page sees.
+#[cfg(not(target_os = "android"))]
+fn open(payload: &Value, kind: &str) -> Result<Value, crate::Error> {
+    let dialog = build(payload);
+    let picked: Option<Value> = match kind {
+        "open" => dialog.pick_file().as_deref().map(|path| json!({ "path": path_string(path) })),
+        "open_many" => dialog.pick_files().map(|paths| {
+            json!({ "paths": paths.iter().map(|p| path_string(p)).collect::<Vec<_>>() })
+        }),
+        "save" => dialog.save_file().as_deref().map(|path| json!({ "path": path_string(path) })),
+        "folder" => dialog.pick_folder().as_deref().map(|path| json!({ "path": path_string(path) })),
+        other => {
+            return Err(crate::Error::Handler(format!("unknown dialog kind {other}")));
+        }
+    };
+    Ok(picked.unwrap_or(Value::Null))
+}
 
-    registry.add_async("dialog.save", |_app, payload| {
-        let dialog = build(&payload);
-        Ok(dialog.save_file().map(|p| json!({ "path": path_string(&p) })).unwrap_or(Value::Null))
-    });
+/// One dialog command, from payload to the reply the page sees.
+///
+/// The request is the payload plus the `kind`, which is what the activity needs
+/// to know in order to pick the intent. The answer is already the reply shape,
+/// because the activity builds it from the same JSON, so it is passed through
+/// unread rather than parsed and rebuilt.
+#[cfg(target_os = "android")]
+fn open(payload: &Value, kind: &str) -> Result<Value, crate::Error> {
+    let mut request = payload.clone();
+    if let Some(object) = request.as_object_mut() {
+        object.insert("kind".to_owned(), Value::from(kind));
+    }
+    let request = request.to_string();
 
-    registry.add_async("dialog.folder", |_app, payload| {
-        let dialog = build(&payload);
-        Ok(dialog.pick_folder().map(|p| json!({ "path": path_string(&p) })).unwrap_or(Value::Null))
-    });
+    match crate::platform::pick_dialog(&request) {
+        Ok(Some(response)) => Ok(serde_json::from_str(&response).unwrap_or(Value::Null)),
+        Ok(None) => Ok(Value::Null),
+        Err(message) => Err(crate::Error::Handler(format!("dialog {kind} failed: {message}"))),
+    }
 }
 
 /// Paths cross the IPC boundary as UTF-8 strings. A path that is not valid UTF-8
 /// cannot be represented in JSON at all, so it is reported rather than mangled
 /// into replacement characters that would name a different file.
+#[cfg(not(target_os = "android"))]
 fn path_string(path: &std::path::Path) -> String {
     match path.to_str() {
         Some(text) => text.to_owned(),
@@ -64,6 +95,7 @@ fn path_string(path: &std::path::Path) -> String {
 }
 
 /// Apply the payload's optional settings to a fresh dialog.
+#[cfg(not(target_os = "android"))]
 fn build(payload: &Value) -> rfd::FileDialog {
     let mut dialog = rfd::FileDialog::new();
 
@@ -87,6 +119,9 @@ fn build(payload: &Value) -> rfd::FileDialog {
 
 /// Parse the payload's filter list without a dialog. Used by `build` and kept
 /// separate so the parsing is testable without opening a window.
+///
+/// Android receives these too, as part of the JSON request: the activity maps an
+/// extension to a MIME type, so the filter has to be described the same way.
 pub fn parse_filters(payload: &Value) -> Vec<(String, Vec<String>)> {
     payload
         .get("filters")
@@ -153,10 +188,21 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_os = "android"))]
     #[test]
     fn paths_convert_to_utf8_strings() {
         let path = std::path::Path::new("/tmp/file.txt");
         assert_eq!(path_string(path), "/tmp/file.txt");
     }
 
+    #[cfg(target_os = "android")]
+    #[test]
+    fn the_request_carries_the_kind_for_the_activity() {
+        // Android's picker is chosen from this field, so a command that lost it
+        // would open the wrong intent.
+        let request = open(&json!({ "title": "Pick" }), "folder")
+            .err()
+            .expect("no activity in a test process, so this must report rather than hang");
+        assert!(request.to_string().contains("folder"));
+    }
 }

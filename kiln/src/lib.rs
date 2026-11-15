@@ -47,6 +47,7 @@ mod assets;
 mod config;
 mod error;
 mod ipc;
+mod platform;
 mod reporting;
 mod security;
 
@@ -65,6 +66,12 @@ pub use assets::{content_type, lookup, AssetTable};
 pub use config::Config;
 pub use error::Error;
 pub use ipc::Registry;
+pub use platform::{data_dir, menu_clicked, runtime, tray_clicked};
+/// Android only: the outer crate has to hand the activity in when the OS
+/// creates one, because everything that starts an intent lives on it, and to
+/// hand back the answer when the picker it started returns.
+#[cfg(target_os = "android")]
+pub use platform::{complete_dialog, fail_dialog, init_activity};
 /// Re-exported so an app crate needs exactly one dependency: `kiln`.
 pub use serde_json;
 pub use security::{content_security_policy, navigation_allowed, APP_ORIGIN};
@@ -114,6 +121,8 @@ pub(crate) enum UserEvent {
     CloseWindow(String),
     /// A menu item was clicked.
     Menu(String),
+    /// A tray item was clicked.
+    Tray(String),
     /// An out-of-band signal, e.g. "open devtools".
     Signal(String),
     /// Run a script in every window (used to resolve bridge promises).
@@ -225,10 +234,16 @@ impl AppHandle {
     /// Internal bridge for crate modules that need to wake the loop.
     pub(crate) fn emit_signal(&self, signal: &str) {
         let Some(proxy) = &self.proxy else { return };
-        let event = signal
-            .strip_prefix("menu:")
-            .map(|id| UserEvent::Menu(id.to_owned()))
-            .unwrap_or_else(|| UserEvent::Signal(signal.to_owned()));
+        // Menu and tray ids share this entry point but not their event name, so
+        // the prefix decides which one fires; a single `signal` event would make
+        // a page unable to tell a tray click from anything else on the platform.
+        let event = if let Some(id) = signal.strip_prefix("menu:") {
+            UserEvent::Menu(id.to_owned())
+        } else if let Some(id) = signal.strip_prefix("tray:") {
+            UserEvent::Tray(id.to_owned())
+        } else {
+            UserEvent::Signal(signal.to_owned())
+        };
         let _ = proxy.send_event(event);
     }
 }
@@ -419,6 +434,13 @@ impl App {
         let registry = Arc::new(registry);
         let handle = AppHandle::new(proxy, Arc::clone(&registry));
 
+        // Published before anything can call back, and on every platform: an
+        // outer bootstrap (the Android one) has to answer with the same registry
+        // the webview uses, and a platform callback can arrive before the first
+        // window exists.
+        platform::set_registry(&registry);
+        platform::set_app_handle(&handle);
+
         let spec = Arc::new(windows::Spec {
             entry,
             default_title: config.title.clone(),
@@ -462,8 +484,10 @@ impl App {
             menu_command_map(&self.menus)
         };
 
+        // Underscored because nothing reads it: the tray has to stay alive for the
+        // whole run, and dropping it removes the icon.
         #[cfg(feature = "tray")]
-        let tray_handle = build_tray(&self.tray, &handle);
+        let _tray_handle = build_tray(&self.tray, &handle);
 
         let mut open = windows::Windows::new();
         windows::insert(
@@ -548,6 +572,9 @@ impl App {
                             *control_flow = ControlFlow::Exit;
                         }
                     }
+                }
+                Event::UserEvent(UserEvent::Tray(id)) => {
+                    handle.emit_to_all("tray", serde_json::json!({ "id": id }));
                 }
                 Event::UserEvent(UserEvent::Menu(id)) => {
                     handle.emit_to_all("menu", serde_json::json!({ "id": id }));
@@ -665,10 +692,29 @@ fn build_menu(
         }
     };
 
-    let proxy = handle.clone();
-    muda::MenuEvent::set_event_handler(Some(move |event: muda::MenuEvent| {
-        proxy.emit_signal(&format!("menu:{}", event.id.0));
-    }));
+    // Desktop menus report clicks through muda's global handler. Android has no
+    // menu bar: its menu is a Java `PopupMenu` that calls back through
+    // `platform::menu_clicked`, so it only needs the groups in a form the
+    // activity can render, and emits through `platform::handle` when a click
+    // arrives.
+    #[cfg(not(target_os = "android"))]
+    {
+        let proxy = handle.clone();
+        muda::MenuEvent::set_event_handler(Some(move |event: muda::MenuEvent| {
+            proxy.emit_signal(&format!("menu:{}", event.id.0));
+        }));
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = handle;
+        // There is no menu bar to hang the items on, so they are handed over once
+        // and shown later by `__kiln_show_menu`, when there is an anchor view.
+        let json = menu::to_json(&built.groups()).to_string();
+        if !crate::platform::install_menu(&json) {
+            eprintln!("kiln: menu installed before the activity existed; it will not show");
+        }
+    }
+
     Some(built)
 }
 
@@ -766,7 +812,7 @@ fn build_shim(dev_origin: Option<&str>) -> String {
 
 /// The parts of the shell that do not depend on a desktop window loop.
 ///
-/// A mobile build replaces the *transport* (`@JavascriptInterface` on Android,
+/// A mobile build replaces the *transport* (wry's IPC handler on Android,
 /// `WKScriptMessageHandler` on iOS) and the *entry point* (JNI instead of
 /// `fn main`), but the envelope, the registry, the allowlist, the CSP and the
 /// navigation policy are identical. Keeping them in one place is what makes that
@@ -1013,6 +1059,19 @@ fn register_builtins(registry: &mut Registry, config: &Config) {
         Ok(serde_json::json!(reporting::entries()))
     });
 
+    // A page that writes user data needs somewhere to put it, and the answer
+    // differs per OS. Answered here rather than in the shim so the page never
+    // has to guess a platform. `null` means it could not be determined, which
+    // the page should treat as "no persistence available".
+    registry.add("__kiln_data_dir", {
+        let name = config.name.clone();
+        move |_app, _payload| {
+            let path = platform::data_dir(&name)
+                .and_then(|dir| dir.to_str().map(str::to_owned));
+            Ok(serde_json::json!({ "path": path }))
+        }
+    });
+
     registry.add("__kiln_open_window", |app, payload| {
         app.open_window(WindowOptions::from_json(&payload))?;
         Ok(Value::Null)
@@ -1028,6 +1087,18 @@ fn register_builtins(registry: &mut Registry, config: &Config) {
     registry.add("__kiln_devtools", |app, _payload| {
         app.open_devtools();
         Ok(Value::Null)
+    });
+
+    // Android has no menu bar, so the menu is a `PopupMenu` raised on demand.
+    // The page owns the button that raises it, because Android expects app chrome
+    // (an overflow button or drawer) rather than OS chrome.
+    #[cfg(all(feature = "menu", target_os = "android"))]
+    registry.add("__kiln_show_menu", |_app, _payload| {
+        if platform::show_menu() {
+            Ok(Value::Null)
+        } else {
+            Err(Error::Handler("no menu is installed to show".to_owned()))
+        }
     });
 
     #[cfg(feature = "dialogs")]

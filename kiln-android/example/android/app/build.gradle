@@ -18,6 +18,10 @@ android {
         targetSdk 36
         versionCode 1
         versionName "0.1.0"
+
+        // The instrumentation tests in src/androidTest are the only way to run
+        // the picker and menu translations on a real Android runtime.
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -48,4 +52,9 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.activity:activity:1.9.3'
     implementation 'androidx.lifecycle:lifecycle-process:2.8.7'
+    // NotificationCompat, for the tray notification the Rust side posts.
+    implementation 'androidx.core:core:1.13.1'
+
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 }

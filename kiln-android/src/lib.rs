@@ -7,9 +7,13 @@
 //!
 //! - the JNI entry points the Kotlin activity calls (`onCreate`, `onResume`, ...)
 //! - `android_main`, the Android counterpart of `fn main`
-//! - a JNI bridge for `invoke`, because a custom URL scheme is awkward inside
-//!   Android's WebView. The envelope, registry, allowlist and security policy are
-//!   the desktop ones, so app code does not change between platforms.
+//!
+//! Page requests do not cross this crate. Android's WebView makes a custom URL
+//! scheme awkward, so `kiln` installs wry's IPC handler on Android and answers
+//! `window.ipc` itself; the envelope, registry, allowlist and security policy are
+//! the desktop ones. The other direction, Java calling in for a dialog result or a
+//! menu click, needs JNI symbols named after the *app's* package, so those exports
+//! live in the app crate, not here.
 //!
 //! This crate deliberately does not invent a lifecycle model. Pause, resume and
 //! destroy become events, and the docs say plainly that a command can be
@@ -17,51 +21,22 @@
 
 #![cfg(target_os = "android")]
 
-pub mod bridge;
-
 pub use kiln;
 /// Re-exported so an app needs only `kiln-android` in its manifest.
 pub use tao;
 pub use wry;
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
-use kiln::serde_json::Value;
 use kiln::{App, AppHandle, Registry};
 
-/// The registry and handle, published once the app is running.
-///
-/// The Java side calls in from a different thread, so the bridge needs a stable
-/// way to reach the same registry the webview uses. Built once per process: a
-/// resumed activity reuses it.
-static RUNTIME: OnceLock<Runtime> = OnceLock::new();
-
-struct Runtime {
-    registry: Arc<Registry>,
-    handle: AppHandle,
-}
-
 /// Return the live runtime, if the app has started.
-pub fn runtime() -> Option<(&'static Arc<Registry>, &'static AppHandle)> {
-    let runtime = RUNTIME.get()?;
-    Some((&runtime.registry, &runtime.handle))
-}
-
-/// Run one page request through the same path the desktop protocol uses.
 ///
-/// Returns the response envelope as JSON text, which the Java bridge hands
-/// straight back to the page.
-pub fn invoke(method: &str, payload_json: &str) -> String {
-    let Some((registry, handle)) = runtime() else {
-        return r#"{"error":"kiln: app has not started yet"}"#.to_owned();
-    };
-    let payload = match kiln::transport::parse_payload(payload_json.as_bytes()) {
-        Ok(value) => value,
-        Err(message) => {
-            return format!(r#"{{"error":{}}}"#, Value::from(message));
-        }
-    };
-    kiln::transport::respond(registry, handle, method, payload)
+/// Forwarded rather than kept here: `App::run` publishes the registry and handle
+/// it actually built, and a second copy would answer with a registry that has no
+/// commands in it. One publisher, one answer.
+pub fn runtime() -> Option<(&'static Arc<Registry>, &'static AppHandle)> {
+    kiln::runtime()
 }
 
 /// Start a Kiln app from the Android entry point.
@@ -69,15 +44,11 @@ pub fn invoke(method: &str, payload_json: &str) -> String {
 /// Call this from the function named in `android_binding!`; it blocks for the
 /// lifetime of the activity, exactly like `App::run` on desktop.
 ///
-/// The shell builds its own registry internally, so this only records that the
-/// app is live for the bridge. A future revision should hand the shell's registry
-/// here instead of a placeholder; until then `invoke` from the Kotlin bridge
-/// reports "not started" rather than lying about a result.
+/// Nothing is published here. `App::run` hands its own registry and handle to
+/// `kiln::platform` before the loop starts, and [`runtime`] reads them back; the
+/// shell cannot be duplicated by the crate that starts it without the bridge and
+/// the webview disagreeing about which commands exist.
 pub fn run(app: App) {
-    let _ = RUNTIME.set(Runtime {
-        registry: Arc::new(Registry::new()),
-        handle: AppHandle::detached_for_tests(),
-    });
     app.run().ok();
 }
 
@@ -156,6 +127,12 @@ pub fn on_activity_create(
     // Route through logcat directly: at this point tao has not yet redirected
     // stdout to the log pipe, so `println!` would vanish.
     __android_log(package);
+    // The shell needs its own reference: `ndk_context` only ever holds the
+    // *application* context, and a picker, a `PopupMenu`, or a notification can
+    // only be started from the activity. Publishing it here, on every create,
+    // is what a configuration change needs: the old activity is destroyed, so
+    // keeping the first one would mean calling into a dead object.
+    kiln::init_activity(activity.clone());
     // SAFETY: this is the hook wry documents for exactly this call, on the thread
     // where the looper is local. tao passes the package name it stored from the
     // macro's `$domain`/`$package`, which is what wry's Kotlin classes are keyed on.

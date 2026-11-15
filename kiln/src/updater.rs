@@ -66,6 +66,11 @@ pub fn register(registry: &mut Registry, config: &Config) {
 
 /// Fetch a URL as text. Kept separate so the comparison logic stays testable
 /// without a network.
+///
+/// On Android this goes through the activity's `HttpURLConnection`, because a
+/// bundled TLS stack has to carry its own root certificates while the platform
+/// one already trusts the system store.
+#[cfg(not(target_os = "android"))]
 fn fetch(url: &str) -> Result<String, Error> {
     let response = ureq::get(url)
         .call()
@@ -74,6 +79,17 @@ fn fetch(url: &str) -> Result<String, Error> {
         .into_body()
         .read_to_string()
         .map_err(|e| Error::Handler(format!("update check failed: {e}")))
+}
+
+/// Fetch a URL as text through the activity's HTTP stack.
+///
+/// Android ships a curated certificate store the app cannot see, and a bundled
+/// one has to be updated with the app, so the platform's `HttpURLConnection` is
+/// the honest choice. It blocks, which is fine: `update.check` is async.
+#[cfg(target_os = "android")]
+fn fetch(url: &str) -> Result<String, Error> {
+    crate::platform::http_get(url)
+        .ok_or_else(|| Error::Handler("update check failed: no activity can make the request".to_owned()))
 }
 
 /// Whether `latest` is newer than `current`, comparing dotted numeric segments.

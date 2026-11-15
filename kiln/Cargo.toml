@@ -17,10 +17,6 @@ tao = { version = "0.37", default-features = false, features = ["rwh_06", "x11"]
 serde_json = "1"
 
 # Opt-in crates. Each is behind a feature so a minimal app pays nothing.
-muda = { version = "0.21", optional = true }
-tray-icon = { version = "0.26", optional = true }
-rfd = { version = "0.18", optional = true }
-ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
 
 # GTK is Linux-only, and naming it directly is what lets the menu code describe a
 # GTK container without guessing at an opaque type. It is not optional because
@@ -49,3 +45,21 @@ full = ["menu", "dialogs", "updater", "devtools"]
 [[example]]
 name = "hello"
 path = "examples/hello.rs"
+
+# These four have no Android backend: muda and rfd do not compile for the target
+# at all, and ureq pulls in `ring`, whose build script refuses to cross-build for
+# it without a C toolchain dance. Android gets native equivalents in
+# `src/platform`, so gating them here is what lets one app declare the same
+# features on both platforms.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+muda = { version = "0.21", optional = true }
+tray-icon = { version = "0.26", optional = true }
+rfd = { version = "0.18", optional = true }
+ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
+
+# On Android those features are served by `src/platform`, which talks to the
+# activity over JNI. `jni` is the binding itself; `ndk-context` is how the
+# JavaVM and application context reach us, because tao stores them there.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"

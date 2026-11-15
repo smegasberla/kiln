@@ -1145,7 +1145,9 @@ name = "kiln"
 version = "0.1.0"
 dependencies = [
  "gtk",
+ "jni",
  "muda",
+ "ndk-context",
  "rfd",
  "serde_json",
  "tao",

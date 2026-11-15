@@ -51,11 +51,12 @@ jobs:
       - name: Clippy
         run: cargo clippy -p kiln --features full --all-targets -- -D warnings
 
-      - name: Typecheck CLI
+      - name: Typecheck and test CLI
         working-directory: cli
         run: |
           bun install --frozen-lockfile
           bun run typecheck
+          bun test
 
       - name: Install Xvfb and appimagetool
         run: |
@@ -172,12 +173,21 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
+          # Launching is what proves the Java -> Rust entry points: a wrong JNI
+          # name is an UnsatisfiedLinkError in the log, not a build error. The
+          # picker and menu round-trips are not driven from here: the menu is
+          # covered by KilnMenuTest and the intent by KilnDialogsTest, both
+          # instrumentation tests, and the intent answer itself needs a document
+          # provider the emulator image does not ship.
           script: |
             adb install -r /tmp/app/android/app/build/outputs/apk/debug/*.apk
             adb shell am start -n com.kiln.ci_app/.MainActivity
             sleep 15
             adb logcat -d -s Kiln:* || true
-            adb logcat -d | grep -q "FATAL EXCEPTION" && exit 1 || exit 0
+            adb logcat -d > /tmp/logcat.txt
+            grep -q "FATAL EXCEPTION" /tmp/logcat.txt && exit 1
+            grep -q "UnsatisfiedLinkError" /tmp/logcat.txt && exit 1
+            exit 0
 
   macos:
     name: macOS (build, test)

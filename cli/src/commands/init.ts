@@ -29,6 +29,12 @@ import androidProps from "../../template/android/gradle.properties.tmpl" with { 
 import androidManifest from "../../template/android/AndroidManifest.xml.tmpl" with { type: "text" };
 import androidThemes from "../../template/android/themes.xml.tmpl" with { type: "text" };
 import androidActivity from "../../template/android/MainActivity.java.tmpl" with { type: "text" };
+import androidDialogs from "../../template/android/KilnDialogs.java.tmpl" with { type: "text" };
+import androidMenu from "../../template/android/KilnMenu.java.tmpl" with { type: "text" };
+import androidTray from "../../template/android/KilnTray.java.tmpl" with { type: "text" };
+import androidHttp from "../../template/android/KilnHttp.java.tmpl" with { type: "text" };
+import androidMenuTest from "../../template/android/androidTest/KilnMenuTest.java.tmpl" with { type: "text" };
+import androidDialogsTest from "../../template/android/androidTest/KilnDialogsTest.java.tmpl" with { type: "text" };
 import androidCargo from "../../template/android/Cargo.toml.tmpl" with { type: "text" };
 import androidLib from "../../template/android/lib.rs.tmpl" with { type: "text" };
 import androidAssets from "../../template/android/assets.rs.tmpl" with { type: "text" };
@@ -94,10 +100,19 @@ export function init(args: Args): number {
   write("android/app/gradle.properties", fill(androidGradleProps(androidProps)));
   write("android/app/src/main/AndroidManifest.xml", fill(androidManifest));
   write("android/app/src/main/res/values/themes.xml", fill(androidThemes));
-  write(
-    `android/app/src/main/java/${ids.package.replace(/\./g, "/")}/MainActivity.java`,
-    fill(androidActivity),
-  );
+  const java = `android/app/src/main/java/${ids.package.replace(/\./g, "/")}`;
+  write(`${java}/MainActivity.java`, fill(androidActivity));
+  write(`${java}/KilnDialogs.java`, fill(androidDialogs));
+  write(`${java}/KilnMenu.java`, fill(androidMenu));
+  write(`${java}/KilnTray.java`, fill(androidTray));
+  write(`${java}/KilnHttp.java`, fill(androidHttp));
+
+  // Instrumentation tests. They cover the parts of the picker and menu that are
+  // pure data translation, which is exactly the part a device can exercise
+  // without a document provider or a visible window.
+  const androidTest = `android/app/src/androidTest/java/${ids.package.replace(/\./g, "/")}`;
+  write(`${androidTest}/KilnMenuTest.java`, fill(androidMenuTest));
+  write(`${androidTest}/KilnDialogsTest.java`, fill(androidDialogsTest));
 
   console.log(
     [

@@ -286,7 +286,7 @@ different lifecycle, and the honest estimate is weeks, not hours.
 | Entry point | `fn main` | `android_main` via JNI, driven by `tao-macros` |
 | Window | Kiln creates one | the activity owns it |
 | Assets | `include_bytes!` served over `kiln://` | APK `assets/`, served over `https://` via WebViewAssetLoader |
-| IPC | custom protocol POST | `@JavascriptInterface` bridge (custom schemes are awkward in Android WebView) |
+| IPC | custom protocol POST | wry's IPC handler (`window.ipc.postMessage`), answered from Rust (custom schemes cannot carry a body in Android WebView) |
 | Backgrounding | app either runs or exits | paused/resumed/destroyed, state can be lost at any moment |
 | Keyboard | free | on-screen IME, resize/viewport handling |
 | Packaging | AppImage/.app/.zip | AAB/APK, Gradle, signing key, SDK/NDK versions |
@@ -301,8 +301,8 @@ iOS is a further step on top: no JNI, an Xcode project, `WKWebView` inside a
    desktop `run()` and a mobile entry point can drive. No behaviour change; this
    is the prerequisite for everything else.
 2. **Android bootstrap crate** (`kiln-android`): JNI entry, activity glue,
-   asset loader, `@JavascriptInterface` bridge replacing the protocol endpoint.
-   Same `invoke(method, payload) -> json` surface, so app code does not change.
+   asset loader, wry's IPC handler replacing the protocol endpoint. Same
+   `invoke(method, payload) -> json` surface, so app code does not change.
 3. **Lifecycle.** Expose `on_pause`/`on_resume`/`on_destroy` as events
    (`kiln.listen("lifecycle", ...)`), and make it explicit in docs that a
    command may be interrupted by process death. Async handlers need a
@@ -314,8 +314,15 @@ iOS is a further step on top: no JNI, an Xcode project, `WKWebView` inside a
 
 ### Deliberate limits for v1 of mobile
 
-- One window. Multi-window, tray, menu bar, updater and native dialogs are
-  desktop-only; the app must compile with them compiled out.
+- One window. Multi-window is desktop-only and stays that way.
+- Menu, tray, dialogs and updater have Android equivalents served by
+  `kiln/src/platform.rs`, so an app declares the same features on both targets
+  and only `tray` is opt-in. The crate carries `features = ["full"]` because the
+  alternatives cost more than they save: a featureless Android build leaves the
+  whole platform surface dead and fails under `-D warnings`, and per-target
+  feature lists in `cli/src/commands/android.ts` would diverge from the crate the
+  developer reads. Measured cost of `full` over featureless for the example app:
+  3.87 MB vs 3.79 MB of release `.so`.
 - No background execution, no notifications beyond the web API.
 - Android target ABI set starts at arm64-v8a only; adding ABIs is a Gradle line.
 
@@ -329,16 +336,23 @@ made once with Windows and macOS.
 
 ### Phase 8 status: Android done
 
-Android works. Verified on an emulator (Android 14, Chromium WebView 113) by
-`kiln-android/example/verify.sh`, which installs the APK, launches it, and asserts
-that the webview attached, that a command round-tripped into Rust, and that the
-process did not crash.
+Android works. The `android` job in `.github/workflows/ci.yml` scaffolds a fresh
+project, builds an APK, installs it on an emulator, launches it, and fails on
+either a `FATAL EXCEPTION` or an `UnsatisfiedLinkError` in the log. That covers
+what a wrong JNI name breaks: a symbol mismatch is a link error at runtime, not a
+compile error. `KilnMenuTest` and `KilnDialogsTest` add instrumentation coverage
+on top of it — `PopupMenu` construction and click dispatch under a themed
+context, and the picker's intent construction, URI-to-path resolution and MIME
+mapping. What is still not driven is the intent answer itself: handing back a
+`content://` URI needs a document provider the emulator image does not ship.
 
 **Working:**
 
 - `kiln` compiles for `aarch64-linux-android` and `x86_64-linux-android`.
-- `kiln-android` provides the JNI entry points, the activity-create hook, and the
-  `invoke` bridge.
+- `kiln-android` provides the JNI entry points and the activity-create hook;
+  page requests arrive through wry's IPC handler, and the Java-to-Rust exports
+  (dialog results, menu clicks, tray clicks) live in the app crate, because their
+  symbol names must carry the app's own package.
 - A real APK builds for either ABI, installs, and launches.
 - The page loads through the custom protocol, `kiln.invoke` reaches the registry,
   and handlers run — the same envelope and security policy as desktop.

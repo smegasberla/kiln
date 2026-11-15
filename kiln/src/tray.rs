@@ -8,6 +8,12 @@
 //! On Linux this needs `libappindicator` (or ayatana-appindicator) at build time;
 //! the icon lives in the desktop's status area and its menu is owned by the
 //! environment.
+//!
+//! Android has no status area and no background tray, so the same configuration
+//! becomes a notification: the tooltip is its title and each item an action
+//! button. It is not equivalent, and is not presented as such: a notification can
+//! be dismissed, and posting one needs the notification permission, so the tray's
+//! "always there" promise does not carry over.
 
 use serde_json::json;
 
@@ -86,11 +92,22 @@ impl TrayConfig {
 }
 
 /// A live tray icon. Dropping it removes the icon from the status area.
+#[cfg(not(target_os = "android"))]
 pub struct TrayHandle {
     _icon: tray_icon::TrayIcon,
 }
 
+/// A live tray on Android, which is a notification that has already been posted.
+///
+/// There is nothing to keep alive: the notification outlives this value, and the
+/// OS owns it from the moment it is posted.
+#[cfg(target_os = "android")]
+pub struct TrayHandle {
+    _private: (),
+}
+
 /// Build the tray icon and wire its menu to the app's event loop.
+#[cfg(not(target_os = "android"))]
 pub fn build(config: &TrayConfig, handle: &AppHandle) -> Result<TrayHandle, Error> {
     use tray_icon::menu::{Menu, MenuItem as TrayMenuItem};
     use tray_icon::{Icon, TrayIconBuilder};
@@ -121,6 +138,33 @@ pub fn build(config: &TrayConfig, handle: &AppHandle) -> Result<TrayHandle, Erro
     }));
 
     Ok(TrayHandle { _icon: icon })
+}
+
+/// Post the tray as a notification, with its items as action buttons.
+///
+/// The configuration is handed over as JSON rather than as individual JNI calls
+/// so the activity decides how a notification is built; a failure to reach the
+/// activity is reported, because a tray that silently did nothing would look like
+/// a missing feature rather than a broken one.
+#[cfg(target_os = "android")]
+pub fn build(config: &TrayConfig, _handle: &AppHandle) -> Result<TrayHandle, Error> {
+    let request = json!({
+        "title": config.tooltip,
+        "items": config
+            .items
+            .iter()
+            .map(|item| json!({ "id": item.id, "label": item.label }))
+            .collect::<Vec<_>>(),
+    });
+
+    if crate::platform::post_notification(&request.to_string()) {
+        Ok(TrayHandle { _private: () })
+    } else {
+        Err(Error::Handler(
+            "the tray could not be posted as a notification: the activity is not available"
+                .to_owned(),
+        ))
+    }
 }
 
 /// The event payload the page receives for a tray click.

@@ -52,7 +52,7 @@ Measured on this machine (Linux x64, release profile, `strip` on):
 | Direct dependencies | 2 | 3 (minimal) |
 
 `bun scripts/bench.ts` and `bun scripts/verify.ts` reproduce those numbers and
-assert the rest of the guarantees. The verifier runs 13 checks and exits non-zero
+assert the rest of the guarantees. The verifier runs 14 checks and exits non-zero
 if any fails: shell unit tests, embedded round-trip + `emit`, `kiln init`,
 `kiln build`, binary size, no JS runtime embedded, OS webview only, the app
 surviving launch, dev-mode cross-origin invoke, the compiled CLI working with
@@ -280,7 +280,7 @@ kiln package --icon icon.png
 | macOS x86_64 / arm64 | `cargo check` clean | CI | WKWebView |
 | FreeBSD | CI (VM) | CI (VM) | GTK 3 + WebKit2GTK, same code path as Linux |
 | NetBSD | `cargo check` | graph only | unverified at runtime |
-| Android arm64 / x86_64 | yes | yes (emulator, CI) | JNI bridge, same commands and security policy |
+| Android arm64 / x86_64 | yes | yes (emulator, CI) | wry's IPC handler, same commands and security policy |
 
 BSD works because wry and tao already treat it as a webkitgtk/GTK platform: two
 things blocked it (tao's default `dbus` feature and a Linux-only `gtk`
@@ -297,9 +297,17 @@ different. The activity owns the event loop, and `invoke` cannot use the custom
 protocol: `WebResourceRequest` carries no body, so wry would deliver every payload
 as `null`. Android therefore uses wry's IPC handler and resolves the page's promise
 from Rust. The envelope, registry, allowlist and security policy are shared through
-a transport seam, so app code is identical. `kiln-android/example/verify.sh` installs
-the APK on an emulator and asserts the webview attached, a command round-tripped
-into Rust, and the process did not crash; CI runs it.
+a transport seam, so app code is identical. The `android` job in
+`.github/workflows/ci.yml` installs the APK on an emulator and asserts the webview
+attached, a command round-tripped into Rust, and the process did not crash.
+
+The activity template is split by concern rather than kept as one file:
+`MainActivity` holds the natives and the lifecycle, `KilnDialogs` the file picker
+and its URI-to-path resolution, `KilnMenu` the `PopupMenu` build and click
+dispatch, `KilnTray` the notification, `KilnHttp` the blocking `GET`. That split
+is what makes the picker and the menu testable: `KilnDialogsTest` and
+`KilnMenuTest` are instrumentation tests `kiln init` scaffolds alongside the app,
+so a broken MIME mapping or a wrong menu id fails a test instead of a tap.
 
 iOS is not supported.
 

@@ -1,5 +1,6 @@
 package com.kiln.counter;
 
+import android.content.Intent;
 import android.util.Log;
 import android.view.ViewGroup;
 import android.webkit.WebView;
@@ -23,13 +24,60 @@ import android.webkit.WebView;
  * <p>Do not call the native entry point from {@code onCreate}: tao invokes it
  * itself from {@code onFirstActivityCreate}, which runs once the process
  * lifecycle starts. Calling it twice starts the event loop twice.
+ *
+ * <p>The desktop shell has four services Android implements differently, not
+ * equivalently. Each has its own class rather than a block in this one, because
+ * they share only the natives declared below:
+ *
+ * <ul>
+ *   <li>{@link KilnDialogs}: {@code rfd} has no Android backend. A file picker
+ *       here is a system intent, so the answer is a {@code content://} URI that
+ *       has to become a path before Rust can use it.
+ *   <li>{@link KilnMenu}: a desktop app has a menu bar, Android has none, so the
+ *       menu only exists while a {@code PopupMenu} is up. That is why installing
+ *       it and showing it are two separate calls.
+ *   <li>{@link KilnTray}: there is no status area either. The tray becomes a
+ *       notification whose actions are PendingIntents back into this activity.
+ *   <li>{@link KilnHttp}: the updater's request goes through
+ *       {@code HttpURLConnection} so it uses the system certificate store,
+ *       which a bundled TLS stack would have to be taught separately.
+ * </ul>
+ *
+ * <p>Every native method declared below is called <em>from</em> Java and
+ * implemented in {@code android/src/lib.rs}; every {@code public void kiln*}
+ * method is called <em>from</em> Rust through JNI and implemented here. They are
+ * separate directions and the names are only similar.
  */
 public class MainActivity extends WryActivity {
-    private static final String TAG = "Kiln";
+    static final String TAG = "Kiln";
+
+    /** Intent extra carrying a tray item id through a notification tap. */
+    static final String TRAY_EXTRA = "kiln.tray.id";
+
+    // Java -> Rust. Package-private rather than private: the service classes call
+    // them, and JNI does not care which of the two it is.
+
+    /** A picker answered. {@code json} is the reply shape, or null for a cancel. */
+    static native void kilnCompleteDialog(long id, String json);
+
+    /** A picker could not be shown. Not the same thing as a cancel. */
+    static native void kilnFailDialog(long id, String message);
+
+    static native void kilnMenuClicked(String id);
+
+    /** True when the click reached the shell, so a too-early tap can be retried. */
+    static native boolean kilnTrayClicked(String id);
 
     static {
         System.loadLibrary("counter");
     }
+
+    // One of each, because each holds state that must outlive a single call: the
+    // picker holds the id it is waiting on, the menu the groups it was given, and
+    // the tray whether the notification permission has already been asked for.
+    private final KilnDialogs dialogs = new KilnDialogs(this);
+    private final KilnMenu menus = new KilnMenu(this);
+    private final KilnTray tray = new KilnTray(this);
 
     @Override
     public void onWebViewCreate(WebView webView) {
@@ -38,5 +86,61 @@ public class MainActivity extends WryActivity {
         webView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        tray.deliverClick();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // A notification tap that starts the process arrives here rather than at
+        // `onNewIntent`, because this activity was created by it.
+        tray.deliverClick();
+    }
+
+    // Rust -> Java. Every one of these may be called from any thread: the Rust
+    // side calls in over JNI from whichever thread started the work, and views
+    // may only be touched on the UI thread, so each hops first.
+
+    /**
+     * Show the picker described by {@code requestJson}.
+     *
+     * <p>{@code requestJson} is the command payload plus a {@code kind} of
+     * {@code open}, {@code open_many}, {@code save}, or {@code folder}. The reply
+     * is the same JSON shape the desktop dialogs return: {@code {"path": ...}},
+     * {@code {"paths": [...]}}, or null for a cancel.
+     */
+    public void kilnDialog(long id, String requestJson) {
+        runOnUiThread(() -> dialogs.show(id, requestJson));
+    }
+
+    /** Keep the menu until {@link #kilnShowMenu()} can put it on screen. */
+    public void kilnInstallMenu(String json) {
+        menus.install(json);
+    }
+
+    /** Show the installed menu as a popup anchored on the content view. */
+    public void kilnShowMenu() {
+        menus.show();
+    }
+
+    /** Post the tray configuration as a notification. */
+    public void kilnNotify(String json) {
+        tray.post(json);
+    }
+
+    /**
+     * Fetch a URL as text, or null if it could not be fetched.
+     *
+     * <p>Blocking, and must stay off the UI thread. Rust calls this from the
+     * updater's worker thread, which is what makes the blocking call safe.
+     */
+    public String kilnHttpGet(String url) {
+        return KilnHttp.get(url);
     }
 }
