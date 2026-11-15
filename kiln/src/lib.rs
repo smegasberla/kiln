@@ -91,8 +91,16 @@ pub const SCHEME: &str = "kiln";
 /// The JS shim injected into every page: defines `window.kiln`.
 const SHIM: &str = include_str!("shim.js");
 
-/// The invoke endpoint. Reached through the custom protocol in both modes, so
-/// the page's own origin never matters.
+/// The invoke endpoint.
+///
+/// Android has no custom-protocol registration, so wry rewrites `kiln://localhost`
+/// to `http://kiln.localhost` and intercepts it. The shim must use the rewritten
+/// form there or its `fetch` never reaches the handler.
+#[cfg(target_os = "android")]
+const INVOKE_BASE: &str = "http://kiln.localhost/__kiln/";
+/// Reached through the custom protocol in both modes, so the page's own origin
+/// never matters on desktop.
+#[cfg(not(target_os = "android"))]
 const INVOKE_BASE: &str = "kiln://localhost/__kiln/";
 
 /// Everything that can arrive on the UI thread from another thread.
@@ -568,6 +576,26 @@ fn build_factory(
         let protocol_registry = Arc::clone(&registry);
         let protocol_handle = handle.clone();
         let protocol_origin = dev_origin.clone();
+
+        // Android has no way to intercept a custom scheme into the APK, so the
+        // page comes from wry's WebViewAssetLoader instead. The shim, navigation
+        // policy and invoke path are unchanged: only the asset source differs.
+        #[cfg(target_os = "android")]
+        {
+            let _ = (&protocol_registry, &protocol_handle, &protocol_origin);
+            use wry::WebViewBuilderExtAndroid;
+            return WebViewBuilder::new()
+                .with_devtools(false)
+                .with_initialization_script(&shim)
+                .with_navigation_handler(move |url| {
+                    security::navigation_allowed(&url, nav_origin.as_deref())
+                })
+                .with_asset_loader(SCHEME.to_owned())
+                .with_url(target);
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
         let builder = WebViewBuilder::new()
             // Debug builds always have devtools; a release build gets them only
             // with the `devtools` feature (or `full`).
@@ -602,6 +630,7 @@ fn build_factory(
                 })
             }
             None => builder,
+        }
         }
     })
 }
@@ -677,12 +706,25 @@ fn is_devtools_shortcut(key: KeyCode, modifiers: ModifiersState) -> bool {
     }
 }
 
+/// Attach a webview to a window.
+///
+/// Three shapes, because the platforms genuinely differ:
+///
+/// - **Windows, macOS, Android, iOS** — the window is a handle the webview can
+///   attach to directly, so `build` is enough.
+/// - **GTK platforms** (Linux and the BSDs) — the webview is a GTK widget that
+///   has to be added to the window's container explicitly.
 fn build_webview(builder: WebViewBuilder<'_>, window: &Window) -> Result<WebView, Error> {
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "android",
+        target_os = "ios"
+    ))]
     {
         Ok(builder.build(window)?)
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(kiln_gtk_webview)]
     {
         use tao::platform::unix::WindowExtUnix;
         use wry::WebViewBuilderExtUnix;
@@ -702,9 +744,68 @@ fn build_shim(dev_origin: Option<&str>) -> String {
     if let Some(dev) = dev_origin {
         origins.push(dev.to_owned());
     }
+    // Android serves the page from http://kiln.localhost, which wry intercepts.
+    #[cfg(target_os = "android")]
+    origins.push("http://kiln.localhost".to_owned());
     let allowed = serde_json::to_string(&origins).unwrap_or_else(|_| "[]".to_owned());
     SHIM.replace("__INVOKE_BASE__", INVOKE_BASE)
         .replace("__ALLOWED_ORIGINS__", &allowed)
+}
+
+/// The parts of the shell that do not depend on a desktop window loop.
+///
+/// A mobile build replaces the *transport* (`@JavascriptInterface` on Android,
+/// `WKScriptMessageHandler` on iOS) and the *entry point* (JNI instead of
+/// `fn main`), but the envelope, the registry, the allowlist, the CSP and the
+/// navigation policy are identical. Keeping them in one place is what makes that
+/// possible without forking behaviour; `transport` is the seam.
+pub mod transport {
+    use super::*;
+
+    /// Which transport a page's calls arrive through.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Kind {
+        /// wry custom protocol: `POST kiln://localhost/__kiln/<method>`.
+        Protocol,
+        /// A native message handler that receives `{method, payload}` as a
+        /// string and answers with an envelope.
+        MessageBridge,
+    }
+
+    /// Build the response envelope for one request on any transport.
+    ///
+    /// This is the single place that decides what a page is told, so desktop and
+    /// mobile cannot drift apart.
+    pub fn respond(
+        registry: &Registry,
+        handle: &AppHandle,
+        method: &str,
+        payload: Value,
+    ) -> String {
+        registry.dispatch(handle, method, payload)
+    }
+
+    /// Parse a payload body, treating an empty body as JSON `null`.
+    pub fn parse_payload(body: &[u8]) -> Result<Value, String> {
+        if body.is_empty() {
+            return Ok(Value::Null);
+        }
+        serde_json::from_slice(body).map_err(|_| "payload is not valid JSON".to_owned())
+    }
+
+    /// The method name and payload a mobile bridge receives in one string,
+    /// mirroring the protocol's path-plus-body shape.
+    pub fn parse_message(message: &str) -> Result<(String, Value), String> {
+        let value: Value = serde_json::from_str(message)
+            .map_err(|_| "message is not valid JSON".to_owned())?;
+        let method = value
+            .get("method")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "message has no method".to_owned())?
+            .to_owned();
+        let payload = value.get("payload").cloned().unwrap_or(Value::Null);
+        Ok((method, payload))
+    }
 }
 
 /// Serve one request, replying through wry's async responder so async commands
@@ -735,15 +836,11 @@ fn serve_async(
             responder.respond(json_error(builder, 405, "invoke requires POST"));
             return;
         }
-        let payload = if request.body().is_empty() {
-            Value::Null
-        } else {
-            match serde_json::from_slice(request.body()) {
-                Ok(value) => value,
-                Err(_) => {
-                    responder.respond(json_error(builder, 400, "payload is not valid JSON"));
-                    return;
-                }
+        let payload = match transport::parse_payload(request.body()) {
+            Ok(value) => value,
+            Err(message) => {
+                responder.respond(json_error(builder, 400, &message));
+                return;
             }
         };
         // The response is built here, not from `builder`, so the CORS header has
@@ -906,6 +1003,48 @@ mod tests {
             assert!(is_devtools_shortcut(KeyCode::KeyI, mods));
             assert!(!is_devtools_shortcut(KeyCode::KeyI, ModifiersState::SUPER));
         }
+    }
+
+    #[test]
+    fn both_transports_share_the_envelope() {
+        // The mobile bridge and the desktop protocol must not be able to answer
+        // differently for the same command.
+        let mut registry = Registry::new();
+        registry.add("echo", |_app, payload| Ok(payload));
+
+        let via_protocol = transport::respond(
+            &registry,
+            &AppHandle::detached_for_tests(),
+            "echo",
+            transport::parse_payload(br#"{"a":1}"#).unwrap(),
+        );
+
+        let (method, payload) =
+            transport::parse_message(r#"{"method":"echo","payload":{"a":1}}"#).unwrap();
+        let via_bridge =
+            transport::respond(&registry, &AppHandle::detached_for_tests(), &method, payload);
+
+        assert_eq!(via_protocol, via_bridge);
+        assert_eq!(via_protocol, r#"{"ok":{"a":1}}"#);
+    }
+
+    #[test]
+    fn an_empty_body_is_null_and_junk_is_rejected() {
+        assert_eq!(transport::parse_payload(b"").unwrap(), Value::Null);
+        assert!(transport::parse_payload(b"not json").is_err());
+        assert_eq!(
+            transport::parse_payload(br#"{"x":1}"#).unwrap(),
+            json!({ "x": 1 })
+        );
+    }
+
+    #[test]
+    fn bridge_messages_need_a_method() {
+        assert!(transport::parse_message(r#"{"payload":{}}"#).is_err());
+        assert!(transport::parse_message("nope").is_err());
+        let (method, payload) = transport::parse_message(r#"{"method":"m"}"#).unwrap();
+        assert_eq!(method, "m");
+        assert_eq!(payload, Value::Null);
     }
 
     #[test]

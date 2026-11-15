@@ -180,9 +180,71 @@ async function packageForPlatform(input: PackageInput): Promise<string> {
       return packageMacos(input);
     case "win32":
       return packageWindows(input);
+    case "freebsd":
+    case "netbsd":
+    case "openbsd":
+      return packageBsd(input);
     default:
       return packageLinux(input);
   }
+}
+
+/** BSD: a staged tree plus a pkg(8) manifest, which is how FreeBSD installs
+ *  software. No self-contained single file exists there the way AppImage does. */
+async function packageBsd(input: PackageInput): Promise<string> {
+  const execName = basename(input.binary);
+  const stage = join(input.appDir, "bsd");
+  prepare(stage);
+
+  const bindir = join(stage, "usr/local/bin");
+  const sharedir = join(stage, "usr/local/share/applications");
+  const icondir = join(stage, "usr/local/share/icons/hicolor/256x256/apps");
+  mkdirSync(bindir, { recursive: true });
+  mkdirSync(sharedir, { recursive: true });
+
+  copyFileSync(input.binary, join(bindir, execName));
+  chmodSync(join(bindir, execName), 0o755);
+  writeFileSync(join(sharedir, `${input.identifier}.desktop`), desktopEntry(input, execName));
+
+  if (input.icon) {
+    mkdirSync(icondir, { recursive: true });
+    copyFileSync(input.icon, join(icondir, `${input.identifier}.png`));
+  }
+
+  // `+MANIFEST` is what pkg(8) reads; `pkg create -r <stage>` turns the tree into
+  // a .pkg. The manifest is written here so the staged tree is inspectable.
+  writeFileSync(
+    join(stage, "+MANIFEST"),
+    [
+      `name: ${input.identifier}`,
+      `version: "${input.version}"`,
+      `origin: local/${input.identifier}`,
+      `comment: ${input.name}`,
+      "desc: A desktop app built with Kiln",
+      "www: https://github.com/smegasberla/kiln",
+      "maintainer: unset@example.invalid",
+      "prefix: /usr/local",
+      `abi: "*"`,
+      "categories: [x11]",
+      "",
+    ].join("\n"),
+  );
+
+  const pkg = Bun.which("pkg");
+  if (!pkg) {
+    return stage; // staged tree only; pkg(8) is not on this host
+  }
+  const out = join(input.appDir, `${input.identifier}-${input.version}.pkg`);
+  const proc = Bun.spawn([pkg, "create", "-r", stage, "-o", out], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  if (code !== 0) {
+    console.warn(`kiln: pkg create failed, leaving the staged tree: ${stderr.slice(-200)}`);
+    return stage;
+  }
+  return out;
 }
 
 /** AppImage: one self-contained executable file, no install step. */
@@ -310,6 +372,13 @@ function printSigningSteps(input: PackageInput, artifact: string): void {
     case "win32":
       console.log(`  Sign:    signtool sign /fd SHA256 /tr http://timestamp.digicert.com \\
     /td SHA256 /a "${artifact}"`);
+      break;
+    case "freebsd":
+    case "netbsd":
+    case "openbsd":
+      console.log(`  Install: pkg install -f "${name}" (or copy the staged tree)`);
+      console.log(`  Note:    BSD packaging has no signing step; trust comes from the`);
+      console.log(`           repository the package is served from.`);
       break;
     default:
       console.log(`  Sign:    gpg --detach-sign --armor "${name}"`);

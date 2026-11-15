@@ -11,3 +11,6 @@ dist/
 *.swp
 dist-package/
 *.AppImage
+kiln-android/example/target/
+kiln-android/example/app/build/
+kiln-android/example/app/.gradle/

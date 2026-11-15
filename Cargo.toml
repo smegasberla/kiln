@@ -1,5 +1,5 @@
 [workspace]
-members = ["kiln", "baseline", "probe"]
+members = ["kiln", "kiln-android", "baseline", "probe"]
 exclude = ["examples"]
 resolver = "2"
 

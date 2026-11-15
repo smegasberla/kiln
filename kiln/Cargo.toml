@@ -10,7 +10,10 @@ license = "MIT OR Apache-2.0"
 # custom protocol handler when that feature is on, and the whole IPC bridge is
 # a POST. Without it, invoke() silently receives an empty payload on Linux.
 wry = { version = "0.57", features = ["linux-body"] }
-tao = "0.37"
+# `dbus` (a default feature) is only used for Linux portal integrations and drag
+# support. It needs libdbus headers on the build host, which cross-building for
+# BSD does not have, and none of it is used by Kiln: a window is created directly.
+tao = { version = "0.37", default-features = false, features = ["rwh_06", "x11"] }
 serde_json = "1"
 
 # Opt-in crates. Each is behind a feature so a minimal app pays nothing.
@@ -24,7 +27,7 @@ ureq = { version = "3", optional = true, default-features = false, features = ["
 # cargo cannot enable a feature per target, and it is not gated behind a feature
 # because it is *already* in tao's Linux tree: declaring it here dedupes to the
 # same crate instance, so it adds no build time and no code to the binary.
-[target.'cfg(not(any(target_os = "windows", target_os = "macos")))'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly"))'.dependencies]
 gtk = "0.18"
 
 [features]

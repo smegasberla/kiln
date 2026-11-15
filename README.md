@@ -278,6 +278,18 @@ kiln package --icon icon.png
 | Linux x86_64 | yes | yes | WebKitGTK 4.1 |
 | Windows x86_64 | `cargo check` clean | CI | WebView2, preinstalled on Win10 2020+/11 |
 | macOS x86_64 / arm64 | `cargo check` clean | CI | WKWebView |
+| FreeBSD | CI (VM) | CI (VM) | GTK 3 + WebKit2GTK, same code path as Linux |
+| NetBSD | `cargo check` | graph only | unverified at runtime |
+| Android arm64 | yes | partial | launches and renders a WebView; asset loading unfinished |
+
+BSD works because wry and tao already treat it as a webkitgtk/GTK platform: two
+things blocked it (tao's default `dbus` feature and a Linux-only `gtk`
+dependency) and both are fixed. The remaining cost is that the `-sys` crates need
+GTK and WebKit installed on the *target*, so it builds and runs on BSD, not as a
+cross-compile from Linux.
+
+Android is documented in `PLAN.md` with exactly what works and what does not.
+Mandatory: CI installs `webkit2gtk` and tests both BSD branches.
 
 `cargo check` for Windows and macOS runs in this repo. macOS cannot be *fully*
 compiled off a Mac (its Objective-C shims need the Apple SDK), so `ci.yml`

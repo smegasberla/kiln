@@ -1,0 +1,20 @@
+[package]
+name = "kiln-android"
+version = "0.1.0"
+edition = "2021"
+description = "Android bootstrap for Kiln: JNI entry, activity glue, and an invoke bridge"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+kiln = { path = "../kiln" }
+jni = "0.21"
+# `ThreadLooper` is the type tao hands to its activity-create hook.
+ndk = "0.9"
+serde_json = "1"
+tao = { version = "0.37", default-features = false }
+wry = { version = "0.57" }
+
+[lib]
+name = "kiln_android"
+crate-type = ["cdylib", "rlib"]

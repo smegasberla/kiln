@@ -1,0 +1,57 @@
+// Minimal Android project for the Kiln example. Hand-written on purpose: a
+// scaffolder that emits hundreds of generated files nobody reads is harder to
+// debug than this.
+plugins {
+    id 'com.android.application' version '8.9.2'
+    // wry generates Kotlin sources at build time (RustWebView, WryActivity, ...),
+    // so this module must compile Kotlin even when app code is Java.
+    id 'org.jetbrains.kotlin.android' version '2.0.21'
+}
+
+android {
+    namespace 'com.kiln.example'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "com.kiln.example"
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName "0.1.0"
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        // wry's generated Logger.kt reads BuildConfig.DEBUG.
+        buildConfig true
+    }
+
+    sourceSets {
+        main {
+            // The Rust .so is copied here by build.sh.
+            jniLibs.srcDirs = ['src/main/jniLibs']
+            // wry writes its Kotlin sources into the java/ tree; that is fine,
+            // Gradle compiles both from the same source set.
+            java.srcDirs += ['src/main/kotlin']
+        }
+    }
+}
+
+dependencies {
+    // wry's Kotlin uses WebViewCompat / WebViewFeature from androidx.webkit, and
+    // its WryActivity extends AppCompatActivity, which is what carries
+    // isFinishing/getApplicationContext and the Activity Result APIs it relies on.
+    implementation 'androidx.webkit:webkit:1.12.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.activity:activity:1.9.3'
+    // WryActivity observes ProcessLifecycleOwner to survive process-level pauses.
+    implementation 'androidx.lifecycle:lifecycle-process:2.8.7'
+}

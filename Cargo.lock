@@ -1155,6 +1155,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "kiln-android"
+version = "0.1.0"
+dependencies = [
+ "jni",
+ "kiln",
+ "ndk",
+ "serde_json",
+ "tao",
+ "wry",
+]
+
+[[package]]
 name = "kiln-probe"
 version = "0.1.0"
 dependencies = [

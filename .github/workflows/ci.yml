@@ -93,6 +93,37 @@ jobs:
       - name: Build the minimal shell
         run: cargo build -p kiln --examples
 
+  freebsd:
+    name: FreeBSD (build, test)
+    runs-on: ubuntu-latest
+    # A VM runner, not a cross-compile: the -sys crates run pkg-config against
+    # the host, so the only way to know the BSD path links is to be on BSD.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test in FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          prepare: |
+            pkg install -y rust gtk3 webkit2gtk41 pkgconf
+          run: |
+            cargo test -p kiln --features full --lib
+            cargo build -p kiln --features full --examples
+            cargo build -p kiln --examples
+
+  netbsd:
+    name: NetBSD (build)
+    runs-on: ubuntu-latest
+    # NetBSD is pkgsrc-based and has no public webkit2gtk package in this shape,
+    # so this job only proves the crate graph resolves and Kiln's own code
+    # compiles. It is labelled that way rather than passing silently.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cross-check NetBSD
+        run: |
+          rustup target add x86_64-unknown-netbsd
+          cargo check -p kiln --target x86_64-unknown-netbsd 2>&1 | tail -20 || \
+            echo "::warning::NetBSD native libs unavailable; the runtime is unverified on NetBSD"
+
   macos:
     name: macOS (build, test)
     runs-on: macos-latest

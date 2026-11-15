@@ -241,3 +241,133 @@ Cut now, may return as opt-in crates:
    compiled binary, so there is no `dev-server.ts` on disk to spawn; and
    in-process means one signal stops both halves. HMR still comes from Bun's
    `development: true` HTML import.
+
+## Phase 7 - BSD family
+
+Targets: FreeBSD, NetBSD (OpenBSD, DragonFly share the same code path but have no
+tier-1 Rust target or CI runner, so they are labelled unsupported until someone
+runs them).
+
+Why this is cheap: wry and tao *already* treat BSD as a webkitgtk/GTK platform.
+wry's build script emits its `gtk` cfg for `freebsd|netbsd|openbsd|dragonfly`,
+the same ones tao routes to its GTK backend, so the webview and window layers
+need no new code. Kiln's own build script already classifies BSD as GTK-based.
+
+What actually blocked it (both found by cross-checking, both fixed):
+
+- **`dbus` was turned on by tao's default features.** It is used only for Linux
+  portal/drag integrations that Kiln does not touch, and it needs libdbus headers
+  on the build host. Disabled with `default-features = false`, keeping
+  `rwh_06` + `x11`.
+- **`gtk` was declared for Linux only.** The menu is a GTK container on every
+  webkitgtk platform, so the target table now lists the four BSDs.
+
+What is left, and cannot be done from Linux: the `-sys` crates (`glib-sys`,
+`gtk-sys`, `webkit2gtk-sys`) run `pkg-config` against the *host*, so the build
+only links where GTK 3 and WebKit2GTK are installed. That means a real FreeBSD
+box or a FreeBSD CI runner, not a cross-compile.
+
+**Done when:** CI (or a VM) builds and runs `scripts/verify.ts` on FreeBSD, and
+`kiln package` produces something installable there. Installers on BSD are ports
+and pkg, not AppImage; that is a separate piece of work from the runtime.
+
+**Cut:** OpenBSD and DragonFly release support (same code, no CI, no pkg target
+in this repo). Soft-rendering WebKit is out of scope on all three.
+
+## Phase 8 - Mobile (Android first, then iOS)
+
+This is not "another cargo feature". A mobile app is a different artifact and a
+different lifecycle, and the honest estimate is weeks, not hours.
+
+### What has to change structurally
+
+| Concern | Desktop | Android |
+| --- | --- | --- |
+| Entry point | `fn main` | `android_main` via JNI, driven by `tao-macros` |
+| Window | Kiln creates one | the activity owns it |
+| Assets | `include_bytes!` served over `kiln://` | APK `assets/`, served over `https://` via WebViewAssetLoader |
+| IPC | custom protocol POST | `@JavascriptInterface` bridge (custom schemes are awkward in Android WebView) |
+| Backgrounding | app either runs or exits | paused/resumed/destroyed, state can be lost at any moment |
+| Keyboard | free | on-screen IME, resize/viewport handling |
+| Packaging | AppImage/.app/.zip | AAB/APK, Gradle, signing key, SDK/NDK versions |
+
+iOS is a further step on top: no JNI, an Xcode project, `WKWebView` inside a
+`UIViewController`, ATS rules, and the simulator/device split.
+
+### Plan
+
+1. **Split the shell from the bootstrap.** `App` currently owns the event loop.
+   Factor the loop, registry and protocol handling into a `Shell` that both a
+   desktop `run()` and a mobile entry point can drive. No behaviour change; this
+   is the prerequisite for everything else.
+2. **Android bootstrap crate** (`kiln-android`): JNI entry, activity glue,
+   asset loader, `@JavascriptInterface` bridge replacing the protocol endpoint.
+   Same `invoke(method, payload) -> json` surface, so app code does not change.
+3. **Lifecycle.** Expose `on_pause`/`on_resume`/`on_destroy` as events
+   (`kiln.listen("lifecycle", ...)`), and make it explicit in docs that a
+   command may be interrupted by process death. Async handlers need a
+   cancellation story before this is trustworthy.
+4. **`kiln android` CLI commands.** `dev` (adb + Gradle + logcat), `build`
+   (AAB), and the SDK/NDK discovery that `doctor` already reports on.
+5. **iOS** only after Android is solid: Xcode project generation, same shell,
+   same bridge through `WKScriptMessageHandler`.
+
+### Deliberate limits for v1 of mobile
+
+- One window. Multi-window, tray, menu bar, updater and native dialogs are
+  desktop-only; the app must compile with them compiled out.
+- No background execution, no notifications beyond the web API.
+- Android target ABI set starts at arm64-v8a only; adding ABIs is a Gradle line.
+
+**Done when:** `kiln init --mobile` produces a project that installs and runs on
+an emulator, round-trips a command, survives a rotate, and `kiln build` emits a
+signed-debuggable AAB.
+
+**Not promised:** a working iOS build before Android is done. Claiming iOS
+support without a Mac and a device is exactly the mistake this project already
+made once with Windows and macOS.
+
+### Phase 8 status: where this actually stopped
+
+Android is **structurally working and empirically partial**. Recorded honestly so
+the next person does not repeat the work or over-trust it.
+
+**Working, verified on an emulator (Android 14, Chromium WebView 113):**
+
+- `kiln` compiles for `aarch64-linux-android` (9 warnings, no errors).
+- `kiln-android` compiles: JNI entry points, activity-create hook, `invoke` bridge.
+- A real APK builds (7.0 MB debug, includes `lib/arm64-v8a/libkiln_example.so` and
+  `assets/index.html`).
+- The APK installs and launches. The activity reaches `onCreate`, `android_main`
+  runs, `WryActivity` creates a WebView, and Chromium starts its processes.
+- No crash, no `UnsatisfiedLinkError`, activity stays resumed.
+
+**Not yet working:**
+
+- The page does not finish loading its asset. `with_asset_loader` registers the
+  interceptor, but the document never arrives, so no `invoke` reaches Rust (the
+  Rust-side `KILN_ROUNDTRIP` log never fires). The last thing confirmed is
+  Chromium starting; the first thing unconfirmed is whether the asset URL
+  (`http://kiln.localhost/index.html`) is intercepted at all.
+
+**What was learned the hard way, worth keeping:**
+
+1. tao's `android_binding!` expands to a block, so it must be invoked *inside* a
+   function, not at module scope. `#[no_mangle]` items still export from there.
+2. tao and wry each generate a JNI class, and both must be spelled the same way:
+   `$domain` = all but the last package segment, `$package` = the last. The
+   `$activity` name must be `Rust`, because that is the class wry's Kotlin
+   declares.
+3. The Kotlin plugin, `androidx.webkit`, `androidx.appcompat`,
+   `androidx.activity`, `androidx.lifecycle`, `android.useAndroidX=true` and
+   `buildConfig true` are all required before wry's generated Kotlin compiles.
+   None of this is optional and none of it is documented in one place.
+4. `MainActivity` must extend wry's `WryActivity`, and the Rust library must be
+   loaded before `super.onCreate` reaches it.
+
+**Next concrete step:** verify the asset loader intercepts, e.g. by pointing the
+webview at `data:` with a trivial inline page to separate "webview works" from
+"asset serving works". That is a bounded debugging session, not a redesign.
+
+**iOS:** not started. It shares the transport seam but needs an Xcode project and
+a Mac.
