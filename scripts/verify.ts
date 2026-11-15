@@ -228,6 +228,15 @@ async function main() {
 
   const binary = join(app, "native", "target", "release", "app");
 
+  // A failed build used to crash here with ENOENT, hiding the compiler error
+  // that caused it. Report the remaining checks as failures and move on.
+  if (!statSync(binary, { throwIfNoEntry: false })) {
+    record("artifact checks", false, `no binary at ${binary}`);
+    const failed = results.filter((r) => !r.ok);
+    console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
+    process.exit(1);
+  }
+
   // 4. Size and composition of the shipped artifact.
   {
     const size = statSync(binary).size;
