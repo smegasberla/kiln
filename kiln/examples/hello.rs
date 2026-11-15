@@ -4,8 +4,8 @@
 //! Headless proof: `KILN_SELFTEST=1 cargo run --example hello` exits 0 after the
 //! JS -> Rust -> JS round-trip prints `SELFTEST OK`.
 
-use kiln::{App, AssetTable, Error};
 use kiln::serde_json::{json, Value};
+use kiln::{App, AssetTable, Error};
 
 static ASSETS: AssetTable = &[
     ("index.html", include_bytes!("hello/index.html")),

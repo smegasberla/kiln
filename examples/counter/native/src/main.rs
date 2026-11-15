@@ -61,5 +61,21 @@ fn main() -> Result<(), Error> {
                 Ok(counter.snapshot())
             }
         })
+        // Async command: a slow "export" that does not block the window.
+        .async_command("export", {
+            let state = Arc::clone(&state);
+            move |_app, _payload| {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                let counter = state.lock().unwrap();
+                Ok(json!({
+                    "value": counter.value,
+                    "history": counter.history,
+                    "exported": true
+                }))
+            }
+        })
+        .on_ready(|app| {
+            app.emit("ready", json!(true));
+        })
         .run()
 }

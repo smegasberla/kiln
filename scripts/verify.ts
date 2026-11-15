@@ -115,6 +115,60 @@ async function probe(binary: string, app: string, port: number): Promise<string 
   }
 }
 
+/** Run the probe fixture against a hostile server and collect what it saw.
+ *
+ *  The fixture loads its page from the binary's own embedded assets, so the
+ *  *production* security policy is what gets tested: no dev server, no relaxed
+ *  CSP. Its `probe.js` calls a panicking command, then tries a remote script, a
+ *  remote fetch, `eval`, and navigating away, and reports over IPC (which is
+ *  also proof the bridge survived). The result arrives on stdout, so no human
+ *  has to look at a window.
+ */
+async function probeGuarantees(binary: string, app: string, hostilePort: number): Promise<string | null> {
+  const hits: string[] = [];
+  const hostile = Bun.serve({
+    port: hostilePort,
+    fetch(req) {
+      hits.push(new URL(req.url).pathname);
+      const isScript = req.url.includes("evil.js");
+      return new Response(isScript ? "window.__evil='pwned';" : "<h1>escaped</h1>", {
+        headers: { "content-type": isScript ? "text/javascript" : "text/html" },
+      });
+    },
+  });
+
+  const proc = Bun.spawn([binary], {
+    cwd: app,
+    env: { ...process.env, KILN_HOSTILE: `http://127.0.0.1:${hostilePort}` },
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+
+  const lines = proc.stdout.getReader();
+  const deadline = Date.now() + 25_000;
+  let buffer = "";
+  let report: string | null = null;
+  while (Date.now() < deadline) {
+    const { value, done } = await lines.read();
+    if (done) break;
+    buffer += new TextDecoder().decode(value);
+    const match = /PROBE (\{.*\})/.exec(buffer);
+    if (match) {
+      report = match[1]!;
+      break;
+    }
+  }
+
+  proc.kill();
+  hostile.stop(true);
+
+  // Any request that reached the hostile server is a failure of the policy.
+  if (hits.length > 0) {
+    console.log(`     hostile server was contacted: ${hits.join(", ")}`);
+  }
+  return report;
+}
+
 async function main() {
   // 1. Shell unit tests (dispatch, assets, config, protocol handling).
   {
@@ -166,7 +220,10 @@ async function main() {
   // 4. Size and composition of the shipped artifact.
   {
     const size = statSync(binary).size;
-    record("binary size", size < 4 * 1024 * 1024, `${(size / 1048576).toFixed(2)} MB`);
+    // The scaffold enables `full` (menu, dialogs, updater, devtools), so this
+    // covers the realistic app, not the bare shell. Still two orders of
+    // magnitude under Electron's ~120 MB.
+    record("binary size", size < 8 * 1024 * 1024, `${(size / 1048576).toFixed(2)} MB`);
   }
   {
     const bytes = readFileSync(binary);
@@ -235,6 +292,33 @@ async function main() {
         init.code === 0 ? `${size} MB binary, init ok` : init.err.slice(-140),
       );
     }
+  }
+
+  // 7. Panic isolation and the security policy, on a real app, through the real
+  //    IPC path. The harness page reports over IPC so no human has to look.
+  {
+    // Built once, then reused for the hostile-page probe.
+    const probeBin = join(repo, "target", "debug", "kiln-probe");
+    const build = await sh(["cargo", "build", "-p", "kiln-probe"], repo);
+    const reported = build.code === 0 ? await probeGuarantees(probeBin, repo, 5202) : null;
+    const parsed = reported ? JSON.parse(reported) : null;
+    record(
+      "handler panic is contained",
+      parsed?.panic?.includes("command panicked") && parsed?.after === "still alive",
+      parsed ? `${parsed.panic} | then: ${parsed.after}` : "no reply",
+    );
+    record(
+      "remote script/fetch/eval blocked",
+      parsed
+        ? !parsed.remoteScriptExecuted && parsed.remoteFetch === "blocked" && parsed.eval === "blocked"
+        : false,
+      parsed ? JSON.stringify(parsed).slice(0, 90) : "no reply",
+    );
+    record(
+      "navigation is locked down",
+      parsed?.nav === "stayed",
+      parsed?.nav ?? "no reply",
+    );
   }
 
   const failed = results.filter((r) => !r.ok);

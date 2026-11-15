@@ -162,18 +162,63 @@ node/bun, and by checking its own size.
   budget, the measured numbers, and an explicit Tauri comparison (what Kiln
   gives up: plugins, updater, tray, multi-window, codegen, capability system).
 
+## Phase 6 - Production hardening (implemented after the review)
+
+The first cut of the shell proved the architecture but not that it was safe to
+ship. A review found two defects that would lose user work, plus the integrations
+a "real app" is expected to have. All of the following are now implemented and
+covered by tests, and the first three are asserted at runtime by
+`scripts/verify.ts` against a real window.
+
+**Correctness fixes (were blockers).**
+
+- **Panic isolation.** `panic = "abort"` is gone from every profile, and every
+  handler is wrapped in `catch_unwind`. A handler that panics returns
+  `{"error":"command panicked: ..."}` and the app keeps running with the user's
+  unsaved state. Done when: a fixture command that indexes an empty Vec leaves
+  the app serving other commands (verified through the real IPC path).
+- **Navigation lockdown.** `with_navigation_handler` refuses anything but the app
+  origin, the dev-server origin in debug builds, and `about:blank`. Done when:
+  `location.href = "http://hostile/..."` leaves the page where it was, and the
+  hostile server receives zero requests.
+- **Origin-scoped bridge.** The shim checks its origin, tears itself down on a
+  foreign document, and refuses `invoke` there. Rust injects the allowlist as
+  JSON rather than letting JS guess.
+- **CSP and headers.** Every response carries `script-src 'self'`,
+  `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, plus
+  `nosniff` and `no-referrer`. Dev mode relaxes only inline/eval/ws/loopback.
+  Done when: a remote `<script>` does not execute, a remote `fetch` fails, and
+  `eval` throws in a release build.
+
+**Capabilities.**
+
+- Multi-window, addressed by label; creation deferred to the event loop because
+  tao handles are not `Send`.
+- `async_command` running handlers on a worker thread, plus an async protocol
+  responder so a slow reply never blocks painting.
+- Native menu bar (`muda`), tray icon (`tray-icon`), native dialogs (`rfd`),
+  update checks (`ureq` + rustls), devtools in release builds.
+- Crash reporting: a panic hook writing to an optional log file and an in-memory
+  ring buffer, readable via `__kiln_reports`. Nothing is uploaded.
+- All of the above are cargo features, so the minimal shell stays three
+  dependencies and 785 KB.
+
+**Acceptance checks owned by this phase:** 13/13 in `scripts/verify.ts`, 60 unit
+tests, cold start still within +10% of the baseline, and the scaffolded
+`full`-feature app builds at 2.4 MB.
+
 ## Deferred and cut
 
 Cut now, may return as opt-in crates:
 
-- Plugin system, auto-updater, tray, menus, multi-window, notifications, dialogs.
+- Notifications, global shortcuts, deep links, single-instance, auto-install
+  updates. Each needs platform code or code signing that is an app decision.
+- Plugin system. A plugin is a crate that registers commands; the core needs
+  nothing for that.
 - Capability/ACL files. The compile-time whitelist replaces them.
-- Code signing, installers, bundlers.
-- Async command handlers and streaming IPC. Sync handlers are enough for v1;
-  a slow handler blocks its own request, not the UI thread.
+- Streaming IPC. Async handlers cover the case; a stream is an `emit` loop.
 - `#[command]` proc-macro sugar — see the deviation note.
-- Mobile targets, custom titlebars, transparency, incognito, devtools toggle
-  exposed to JS.
+- Mobile targets, custom titlebars, transparency, incognito.
 
 ## Deviations from the brief, and why
 

@@ -7,6 +7,8 @@ pub enum Error {
     UnknownMethod(String),
     /// A handler returned an error; the string is shown to the page.
     Handler(String),
+    /// A handler panicked. The app keeps running; the page gets this message.
+    Panic(String),
     /// The webview or event loop failed.
     Runtime(String),
 }
@@ -16,6 +18,7 @@ impl fmt::Display for Error {
         match self {
             Error::UnknownMethod(m) => write!(f, "unknown command: {m}"),
             Error::Handler(m) => f.write_str(m),
+            Error::Panic(m) => write!(f, "command panicked: {m}"),
             Error::Runtime(m) => write!(f, "runtime error: {m}"),
         }
     }

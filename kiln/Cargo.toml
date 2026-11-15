@@ -13,6 +13,30 @@ wry = { version = "0.57", features = ["linux-body"] }
 tao = "0.37"
 serde_json = "1"
 
+# Opt-in crates. Each one is behind a feature so a minimal app pays nothing.
+# `gtk` is already in the tree via tao and wry; naming it directly is what lets
+# the menu code describe a GTK container without guessing at an opaque type.
+gtk = { version = "0.18", optional = true }
+muda = { version = "0.21", optional = true }
+tray-icon = { version = "0.26", optional = true }
+rfd = { version = "0.18", optional = true }
+ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
+
+[features]
+default = []
+# Native menu bar with the platform's standard items (Cut/Copy/Paste/Quit).
+menu = ["dep:muda", "dep:gtk"]
+# System tray icon with a context menu.
+tray = ["dep:tray-icon", "menu"]
+# Native open/save file dialogs exposed as commands.
+dialogs = ["dep:rfd"]
+# Update checks against a JSON endpoint.
+updater = ["dep:ureq"]
+# Devtools in release builds (F12). Costs a little binary size.
+devtools = ["wry/devtools"]
+# Everything a "real app" normally needs, minus the heavy ones.
+full = ["menu", "dialogs", "updater", "devtools"]
+
 [[example]]
 name = "hello"
 path = "examples/hello.rs"

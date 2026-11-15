@@ -81,6 +81,24 @@ button {
   cursor: pointer;
 }
 
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 #result {
   margin: 0;
   font-family: ui-monospace, monospace;

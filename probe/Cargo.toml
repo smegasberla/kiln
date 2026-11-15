@@ -1,0 +1,13 @@
+[package]
+name = "kiln-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Test fixture: an app whose commands exist to prove the shell's guarantees"
+
+[dependencies]
+kiln = { path = "../kiln" }
+
+[[bin]]
+name = "kiln-probe"
+path = "src/main.rs"

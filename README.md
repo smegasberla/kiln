@@ -15,7 +15,20 @@ kiln 0.1.0
 └── wry
 ```
 
-That is the whole dependency list of the runtime shell.
+That is the whole dependency list of the minimal shell. Optional capabilities
+are cargo features, so a minimal app links none of them:
+
+| Feature | Adds | Why it is opt-in |
+| --- | --- | --- |
+| `menu` | `muda`, `gtk` | native menu bar with cut/copy/paste and quit |
+| `tray` | `tray-icon` | system tray icon (implies `menu`) |
+| `dialogs` | `rfd` | native open/save/folder dialogs |
+| `updater` | `ureq` + rustls | update checks against your JSON endpoint |
+| `devtools` | `wry/devtools` | devtools in release builds |
+| `full` | all but `tray` | menu + dialogs + updater + devtools |
+
+`kiln init` scaffolds with `full`. Building with no features gives the 785 KB
+minimal shell; with `full` it is ~2.4 MB.
 
 ## What gets shipped
 
@@ -33,16 +46,23 @@ Measured on this machine (Linux x64, release profile, `strip` on):
 
 | | Bare `wry` + `tao` | Kiln shell |
 | --- | --- | --- |
-| Median cold start (to page-load finished) | 352 ms | 373 ms (**+6.0%**) |
-| Binary size | 707 KB | 785 KB |
-| Direct dependencies | 2 | 3 |
+| Median cold start (to page-load finished) | ~390 ms | ~394 ms (**+1.5%**) |
+| Binary size, minimal shell | 707 KB | 785 KB |
+| Binary size, `full` features | — | 2.4 MB |
+| Direct dependencies | 2 | 3 (minimal) |
 
 `bun scripts/bench.ts` and `bun scripts/verify.ts` reproduce those numbers and
-assert the rest of the guarantees. The verifier runs 10 checks and exits non-zero
+assert the rest of the guarantees. The verifier runs 13 checks and exits non-zero
 if any fails: shell unit tests, embedded round-trip + `emit`, `kiln init`,
 `kiln build`, binary size, no JS runtime embedded, OS webview only, the app
-surviving launch, dev-mode cross-origin invoke, and the compiled CLI working with
-neither Bun nor Node on `PATH`.
+surviving launch, dev-mode cross-origin invoke, the compiled CLI working with
+neither Bun nor Node on `PATH`, handler panic containment, remote
+script/fetch/eval blocking, and navigation lockdown.
+
+The last three run against `probe/`, a fixture app whose page loads from the
+binary's own embedded assets (so the production policy applies, not the relaxed
+dev one) and reports back over IPC. It calls a command that panics on purpose and
+then a healthy one to prove the window survived.
 
 Those numbers are for the *shipped binary*, not the CLI. The CLI is a separate
 program that only developers install, and it is never on the user's machine.
@@ -141,6 +161,61 @@ One file, eight-ish keys, all optional:
 It is `include_str!`-ed into the binary. A shipped app does not read config from
 disk, so it cannot be redirected by a writable working directory.
 
+## Guarantees (and how they are proved)
+
+These are not aspirational; each one is asserted by `scripts/verify.ts` against a
+real window on the real IPC path.
+
+**A panicking command does not kill the app.** Handlers run inside wry's FFI
+callback, where unwinding across the C boundary aborts the process. Every handler
+is wrapped in `catch_unwind`, so a bug in one command returns
+`{"error":"command panicked: ..."}` to the page and the window keeps working with
+its unsaved state. `panic = "abort"` is deliberately *not* set in the release
+profile, because it would make this impossible.
+
+**The page cannot leave.** A navigation handler allows only the app origin, the
+dev-server origin in debug builds, and `about:blank`. `location.href = "https://example.com"`
+is refused. The injected `window.kiln` bridge is also origin-scoped and tears
+itself down if the document ever becomes foreign, so navigation is not the only
+thing standing between a remote page and your commands.
+
+**The page cannot pull in remote code.** Every response carries a
+`Content-Security-Policy` with `script-src 'self'`, `object-src 'none'`,
+`base-uri 'none'`, `frame-ancestors 'none'`, plus `X-Content-Type-Options: nosniff`
+and `Referrer-Policy: no-referrer`. A remote `<script>`, a remote `fetch`, and
+`eval` are all blocked in release builds. Dev mode relaxes only what Bun's HMR
+needs (inline + eval scripts, `ws:`, loopback) and never opens the internet.
+
+**Slow work does not freeze the window.** `async_command` runs handlers on a
+worker thread and replies when done. Sync `command` stays available for cheap
+lookups. Native dialogs are async for exactly this reason.
+
+**Crashes leave a trace.** A panic hook records every panic with its location to
+an optional log file and an in-memory ring buffer readable through
+`__kiln_reports`. Nothing is uploaded anywhere.
+
+## Multi-window
+
+Windows are addressed by label. `__kiln_open_window` (and `AppHandle::open_window`)
+take `{label, title, width, height, entry}`; creation happens on the UI thread
+because tao handles are not `Send`. `emit_to(Some("settings"), ...)` targets one
+window; `emit(...)` targets all. The app exits when the last window closes.
+
+## Built-in commands
+
+| Command | Kind | Purpose |
+| --- | --- | --- |
+| `__kiln_version` | sync | app name + shell version |
+| `__kiln_reports` | sync | recent crash/error records |
+| `__kiln_open_window` | sync | open a window from JSON options |
+| `__kiln_close_window` | sync | close by `label` |
+| `__kiln_devtools` | sync | open devtools (release needs `devtools`) |
+| `dialog.open` / `.open_many` / `.save` / `.folder` | async | native dialogs (`dialogs`) |
+| `update.check` | async | compare against `update.url` (`updater`) |
+
+All of them respect the `commands` allowlist: naming one in `kiln.json` is enough
+to keep it, and leaving it out removes it.
+
 ## How this differs from Tauri
 
 | | Tauri v2 | Kiln |
@@ -151,7 +226,9 @@ disk, so it cannot be redirected by a writable working directory.
 | Command registration | `#[tauri::command]` proc macro + `invoke_handler![generate!]` codegen | `app.command("name", fn)`, no codegen |
 | Build step | `tauri-build` codegen, `tauri-cli`, plugin scaffolding | `bun build`, one generated `assets.rs` |
 | Frontend bundler | whatever you configure, integrated by `tauri-cli` | Bun's built-in bundler; no config |
-| Multi-window, tray, menus, updater, plugins | supported | not present (see below) |
+| Multi-window, tray, menus, updater | supported | supported, as opt-in features |
+| Crash reporting | plugin / sentry | panic hook + local ring buffer, no upload |
+| Panic in a command | aborts the app by default | contained, reported to the page as an error |
 | Mobile | supported | not present |
 
 The tradeoff is deliberate: Tauri is a full application platform, Kiln is the
@@ -160,14 +237,13 @@ it back:
 
 - **Plugins** — no plugin system. A plugin is a crate that calls `emit` and
   registers commands; nothing needs to exist in the core for that.
-- **Updater, tray, menus, notifications, dialogs** — opt-in crates. Kiln ships a
-  single window with an OS title bar.
-- **Multi-window** — one window. Adding a second is a `WindowBuilder` away but
-  brings lifecycle questions (which window owns the event loop?) that are out of
-  scope until the core is proven.
-- **Async handlers** — handlers run on the UI thread. A slow handler delays its
-  own reply and the window's redraws; the fix is to do the work on a thread and
-  `emit` the result, which needs no new API.
+- **Notifications, global shortcuts, deep links, single-instance** — not present.
+  Each needs platform-specific code that is not justified until an app asks.
+- **Auto-install updates** — `update.check` reports; downloading, verifying, and
+  replacing a running binary needs code signing to be meaningful and is an app
+  decision.
+- **Plugins** — a plugin is a crate that registers commands and emits events;
+  the core needs nothing for that.
 - **`#[command]` sugar** — would add `syn`, `quote`, and `proc-macro2` and a
   recompile-per-signature-change, to replace one line of builder code.
 
@@ -195,12 +271,14 @@ was built with into the CLI binary — a developer machine, not the user's.
 ```
 PLAN.md              the phase plan and the acceptance checks per phase
 kiln/                runtime shell crate (what ships)
-  examples/hello.rs  minimal app: embedded assets, round-trip, emit
+    examples/hello.rs   minimal app: embedded assets, round-trip, emit
+    examples/studio.rs  full-featured: menus, tray, dialogs, updater, multi-window
+probe/               test fixture: commands that panic on purpose, for verify.ts
 baseline/            bare wry+tao app: the measurement baseline, plus the
                      transport/dev-origin probes that chose the design
 cli/                 Bun CLI (dev tooling only)
   template/          scaffold files, inlined into the CLI at compile time
 examples/counter/    a real CLI-scaffolded app, kept in-tree and buildable
-scripts/verify.ts    10 end-to-end checks (the acceptance gates)
+scripts/verify.ts    13 end-to-end checks (the acceptance gates)
 scripts/bench.ts     cold-start comparison against the baseline
 ```

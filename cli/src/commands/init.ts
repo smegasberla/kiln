@@ -32,7 +32,8 @@ export function init(args: Args): number {
     template
       .replaceAll("{{NAME}}", name)
       .replaceAll("{{CRATE}}", crate)
-      .replaceAll("{{KILN_PATH}}", kilnDependency());
+      .replaceAll("{{KILN_PATH}}", kilnDependency())
+      .replaceAll("{{KILN_PATH_INNER}}", kilnDependency());
 
   const write = (path: string, contents: string) => {
     const full = join(dir, path);

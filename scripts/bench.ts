@@ -33,6 +33,8 @@ function median(values: number[]): number {
   return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
+const samples: Record<string, number[]> = { kiln: [], bare: [] };
+
 async function sample(label: string, binary: string): Promise<number> {
   const values: number[] = [];
   for (let i = 0; i < RUNS; i++) {
@@ -41,6 +43,7 @@ async function sample(label: string, binary: string): Promise<number> {
     await Bun.sleep(150);
   }
   if (values.length === 0) throw new Error(`${label}: no READY line (binary failed to start)`);
+  samples[label === "kiln shell" ? "kiln" : "bare"] = values;
   const med = median(values);
   console.log(
     `  ${label.padEnd(22)} median ${String(med).padStart(4)} ms   ` +
@@ -53,6 +56,22 @@ const bare = await sample("bare wry+tao", join(repo, "target", "release", "bare"
 const kiln = await sample("kiln shell", join(repo, "target", "release", "examples", "hello"));
 
 const delta = ((kiln - bare) / bare) * 100;
+
+// A sample far above the median means the machine was busy (a concurrent build,
+// a browser, another benchmark), not that the shell got slower. Say so instead of
+// reporting a regression that is really measurement noise.
+function spread(values: number[]): number {
+  const med = median(values);
+  return Math.max(...values) / med;
+}
+
+if (spread(samples.kiln) > 1.6 || spread(samples.bare) > 1.6) {
+  console.log(
+    "\n  noisy run: at least one sample was far above the median. Close other\n" +
+      "  work and run again before trusting this number.",
+  );
+}
+
 console.log(
   `\n  overhead: ${(kiln - bare).toFixed(0)} ms (${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%)`,
 );

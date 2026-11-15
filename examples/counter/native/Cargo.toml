@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-kiln = { path = "../../../kiln" }
+kiln = { path = "../../../kiln", features = ["full"] }
 
 [workspace]
 
@@ -12,5 +12,4 @@ kiln = { path = "../../../kiln" }
 opt-level = "s"
 lto = true
 codegen-units = 1
-panic = "abort"
 strip = true

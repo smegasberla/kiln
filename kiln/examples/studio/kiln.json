@@ -1,0 +1,6 @@
+{
+  "name": "Kiln Studio",
+  "width": 760,
+  "height": 560,
+  "update": { "url": "https://example.invalid/releases.json" }
+}

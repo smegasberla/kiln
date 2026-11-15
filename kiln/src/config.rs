@@ -20,6 +20,8 @@ pub struct Config {
     /// Optional allowlist. When present, only these commands may be dispatched,
     /// even if more were registered. `None` means "everything registered".
     pub commands: Option<Vec<String>>,
+    /// Update endpoint, read by the `updater` feature. `None` disables checks.
+    pub update_url: Option<String>,
 }
 
 impl Default for Config {
@@ -31,6 +33,7 @@ impl Default for Config {
             height: 600.0,
             entry: "index.html".to_owned(),
             commands: None,
+            update_url: None,
         }
     }
 }
@@ -64,6 +67,13 @@ impl Config {
         }
         if let Some(entry) = map.get("entry").and_then(Value::as_str) {
             config.entry = entry.trim_start_matches('/').to_owned();
+        }
+        if let Some(url) = map
+            .get("update")
+            .and_then(|u| u.get("url"))
+            .and_then(Value::as_str)
+        {
+            config.update_url = Some(url.to_owned());
         }
         if let Some(list) = map.get("commands").and_then(Value::as_array) {
             let names = list
@@ -116,6 +126,18 @@ mod tests {
         assert_eq!(Config::default().entry, "index.html");
         let c = Config::from_json(r#"{"entry":"/app/index.html"}"#).unwrap();
         assert_eq!(c.entry, "app/index.html");
+    }
+
+    #[test]
+    fn the_update_endpoint_parses_and_defaults_to_none() {
+        assert!(Config::default().update_url.is_none());
+
+        let c = Config::from_json(r#"{"update":{"url":"https://example.com/v.json"}}"#).unwrap();
+        assert_eq!(c.update_url.as_deref(), Some("https://example.com/v.json"));
+
+        // A malformed update block is ignored rather than fatal.
+        let c = Config::from_json(r#"{"update":{"url":42}}"#).unwrap();
+        assert!(c.update_url.is_none());
     }
 
     #[test]
