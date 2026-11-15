@@ -38,6 +38,11 @@ jobs:
 
   macos:
     runs-on: macos-latest
+    # Secrets cannot be referenced from a step-level `if:`, so they are lifted to
+    # job env and the steps test the env var instead.
+    env:
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -48,7 +53,7 @@ jobs:
         working-directory: examples/counter
         run: bun ../../cli/src/index.ts package
       - name: Sign (only when a certificate is configured)
-        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        if: env.MACOS_CERTIFICATE != ''
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -61,7 +66,7 @@ jobs:
           codesign --deep --force --options runtime --sign "Developer ID Application" \
             examples/counter/dist-package/*.app
       - name: Notarize (only when credentials are configured)
-        if: ${{ secrets.MACOS_NOTARY_APPLE_ID != '' }}
+        if: env.APPLE_ID != ''
         env:
           APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
           TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
@@ -78,6 +83,8 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    env:
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -89,7 +96,7 @@ jobs:
         shell: bash
         run: bun ../../cli/src/index.ts package
       - name: Sign (only when a certificate is configured)
-        if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        if: env.WINDOWS_CERTIFICATE != ''
         shell: bash
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
