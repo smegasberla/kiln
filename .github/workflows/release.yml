@@ -1,0 +1,105 @@
+name: Release
+
+# Produces real installable artifacts per platform. Signing is left to secrets:
+# when the secrets are absent the workflow still builds (so forks and PRs work)
+# but clearly marks the artifact as unsigned instead of pretending.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install webview, gtk, and appimagetool deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libayatana-appindicator3-dev librsvg2-dev file
+          sudo apt-get install -y appimagetool || true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Package the example app
+        working-directory: examples/counter
+        run: bun ../../cli/src/index.ts package --icon ../../kiln/examples/studio/icon.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: examples/counter/dist-package/*.AppImage
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Package the example app
+        working-directory: examples/counter
+        run: bun ../../cli/src/index.ts package
+      - name: Sign (only when a certificate is configured)
+        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$MACOS_CERTIFICATE" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p actions build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          codesign --deep --force --options runtime --sign "Developer ID Application" \
+            examples/counter/dist-package/*.app
+      - name: Notarize (only when credentials are configured)
+        if: ${{ secrets.MACOS_NOTARY_APPLE_ID != '' }}
+        env:
+          APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          APP_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent examples/counter/dist-package/*.app /tmp/app.zip
+          xcrun notarytool submit /tmp/app.zip --apple-id "$APPLE_ID" \
+            --team-id "$TEAM_ID" --password "$APP_PASSWORD" --wait
+          xcrun stapler staple examples/counter/dist-package/*.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: examples/counter/dist-package/*.app
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Package the example app
+        working-directory: examples/counter
+        shell: bash
+        run: bun ../../cli/src/index.ts package
+      - name: Sign (only when a certificate is configured)
+        if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        shell: bash
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$WINDOWS_CERTIFICATE" | base64 --decode > cert.pfx
+          "/c/Program Files (x86)/Windows Kits/10/bin/10.0.22621.0/x64/signtool.exe" \
+            sign /fd SHA256 /f cert.pfx /p "$WINDOWS_CERTIFICATE_PASSWORD" \
+            /tr http://timestamp.digicert.com /td SHA256 examples/counter/dist-package/windows/*.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: examples/counter/dist-package/*.zip

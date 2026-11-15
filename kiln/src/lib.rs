@@ -434,7 +434,7 @@ impl App {
 
         #[cfg(feature = "menu")]
         let menu_commands = {
-            let built = build_menu(&self.menus, &handle);
+            let built = build_menu(&self.menus, &handle, &config.name);
             if let Some(built) = &built {
                 if let Err(error) = built.attach(&window) {
                     eprintln!("kiln: menu could not be attached: {error}");
@@ -616,8 +616,12 @@ fn menu_command_map(groups: &[menu::MenuGroup]) -> std::collections::HashMap<Str
 }
 
 #[cfg(feature = "menu")]
-fn build_menu(groups: &[menu::MenuGroup], handle: &AppHandle) -> Option<menu::MenuHandle> {
-    let built = match menu::build(groups) {
+fn build_menu(
+    groups: &[menu::MenuGroup],
+    handle: &AppHandle,
+    app_name: &str,
+) -> Option<menu::MenuHandle> {
+    let built = match menu::build(app_name, groups) {
         Ok(menu) => menu,
         Err(error) => {
             eprintln!("kiln: menu could not be built: {error}");

@@ -10,6 +10,7 @@ import { init } from "./commands/init.ts";
 import { dev } from "./commands/dev.ts";
 import { build } from "./commands/build.ts";
 import { doctor } from "./commands/doctor.ts";
+import { runPackage } from "./commands/package.ts";
 
 const HELP = `kiln - minimal desktop apps with a Rust shell and a Bun toolchain
 
@@ -20,6 +21,7 @@ Commands
   init [dir]     scaffold a new app (default: current directory)
   dev            run the Bun dev server and launch the shell against it
   build          bundle the frontend and compile the release binary
+  package        build, then wrap the binary in a platform installer
   doctor         check the toolchain and report what is missing
 
 Options
@@ -29,6 +31,8 @@ Options
   --debug        build: cargo debug profile instead of release
   --size         build: print the binary size
   --out <path>   build: copy the binary somewhere
+  --icon <path>  package: application icon (256x256 PNG or .icns)
+  --identifier   package: reverse-DNS id (default: derived from the app name)
   --json         doctor: machine-readable output
   -h, --help     show this help
 
@@ -60,6 +64,9 @@ switch (args.command) {
     break;
   case "doctor":
     code = await doctor(args);
+    break;
+  case "package":
+    code = await runPackage(args);
     break;
   default:
     console.error(`kiln: unknown command \`${args.command}\`\n`);

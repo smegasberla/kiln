@@ -247,6 +247,44 @@ it back:
 - **`#[command]` sugar** — would add `syn`, `quote`, and `proc-macro2` and a
   recompile-per-signature-change, to replace one line of builder code.
 
+## Packaging and signing
+
+`kiln package` builds and wraps the app in the format users on that platform
+actually install:
+
+| Platform | Output |
+| --- | --- |
+| Linux | `.AppImage` — one file, no install, no root |
+| macOS | `.app` bundle with `Info.plist` |
+| Windows | `.exe` in a `.zip`, with the WebView2 requirement noted |
+
+An icon is optional: `--icon icon.png` uses yours, and without one the packager
+draws a default so the build never fails on missing artwork.
+
+Signing is **not** attempted. It needs credentials the tool cannot invent, and a
+package that looks signed but isn't is worse than an honestly unsigned one.
+`kiln package` prints the exact command for the platform instead. CI does the
+same: it builds and uploads artifacts on every run, and signs/notarizes only when
+the corresponding secrets exist.
+
+```sh
+kiln package --icon icon.png
+```
+
+## Platform support
+
+| Platform | Build | Tests | Notes |
+| --- | --- | --- | --- |
+| Linux x86_64 | yes | yes | WebKitGTK 4.1 |
+| Windows x86_64 | `cargo check` clean | CI | WebView2, preinstalled on Win10 2020+/11 |
+| macOS x86_64 / arm64 | `cargo check` clean | CI | WKWebView |
+
+`cargo check` for Windows and macOS runs in this repo. macOS cannot be *fully*
+compiled off a Mac (its Objective-C shims need the Apple SDK), so `ci.yml`
+builds and tests both natively on GitHub runners. Treat "compiles" and "runs"
+as different claims: the runtime behaviour on Windows and macOS has not been
+exercised by hand yet.
+
 ## Install / use
 
 Requires Rust, Bun, and the platform webview (Linux: `webkit2gtk-4.1`).
@@ -259,6 +297,7 @@ kiln init myapp
 cd myapp
 kiln dev                                   # Bun dev server + Rust shell
 kiln build --size                          # release binary with the frontend inside
+kiln package --icon icon.png               # AppImage / .app / .zip
 kiln doctor                                # toolchain and project checks
 ```
 
@@ -278,6 +317,9 @@ baseline/            bare wry+tao app: the measurement baseline, plus the
                      transport/dev-origin probes that chose the design
 cli/                 Bun CLI (dev tooling only)
   template/          scaffold files, inlined into the CLI at compile time
+  src/commands/package.ts   AppImage / .app / .zip generation
+  src/icon.ts        PNG encoder and default icon (no image dependency)
+.github/workflows/   CI (3 platforms) and release (packaging + optional signing)
 examples/counter/    a real CLI-scaffolded app, kept in-tree and buildable
 scripts/verify.ts    13 end-to-end checks (the acceptance gates)
 scripts/bench.ts     cold-start comparison against the baseline

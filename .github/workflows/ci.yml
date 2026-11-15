@@ -1,0 +1,106 @@
+name: CI
+
+# The shell's platform code cannot be compiled anywhere except on the platform it
+# targets: macOS needs the Apple SDK for its Objective-C shims, and Windows needs
+# WebView2 headers. So the only honest way to know the Windows and macOS code
+# paths build is to build them there.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Fail on warnings: a warning in a cross-platform `cfg` branch is usually a
+  # sign the branch is not actually the one being compiled.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  linux:
+    name: Linux (build, test, verify)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install webview and build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Unit tests
+        run: cargo test -p kiln --features full --lib
+
+      - name: Clippy
+        run: cargo clippy -p kiln --features full --all-targets -- -D warnings
+
+      - name: Typecheck CLI
+        working-directory: cli
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+
+      - name: Install Xvfb
+        run: sudo apt-get install -y xvfb
+
+      - name: End-to-end verification (headless)
+        run: xvfb-run -a bun scripts/verify.ts
+
+  windows:
+    name: Windows (build, test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # WebView2 is preinstalled on windows-latest, which is what the shell uses
+      # at runtime; the development headers come with the same runtime package.
+      - name: Unit tests
+        run: cargo test -p kiln --features full --lib
+
+      - name: Build the full-feature shell
+        run: cargo build -p kiln --features full --examples
+
+      - name: Build the minimal shell
+        run: cargo build -p kiln --examples
+
+  macos:
+    name: macOS (build, test)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # No extra system packages: WKWebView and the Apple frameworks are part of
+      # the OS SDK.
+      - name: Unit tests
+        run: cargo test -p kiln --features full --lib
+
+      - name: Build the full-feature shell
+        run: cargo build -p kiln --features full --examples
+
+      - name: Build the minimal shell
+        run: cargo build -p kiln --examples

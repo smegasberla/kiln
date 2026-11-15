@@ -321,6 +321,22 @@ async function main() {
     );
   }
 
+  // 8. Packaging produces a real artifact on Linux. The AppImage is the only
+  //    format that can be produced and inspected here; macOS and Windows
+  //    packaging is exercised by the release workflow.
+  if (process.platform === "linux") {
+    const pkg = await shWithTimeout(["bun", cli, "package"], app, {}, 600_000);
+    const artifact = /(\S+\.AppImage)/.exec(pkg.out)?.[1] ?? null;
+    const exists = artifact !== null && statSync(artifact, { throwIfNoEntry: false }) !== undefined;
+    record(
+      "kiln package (AppImage)",
+      pkg.code === 0 && exists,
+      exists ? `${(statSync(artifact!).size / 1048576).toFixed(1)} MB` : pkg.err.slice(-140),
+    );
+  } else {
+    record("kiln package", true, `skipped: not Linux (${process.platform})`);
+  }
+
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
   process.exit(failed.length === 0 ? 0 : 1);

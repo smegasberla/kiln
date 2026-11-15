@@ -74,9 +74,10 @@ impl MenuHandle {
     /// Attach the menu to a window.
     ///
     /// On Linux it goes into the window's GTK container; on Windows it becomes
-    /// the window's menu bar; on macOS it becomes the application menu.
+    /// the window's menu bar; on macOS it becomes the application menu, which is
+    /// a single global menu rather than a per-window one.
     pub fn attach(&self, window: &tao::window::Window) -> Result<(), String> {
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        #[cfg(kiln_gtk_menu)]
         {
             use tao::platform::unix::WindowExtUnix;
 
@@ -96,6 +97,9 @@ impl MenuHandle {
         }
         #[cfg(target_os = "macos")]
         {
+            // `init_for_nsapp` installs the whole bar, and the first submenu of a
+            // macOS menu bar *is* the application menu. There is no per-window
+            // attach on macOS; the window argument is only meaningful elsewhere.
             self.menu.init_for_nsapp();
         }
         let _ = window;
@@ -104,19 +108,35 @@ impl MenuHandle {
 }
 
 /// Create a menu with the platform-standard edit items plus the given groups.
-pub fn build(groups: &[MenuGroup]) -> Result<MenuHandle, String> {
+///
+/// `app_name` is used for the macOS application menu's title, About item, and
+/// Quit item; other platforms use it only to label the quit entry.
+pub fn build(app_name: &str, groups: &[MenuGroup]) -> Result<MenuHandle, String> {
     use muda::{Menu, MenuItem as MudaItem, PredefinedMenuItem, Submenu};
 
     let menu = Menu::new();
 
+    // On macOS the first submenu is the application menu: it holds About,
+    // Services, Hide, and Quit, and the OS expects it before anything else.
     #[cfg(target_os = "macos")]
     {
-        let app_menu = Submenu::new("Kiln", true);
-        app_menu
-            .append(&PredefinedMenuItem::quit(Some("Quit")))
-            .map_err(|e| e.to_string())?;
+        let app_menu = Submenu::new(app_name, true);
+        for item in [
+            PredefinedMenuItem::about(Some(&format!("About {app_name}")), None),
+            PredefinedMenuItem::separator(),
+            PredefinedMenuItem::services(Some("Services")),
+            PredefinedMenuItem::separator(),
+            PredefinedMenuItem::hide(Some(&format!("Hide {app_name}"))),
+            PredefinedMenuItem::hide_others(Some("Hide Others")),
+            PredefinedMenuItem::separator(),
+            PredefinedMenuItem::quit(Some(&format!("Quit {app_name}"))),
+        ] {
+            app_menu.append(&item).map_err(|e| e.to_string())?;
+        }
         menu.append(&app_menu).map_err(|e| e.to_string())?;
     }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app_name;
 
     let edit = Submenu::new("Edit", true);
     for item in [
@@ -139,15 +159,17 @@ pub fn build(groups: &[MenuGroup]) -> Result<MenuHandle, String> {
             let menu_item = MudaItem::with_id(&item.id, &item.label, true, accel);
             submenu.append(&menu_item).map_err(|e| e.to_string())?;
         }
-        #[cfg(not(target_os = "macos"))]
-        submenu
-            .append(&PredefinedMenuItem::separator())
-            .map_err(|e| e.to_string())?;
-        #[cfg(not(target_os = "macos"))]
-        submenu
-            .append(&PredefinedMenuItem::quit(Some("Quit")))
-            .map_err(|e| e.to_string())?;
         menu.append(&submenu).map_err(|e| e.to_string())?;
+    }
+
+    // Quit is a top-level item outside macOS, where it does not belong to an
+    // application menu.
+    #[cfg(not(target_os = "macos"))]
+    {
+        menu.append(&PredefinedMenuItem::separator())
+            .map_err(|e| e.to_string())?;
+        menu.append(&PredefinedMenuItem::quit(Some(&format!("Quit {app_name}"))))
+            .map_err(|e| e.to_string())?;
     }
 
     Ok(MenuHandle { menu })

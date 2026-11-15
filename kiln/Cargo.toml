@@ -13,19 +13,24 @@ wry = { version = "0.57", features = ["linux-body"] }
 tao = "0.37"
 serde_json = "1"
 
-# Opt-in crates. Each one is behind a feature so a minimal app pays nothing.
-# `gtk` is already in the tree via tao and wry; naming it directly is what lets
-# the menu code describe a GTK container without guessing at an opaque type.
-gtk = { version = "0.18", optional = true }
+# Opt-in crates. Each is behind a feature so a minimal app pays nothing.
 muda = { version = "0.21", optional = true }
 tray-icon = { version = "0.26", optional = true }
 rfd = { version = "0.18", optional = true }
 ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
 
+# GTK is Linux-only, and naming it directly is what lets the menu code describe a
+# GTK container without guessing at an opaque type. It is not optional because
+# cargo cannot enable a feature per target, and it is not gated behind a feature
+# because it is *already* in tao's Linux tree: declaring it here dedupes to the
+# same crate instance, so it adds no build time and no code to the binary.
+[target.'cfg(not(any(target_os = "windows", target_os = "macos")))'.dependencies]
+gtk = "0.18"
+
 [features]
 default = []
 # Native menu bar with the platform's standard items (Cut/Copy/Paste/Quit).
-menu = ["dep:muda", "dep:gtk"]
+menu = ["dep:muda"]
 # System tray icon with a context menu.
 tray = ["dep:tray-icon", "menu"]
 # Native open/save file dialogs exposed as commands.
@@ -34,8 +39,9 @@ dialogs = ["dep:rfd"]
 updater = ["dep:ureq"]
 # Devtools in release builds (F12). Costs a little binary size.
 devtools = ["wry/devtools"]
-# Everything a "real app" normally needs, minus the heavy ones.
+# Everything a "real app" normally needs.
 full = ["menu", "dialogs", "updater", "devtools"]
+
 
 [[example]]
 name = "hello"
