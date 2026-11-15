@@ -57,8 +57,17 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
 
-      - name: Install Xvfb
-        run: sudo apt-get install -y xvfb
+      - name: Install Xvfb and appimagetool
+        run: |
+          sudo apt-get install -y xvfb
+          # appimagetool is not in the Ubuntu archive; take the official static
+          # build so `kiln package` produces a real AppImage instead of a bare
+          # AppDir.
+          mkdir -p ~/.local/bin
+          curl -fsSL -o ~/.local/bin/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x ~/.local/bin/appimagetool
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: End-to-end verification (headless)
         run: xvfb-run -a bun scripts/verify.ts
