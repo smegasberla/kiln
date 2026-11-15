@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{NAME}}</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>{{NAME}}</h1>
+      <p class="hint">A native command round-trip: TypeScript calls Rust, Rust returns data.</p>
+      <form id="greet">
+        <input id="name" value="world" autocomplete="off" spellcheck="false" />
+        <button type="submit">Invoke</button>
+      </form>
+      <p id="result" aria-live="polite">waiting</p>
+    </main>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

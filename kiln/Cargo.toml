@@ -1,0 +1,18 @@
+[package]
+name = "kiln"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal Rust runtime shell: OS webview + tao window + generic JSON IPC"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# `linux-body` is not optional here: WebKitGTK only delivers POST bodies to a
+# custom protocol handler when that feature is on, and the whole IPC bridge is
+# a POST. Without it, invoke() silently receives an empty payload on Linux.
+wry = { version = "0.57", features = ["linux-body"] }
+tao = "0.37"
+serde_json = "1"
+
+[[example]]
+name = "hello"
+path = "examples/hello.rs"

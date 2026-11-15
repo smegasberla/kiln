@@ -1,0 +1,17 @@
+[package]
+name = "baseline"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+wry = { version = "0.57", features = ["linux-body"] }
+tao = "0.37"
+
+[[bin]]
+name = "bare"
+path = "src/bare.rs"
+
+[[bin]]
+name = "probe"
+path = "src/probe.rs"

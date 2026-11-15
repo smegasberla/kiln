@@ -1,0 +1,23 @@
+//! {{NAME}} - a Kiln desktop app.
+//!
+//! Everything shipped is here: the window, the commands, and the embedded
+//! frontend bytes. `cargo build --release` produces the whole app.
+
+use kiln::{App, Error};
+use kiln::serde_json::{json, Value};
+
+mod assets;
+
+fn main() -> Result<(), Error> {
+    App::new()
+        .config(include_str!("../../kiln.json"))
+        .assets(assets::ASSETS)
+        .command("greet", |_app, payload: Value| {
+            let name = payload
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("world");
+            Ok(json!(format!("Hello, {name}! (from Rust)")))
+        })
+        .run()
+}

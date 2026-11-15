@@ -1,0 +1,11 @@
+# Agent / editor local state. Never committed, in any subdirectory.
+.crush/
+**/.crush/
+.crush
+**/.crush
+
+target/
+node_modules/
+dist/
+.DS_Store
+*.swp

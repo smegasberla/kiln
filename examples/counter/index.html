@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Counter</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Counter</h1>
+      <p class="hint">State lives in Rust. The page only renders what it is told.</p>
+      <p id="value" class="value" aria-live="polite">0</p>
+      <div class="row">
+        <button id="dec" type="button">-1</button>
+        <button id="inc" type="button">+1</button>
+        <button id="reset" type="button" class="ghost">reset</button>
+      </div>
+      <p id="status" class="hint">ready</p>
+    </main>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

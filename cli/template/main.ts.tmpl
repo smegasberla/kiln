@@ -1,0 +1,18 @@
+/// <reference path="./kiln.d.ts" />
+
+const result = document.getElementById("result")!;
+const form = document.getElementById("greet") as HTMLFormElement;
+const nameInput = document.getElementById("name") as HTMLInputElement;
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  result.textContent = "invoking...";
+  try {
+    const greeting = await window.kiln.invoke<string>("greet", { name: nameInput.value });
+    result.textContent = greeting;
+  } catch (error) {
+    result.textContent = "error: " + (error as Error).message;
+  }
+});
+
+form.requestSubmit();

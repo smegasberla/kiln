@@ -1,0 +1,17 @@
+{
+  "name": "kiln-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "kiln": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "bun build --compile --minify src/index.ts --outfile dist/kiln",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
+  }
+}
