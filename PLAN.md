@@ -337,14 +337,47 @@ made once with Windows and macOS.
 ### Phase 8 status: Android done
 
 Android works. The `android` job in `.github/workflows/ci.yml` scaffolds a fresh
-project, builds an APK, installs it on an emulator, launches it, and fails on
-either a `FATAL EXCEPTION` or an `UnsatisfiedLinkError` in the log. That covers
-what a wrong JNI name breaks: a symbol mismatch is a link error at runtime, not a
-compile error. `KilnMenuTest` and `KilnDialogsTest` add instrumentation coverage
-on top of it — `PopupMenu` construction and click dispatch under a themed
-context, and the picker's intent construction, URI-to-path resolution and MIME
-mapping. What is still not driven is the intent answer itself: handing back a
-`content://` URI needs a document provider the emulator image does not ship.
+project, builds an APK, installs it on an emulator, runs the instrumentation
+suite, then launches the app with no instrumentation attached and fails on either
+a `FATAL EXCEPTION` or an `UnsatisfiedLinkError` in the log. The launch covers
+what a wrong JNI name breaks, since a symbol mismatch is a link error at runtime
+and never a build error, and it covers the one path no test reaches: the process
+starting from the launcher on its own.
+
+The instrumentation suite is in two layers. `KilnMenuTest` and `KilnDialogsTest`
+assert data translation that needs no window: `PopupMenu` construction and click
+dispatch under a themed context, and the picker's intent construction,
+URI-to-path resolution and MIME mapping. `KilnDialogsDeviceTest`,
+`KilnTrayDeviceTest` and `KilnHttpDeviceTest` drive the round trips a device is
+required for. The picker is answered by the document provider the image does ship,
+through `OPEN_DOCUMENT`, `OPEN_DOCUMENT_TREE` and a cancel, and the assertion is on
+the path that arrives back in JavaScript. The tray is asserted as a notification
+in the notification manager, both without `POST_NOTIFICATIONS` (dropped silently,
+which is why the call returning true proves nothing) and with it, checking that the
+tooltip became the title and the items became the actions. HTTP is asserted through
+the system trust store, including `update.check` end to end, so the `ureq`/rustls
+replacement on Android is exercised rather than merely compiled.
+
+`KilnDeviceSupport` holds what those share. Two things in it are there because
+they were learned the hard way. The tests share one activity: the shell starts its
+Rust event loop from `ProcessLifecycleOwner`, which runs once per process, so a
+second `ActivityScenario.launch` produces a WebView with no page behind it. And the
+activity is launched after granting the notification permission, because the app
+posts its tray on startup, the resulting OS prompt leaves the activity paused, and a
+paused WebView never finishes loading the page every test then waits for.
+
+The picker tests drive system UI through the `UiAutomation` that instrumentation
+already owns, rather than adding `androidx.test.uiautomator` to every scaffolded
+app: the active window, its node tree, node actions and shell commands are all
+reachable there. Nodes are clicked through their clickable ancestor or, failing
+that, by injecting a tap at their bounds centre, because DocumentsUI puts the label
+on a `TextView` inside a clickable container.
+
+One asymmetry is deliberate. `tray` stays out of `full` on both targets, because it
+pulls `tray-icon` and implies `menu`. An Android app that wants a tray adds the
+feature itself; the example crate here does, so that the notification path is
+exercised by a real `.tray(...)` call on a device and not only by the JSON the
+`kilnNotify` test posts directly.
 
 **Working:**
 

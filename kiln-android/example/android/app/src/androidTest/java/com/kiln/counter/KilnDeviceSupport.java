@@ -1,0 +1,287 @@
+package com.kiln.counter;
+
+import static org.junit.Assert.fail;
+
+import android.Manifest;
+import android.accessibilityservice.AccessibilityService;
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.app.UiAutomation;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
+import android.graphics.Rect;
+import android.os.ParcelFileDescriptor;
+import android.os.SystemClock;
+import android.service.notification.StatusBarNotification;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.webkit.WebView;
+
+import androidx.test.core.app.ActivityScenario;
+import androidx.test.platform.app.InstrumentationRegistry;
+
+import org.json.JSONTokener;
+
+import java.io.ByteArrayOutputStream;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * What the device tests need that JUnit does not provide.
+ *
+ * <p>One copy because four classes would otherwise carry the same plumbing: driving
+ * system UI, running shell commands as the instrumentation's own identity, reading
+ * a promise back out of the page, and querying this app's notifications.
+ *
+ * <p>UiAutomator is deliberately not a dependency. Everything needed is already
+ * reachable through {@link UiAutomation}, which instrumentation owns: the active
+ * window, its node tree, node actions, global actions, runtime permissions, and
+ * shell commands. Adding a test-only artifact to every scaffolded app to obtain
+ * less than this would be a poor trade.
+ */
+final class KilnDeviceSupport {
+    /** How long anything asynchronous is given: page loads, pickers, notifications. */
+    static final long TIMEOUT_SECONDS = 20;
+
+    /** Labels the system picker supplies, which are not this app's strings. */
+    static final String SHOW_ROOTS = "Show roots";
+
+    static final String DOWNLOADS = "Downloads";
+
+    /** The device's own storage root in the picker's drawer, whose name varies by device. */
+    static final String VOLUME_ROOT = android.os.Build.MODEL;
+
+    /** The id {@code KilnTray} always posts under. */
+    static final int TRAY_ID = 1;
+
+    /** A condition that holds once the system has caught up. */
+    interface Condition {
+        boolean holds();
+    }
+
+    /**
+     * The one activity every device test shares, launched at most once per process.
+     *
+     * <p>Not one per test: wry and tao start the Rust event loop from
+     * {@code ProcessLifecycleOwner}, which runs once per process, so a second
+     * {@code ActivityScenario.launch} produces an activity whose WebView has no
+     * page behind it. The page then never leaves {@code loading}, and every test
+     * after the first fails for a reason that has nothing to do with what it
+     * asserts. Sharing one activity is the arrangement that matches how the shell
+     * actually works.
+     */
+    private static ActivityScenario<MainActivity> app;
+
+    /** The shared activity, launched and waited for on first use. */
+    static synchronized ActivityScenario<MainActivity> app() {
+        if (app == null) {
+            // Granted before the launch, not during: the tray posts on startup, so
+            // the app would raise the notification prompt over itself, and a prompt
+            // leaves the activity paused with its WebView unable to run a script.
+            // Every test after that would then be waiting for a page that cannot
+            // load rather than testing what it names.
+            grant(Manifest.permission.POST_NOTIFICATIONS);
+            app = ActivityScenario.launch(MainActivity.class);
+            awaitPage(app);
+        }
+        return app;
+    }
+
+    private KilnDeviceSupport() {}
+
+    static UiAutomation ui() {
+        return InstrumentationRegistry.getInstrumentation().getUiAutomation();
+    }
+
+    /** The package under test, which is also the app whose notifications land here. */
+    static String packageName() {
+        return InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageName();
+    }
+
+    /**
+     * Grant a runtime permission, as the identity instrumentation runs under.
+     *
+     * <p>Answering the OS prompt instead would not do: a prompt is a window in
+     * front of the app, so the activity under test stops being resumed for as long
+     * as it is up. Granting first removes that variable rather than racing it.
+     *
+     * <p>Silently does nothing for a permission the manifest does not declare,
+     * because the platform throws for those and a test about notifications should
+     * not fail in an app that has no tray.
+     */
+    static void grant(String permission) {
+        if (!declares(permission)) {
+            return;
+        }
+        ui().grantRuntimePermission(packageName(), permission);
+    }
+
+    /**
+     * Revoke a runtime permission.
+     *
+     * <p>This kills the app process, so nothing that depends on the running
+     * activity may follow it: the caller relaunches and starts over.
+     */
+    static void revoke(String permission) {
+        if (!declares(permission)) {
+            return;
+        }
+        ui().revokeRuntimePermission(packageName(), permission);
+    }
+
+    /** Whether this app currently holds {@code permission}. */
+    static boolean holds(String permission) {
+        return InstrumentationRegistry.getInstrumentation()
+                        .getTargetContext()
+                        .getPackageManager()
+                        .checkPermission(permission, packageName())
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** Whether this app's manifest requests {@code permission} at all. */
+    static boolean declares(String permission) {
+        try {
+            PackageInfo info = InstrumentationRegistry.getInstrumentation()
+                    .getTargetContext()
+                    .getPackageManager()
+                    .getPackageInfo(packageName(), PackageManager.GET_PERMISSIONS);
+            if (info.requestedPermissions == null) {
+                return false;
+            }
+            for (String requested : info.requestedPermissions) {
+                if (permission.equals(requested)) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (PackageManager.NameNotFoundException e) {
+            throw new AssertionError("the package under test is not installed", e);
+        }
+    }
+
+    /**
+     * Run a shell command and return its stdout.
+     *
+     * <p>{@code executeShellCommand} runs the program directly rather than through
+     * {@code /system/bin/sh}, so redirection, globs and pipelines are not
+     * interpreted: {@code echo hi > file} becomes an {@code echo} that prints
+     * "hi > file". Anything beyond running one program and reading its output has
+     * to be done in Java, which is what {@link #seedFile} does.
+     */
+    static String shell(String command) {
+        try (ParcelFileDescriptor descriptor = ui().executeShellCommand(command);
+                FileInputStream output = new FileInputStream(descriptor.getFileDescriptor())) {
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            byte[] chunk = new byte[4096];
+            int read;
+            while ((read = output.read(chunk)) > 0) {
+                buffer.write(chunk, 0, read);
+            }
+            return buffer.toString("UTF-8");
+        } catch (IOException e) {
+            throw new AssertionError("the shell could not run: " + command, e);
+        }
+    }
+
+    /**
+     * Put a file with known content in Downloads, the way a real download lands.
+     *
+     * <p>Through {@code MediaStore} rather than a path, because that is the only
+     * identity allowed to write there: an app cannot write {@code /sdcard/Download}
+     * directly under scoped storage, and the shell cannot read this app's private
+     * cache to stage a copy. MediaStore needs no permission on API 29 and up, and a
+     * row inserted this way is exactly what the picker's Downloads provider lists,
+     * so the fixture is also the realistic one.
+     *
+     * <p>{@code relativePath} is relative to the volume root, so
+     * {@code "Download"} puts the file in Downloads and
+     * {@code "Download/sub"} creates {@code sub} as well, which is how the folder
+     * case gets a directory it can actually select.
+     */
+    static void seedDownload(final String name, final String relativePath, final String contents) {
+        app().onActivity(activity -> {
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name);
+            values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+            values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, relativePath);
+            android.net.Uri target = activity.getContentResolver()
+                    .insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (target == null) {
+                throw new AssertionError("MediaStore refused to create " + relativePath + "/" + name);
+            }
+            try (java.io.OutputStream output =
+                    activity.getContentResolver().openOutputStream(target)) {
+                if (output == null) {
+                    throw new AssertionError("MediaStore created " + target + " but would not open it");
+                }
+                output.write(contents.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            } catch (java.io.IOException e) {
+                throw new AssertionError("could not write the fixture at " + target, e);
+            }
+        });
+    }
+
+    /**
+     * Whether this device currently has a working internet connection.
+     *
+     * <p>Asked through {@code ping} rather than {@code ConnectivityManager}: the
+     * latter needs {@code ACCESS_NETWORK_STATE}, and a test is not a good reason to
+     * add a permission to every scaffolded app. A failed ping is the same question
+     * answered without touching the manifest.
+     */
+    static boolean online() {
+        String output = shell("ping -c 1 -W 2 example.com");
+        return output.contains("1 received") || output.contains("1 packets received");
+    }
+
+    /**
+     * Read a file as this app, not as the shell.
+     *
+     * <p>{@code executeShellCommand} runs as the shell user, which cannot descend
+     * into another app's private directory, so verifying a cache copy from there
+     * always reads nothing. The app process is the only identity that can prove the
+     * path it was handed names a file it can open, which is the whole property the
+     * picker's copy branch exists to provide.
+     */
+    static String readFile(String path) {
+        final String[] contents = new String[1];
+        app().onActivity(activity -> {
+            try {
+                java.io.File file = new java.io.File(path);
+                byte[] bytes = new byte[(int) file.length()];
+                try (java.io.FileInputStream input = new java.io.FileInputStream(file)) {
+                    int read = 0;
+                    while (read < bytes.length) {
+                        int justRead = input.read(bytes, read, bytes.length - read);
+                        if (justRead < 0) {
+                            break;
+                        }
+                        read += justRead;
+                    }
+                }
+                contents[0] = new String(bytes, java.nio.charset.StandardCharsets.UTF_8).trim();
+            } catch (java.io.IOException e) {
+                contents[0] = null;
+            }
+        });
+        return contents[0];
+    }
+
+    /** Cancel everything this app posted, so a later assertion sees only what it caused. */
+    static void cancelNotifications() {
+        notifications().cancelAll();
+    }
+
+    private static NotificationManager notifications() {
+        return InstrumentationRegistry.getInstrumentation()
+                .getTargetContext()
+                .getSystemService(NotificationManager.class);
+    }
+}

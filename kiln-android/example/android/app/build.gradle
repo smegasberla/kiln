@@ -8,6 +8,19 @@ plugins {
     id 'org.jetbrains.kotlin.android' version '2.0.21'
 }
 
+// A release keystore is optional. `keystore.properties` at the project root (or
+// the KILN_KEYSTORE* environment variables) supplies a real key; without one the
+// release variant is signed with the debug key, so a fresh scaffold and CI can
+// still produce an `.aab`. Play refuses a debug-signed bundle, which is a
+// clearer signal than Gradle refusing to build before anyone owns a key.
+def kilnKeystore = new Properties()
+def kilnKeystoreFile = rootProject.file("keystore.properties")
+if (kilnKeystoreFile.exists()) {
+    kilnKeystoreFile.withInputStream { kilnKeystore.load(it) }
+}
+def kilnStoreFile = kilnKeystore.getProperty("storeFile") ?: System.getenv("KILN_KEYSTORE")
+def kilnHasKeystore = kilnStoreFile != null
+
 android {
     namespace 'com.kiln.counter'
     compileSdk 36
@@ -22,6 +35,24 @@ android {
         // The instrumentation tests in src/androidTest are the only way to run
         // the picker and menu translations on a real Android runtime.
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        release {
+            if (kilnHasKeystore) {
+                storeFile file(kilnStoreFile)
+                storePassword kilnKeystore.getProperty("storePassword") ?: System.getenv("KILN_KEYSTORE_PASSWORD")
+                keyAlias kilnKeystore.getProperty("keyAlias") ?: System.getenv("KILN_KEY_ALIAS")
+                keyPassword kilnKeystore.getProperty("keyPassword") ?: System.getenv("KILN_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // Debug signing when no keystore was configured above.
+            signingConfig kilnHasKeystore ? signingConfigs.release : signingConfigs.debug
+        }
     }
 
     compileOptions {
@@ -56,5 +87,8 @@ dependencies {
     implementation 'androidx.core:core:1.13.1'
 
     androidTestImplementation 'androidx.test:runner:1.6.2'
+    // ActivityScenario, for the rotation test: it launches the real activity and
+    // lets the test read the same instance back rather than a copy.
+    androidTestImplementation 'androidx.test:core:1.6.1'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 }

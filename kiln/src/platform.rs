@@ -13,7 +13,8 @@
 //! outside this crate (the Android one) is the intended caller.
 
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::{AppHandle, Registry};
 
@@ -62,6 +63,72 @@ pub fn menu_clicked(id: &str) {
 pub fn tray_clicked(id: &str) {
     if let Some(handle) = handle() {
         handle.emit_signal(&format!("tray:{id}"));
+    }
+}
+
+/// Lifecycle states that arrived before a page could receive them.
+///
+/// Android reports `onResume` from the activity, and the activity runs before
+/// `App::run` has published a handle and before the first page can execute a
+/// script. `AppHandle::emit` drops in both cases, so a state is recorded here and
+/// flushed by [`page_loaded`], the first moment a script can run. Dropping one is
+/// not harmless: a page that never hears `pause` keeps its timers running while
+/// the app is in the background, which is the bug this exists to prevent.
+#[derive(Default)]
+struct LifecycleQueue {
+    states: Vec<String>,
+}
+
+impl LifecycleQueue {
+    /// Record a transition. An empty one names no state and is ignored rather
+    /// than queued as a blank event the page cannot interpret.
+    fn record(&mut self, state: &str) {
+        if !state.is_empty() {
+            self.states.push(state.to_owned());
+        }
+    }
+
+    /// Take everything pending, oldest first, leaving the queue empty.
+    ///
+    /// Taking is what makes a flush idempotent: a second call sends nothing, so a
+    /// page that reloads is not replayed a `pause` from ten minutes ago.
+    fn drain(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.states)
+    }
+}
+
+static LIFECYCLE: Mutex<LifecycleQueue> = Mutex::new(LifecycleQueue { states: Vec::new() });
+
+/// Whether a page has finished loading at least once, so `emit` will land.
+static PAGE_LOADED: AtomicBool = AtomicBool::new(false);
+
+/// Record a lifecycle transition, from any thread.
+///
+/// `state` is `resume`, `pause`, `stop`, or `destroy`. Passed through rather than
+/// matched against a list: an app that reports a state this crate has not seen is
+/// better served by the page receiving it than by it silently vanishing. The page
+/// hears it as `kiln.listen("lifecycle", ({ state }) => ...)`.
+pub fn lifecycle(state: &str) {
+    LIFECYCLE.lock().unwrap().record(state);
+    if PAGE_LOADED.load(Ordering::Acquire) {
+        deliver_lifecycle();
+    }
+}
+
+/// Announce that a page is ready, and hand it every state it missed.
+///
+/// Called from the page-load handler in `lib.rs`. Until the handle exists the
+/// states stay queued, so a flush with no handle loses nothing.
+pub fn page_loaded() {
+    PAGE_LOADED.store(true, Ordering::Release);
+    deliver_lifecycle();
+}
+
+/// Send the queued states to the page, or keep them if there is no page yet.
+fn deliver_lifecycle() {
+    let Some(handle) = handle() else { return };
+    for state in LIFECYCLE.lock().unwrap().drain() {
+        handle.emit("lifecycle", serde_json::json!({ "state": state }));
     }
 }
 
@@ -410,6 +477,41 @@ mod tests {
     fn the_data_dir_is_named_after_the_app() {
         let dir = platform_data_dir("kiln-test-app").expect("a home directory should exist");
         assert_eq!(dir.file_name().unwrap(), "kiln-test-app");
+    }
+
+    #[test]
+    fn a_lifecycle_state_before_a_page_is_kept() {
+        // The activity reports `resume` before `App::run` publishes a handle and
+        // before the page can run a script. Dropping it there would leave the
+        // page believing it was never resumed.
+        let mut queue = LifecycleQueue::default();
+        queue.record("resume");
+        queue.record("pause");
+        assert_eq!(queue.drain(), ["resume", "pause"]);
+    }
+
+    #[test]
+    fn draining_empties_the_queue() {
+        // A page that reloads must not be replayed states it already handled.
+        let mut queue = LifecycleQueue::default();
+        queue.record("pause");
+        assert_eq!(queue.drain().len(), 1);
+        assert!(queue.drain().is_empty());
+    }
+
+    #[test]
+    fn an_empty_state_is_not_queued() {
+        let mut queue = LifecycleQueue::default();
+        queue.record("");
+        assert!(queue.drain().is_empty());
+    }
+
+    #[test]
+    fn a_lifecycle_state_with_no_handle_is_queued_not_lost() {
+        // Must not panic and must not vanish: `deliver_lifecycle` keeps it.
+        lifecycle("resume");
+        let queued = LIFECYCLE.lock().unwrap().drain();
+        assert_eq!(queued, ["resume"]);
     }
 
     #[test]

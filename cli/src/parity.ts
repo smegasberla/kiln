@@ -49,6 +49,11 @@ export function checkParity(root: string): { ok: boolean; message: string } {
   const androidFile = join(root, "android", "src", "lib.rs");
 
   if (!existsSync(desktopFile)) {
+    if (existsSync(androidFile)) {
+      // `kiln init --mobile` writes no desktop crate: there is no second command
+      // list to disagree with, so parity is trivially satisfied.
+      return { ok: true, message: "mobile only; skipping parity" };
+    }
     return { ok: false, message: `missing ${desktopFile}` };
   }
   if (!existsSync(androidFile)) {

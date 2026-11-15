@@ -44,6 +44,25 @@ if (window.kiln.platform === "android" || window.kiln.platform === "ios") {
   });
 }
 
+// Lifecycle transitions reach the page as events. Reported rather than
+// interpreted: a web page has no state machine to run, but knowing that it was
+// paused tells it to drop a timer rather than fire while nothing is visible.
+// The `note` command forwards the line to logcat, which is how the device test
+// in the README observes it.
+window.kiln.listen<{ state: string }>("lifecycle", ({ state }) => {
+  show(`lifecycle: ${state}`);
+  window.kiln.invoke("note", { message: `lifecycle ${state}` }).catch(() => {});
+});
+
+// A rotation is a configuration change the activity absorbs rather than a
+// restart, so the page has to prove it is still alive afterwards. Reporting the
+// new size does that: the line only appears if this same page ran the script.
+window.addEventListener("resize", () => {
+  window.kiln
+    .invoke("note", { message: `resized to ${window.innerWidth}x${window.innerHeight}` })
+    .catch(() => {});
+});
+
 // Menu clicks arrive as events, so a native menu needs no extra wiring here.
 window.kiln.listen<{ id: string }>("menu", (event) => show(`menu: ${event.id}`));
 

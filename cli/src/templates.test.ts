@@ -53,11 +53,12 @@ describe("Java -> Rust entry points", () => {
     expect([...java.keys()].sort()).toEqual([...rust.keys()].sort());
   });
 
-  test("the four shell callbacks are the ones exported", () => {
+  test("the five shell callbacks are the ones exported", () => {
     const rust = declaredExports(read("lib.rs.tmpl"));
     expect([...rust.keys()].sort()).toEqual([
       "kilnCompleteDialog",
       "kilnFailDialog",
+      "kilnLifecycle",
       "kilnMenuClicked",
       "kilnTrayClicked",
     ]);
@@ -127,6 +128,18 @@ describe("regeneration", () => {
     [
       "androidTest/KilnDialogsTest.java.tmpl",
       "androidTest/java/com/kiln/counter/KilnDialogsTest.java",
+    ],
+    [
+      "androidTest/KilnLifecycleTest.java.tmpl",
+      "androidTest/java/com/kiln/counter/KilnLifecycleTest.java",
+    ],
+    [
+      "androidTest/KilnDeviceSupport.java.tmpl",
+      "androidTest/java/com/kiln/counter/KilnDeviceSupport.java",
+    ],
+    [
+      "androidTest/KilnDeviceTest.java.tmpl",
+      "androidTest/java/com/kiln/counter/KilnDeviceTest.java",
     ],
   ];
 

@@ -173,14 +173,23 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          # Launching is what proves the Java -> Rust entry points: a wrong JNI
-          # name is an UnsatisfiedLinkError in the log, not a build error. The
-          # picker and menu round-trips are not driven from here: the menu is
-          # covered by KilnMenuTest and the intent by KilnDialogsTest, both
-          # instrumentation tests, and the intent answer itself needs a document
-          # provider the emulator image does not ship.
+          # Two different things are proved here, and neither needs the other.
+          #
+          # `connectedDebugAndroidTest` runs the instrumentation suite: the picker
+          # driven end to end against the document provider the image does ship
+          # (a missing one is this suite's own failure message, not a timeout), the
+          # tray as a notification with and without POST_NOTIFICATIONS, HTTP through
+          # the system trust store, and the updater on top of it. That suite also
+          # covers the JNI symbols, because calling one that is missing throws
+          # UnsatisfiedLinkError.
+          #
+          # The launch afterwards is what covers the path no test can reach: the
+          # app starting from the launcher with no instrumentation attached, which
+          # is where a bad registration shows up as a dead process rather than a
+          # failing assertion.
           script: |
             adb install -r /tmp/app/android/app/build/outputs/apk/debug/*.apk
+            (cd /tmp/app/android/app && gradle connectedDebugAndroidTest --no-daemon)
             adb shell am start -n com.kiln.ci_app/.MainActivity
             sleep 15
             adb logcat -d -s Kiln:* || true

@@ -14,9 +14,12 @@ import org.junit.Test;
  * The picker's two translations: a request's {@code kind} into an intent, and
  * the request's extension filters into MIME types.
  *
- * <p>Neither needs a document provider, which the emulator images do not ship,
- * so the parts of the round trip that can be tested without one are tested here.
- * Answering the intent is not: that is the OS's, not the shell's.
+ * <p>Neither launches anything, so both run without a document provider and
+ * without a window. That is the point of the split: this class pins the translation
+ * down where a failure names the mapping, and {@code KilnDialogsDeviceTest} drives
+ * the other half on a device, where the intent is answered for real by whatever
+ * provider is installed. Answering it is not the shell's job and is not claimed
+ * here.
  */
 public class KilnDialogsTest {
     private static JSONArray json(String text) throws Exception {

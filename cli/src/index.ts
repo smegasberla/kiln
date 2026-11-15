@@ -23,7 +23,7 @@ Commands
   dev            run the Bun dev server and launch the shell against it
   build          bundle the frontend and compile the release binary
   package        build, then wrap the binary in a platform installer
-  android build  cross-compile and package an APK
+  android build  cross-compile and package an APK (or AAB with --aab)
   android run    install and launch on a device or emulator
   doctor         check the toolchain and report what is missing
 
@@ -37,7 +37,10 @@ Options
   --icon <path>  package: application icon (256x256 PNG or .icns)
   --identifier   package: reverse-DNS id (default: derived from the app name)
   --package      init: Android package name (default: com.kiln.<app>)
+  --mobile       init: Android shell only, no desktop crate
   --abi          android build: arm64-v8a (default), x86_64, armeabi-v7a
+  --release      android build: signed release APK instead of debug
+  --aab          android build: signed Android App Bundle for Play upload
   --json         doctor: machine-readable output
   -h, --help     show this help
 

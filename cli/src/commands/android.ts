@@ -122,12 +122,30 @@ export async function build(args: Args): Promise<number> {
   copyFileSync(so, join(jni, `lib${lib}.so`));
   console.log(`  staged ${abi}/lib${lib}.so`);
 
-  await run(["gradle", "assembleDebug", "--no-daemon", "-q"], { cwd: join(android, "app") });
+  // `--release` produces a release APK, `--aab` an Android App Bundle for Play.
+  // Both go through the release variant, which the template signs with a real
+  // keystore when one is configured and with the debug key otherwise.
+  const wantAab = boolFlag(args, "aab");
+  const wantRelease = boolFlag(args, "release") || wantAab;
+  const task = wantAab ? "bundleRelease" : wantRelease ? "assembleRelease" : "assembleDebug";
 
-  const apk = findApk(project);
-  if (!apk) throw new Error("Gradle finished but no APK was produced");
-  const mb = (statSync(apk).size / 1048576).toFixed(1);
-  console.log(`\n  ${apk} (${mb} MB)`);
+  await run(["gradle", task, "--no-daemon", "-q"], { cwd: join(android, "app") });
+
+  const produced: string[] = [];
+  const apk = wantAab ? null : findApk(project, wantRelease);
+  if (apk) produced.push(apk);
+  if (wantAab) {
+    const aab = findBundle(project);
+    if (aab) produced.push(aab);
+  }
+  if (produced.length === 0) {
+    throw new Error(`Gradle finished but ${task} produced no artifact`);
+  }
+  console.log("");
+  for (const artifact of produced) {
+    const mb = (statSync(artifact).size / 1048576).toFixed(1);
+    console.log(`  ${artifact} (${mb} MB)`);
+  }
   return 0;
 }
 
@@ -135,7 +153,10 @@ export async function runOnDevice(args: Args): Promise<number> {
   const project = requireProject();
   const adb = adbPath();
 
-  const apk = findApk(project);
+  // Prefer the debug build, but launch a release APK too when that is what was
+  // built last: `kiln android build --release` followed by `run` is the obvious
+  // pairing, and refusing it would be an artificial restriction.
+  const apk = findApk(project) ?? findApk(project, true);
   if (!apk) {
     console.error("kiln: no APK yet; run `kiln android build` first");
     return 1;
@@ -169,20 +190,38 @@ export async function runOnDevice(args: Args): Promise<number> {
 }
 
 /** Locate the built APK without hardcoding the Gradle output layout beyond what
- *  is documented. */
-export function findApk(project: Project): string | null {
-  const base = join(androidDir(project), "app", "build", "outputs", "apk");
+ *  is documented. `release` picks the release variant's directory so a stale
+ *  debug APK from an earlier run cannot be reported as the new artifact. */
+export function findApk(project: Project, release = false): string | null {
+  return newest(
+    join(androidDir(project), "app", "build", "outputs", "apk", release ? "release" : "debug"),
+    ".apk",
+  );
+}
+
+/** The release AAB, the artifact Play Store uploads consume. */
+export function findBundle(project: Project): string | null {
+  return newest(join(androidDir(project), "app", "build", "outputs", "bundle", "release"), ".aab");
+}
+
+/** Newest file with `suffix` under `base`, or null when the directory is absent. */
+function newest(base: string, suffix: string): string | null {
   if (!existsSync(base)) return null;
+  let best: { path: string; mtime: number } | null = null;
   const stack = [base];
   while (stack.length > 0) {
     const dir = stack.pop()!;
     for (const entry of require("node:fs").readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
-      if (entry.isDirectory()) stack.push(full);
-      else if (entry.name.endsWith(".apk")) return full;
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (entry.name.endsWith(suffix)) {
+        const mtime = statSync(full).mtimeMs;
+        if (!best || mtime > best.mtime) best = { path: full, mtime };
+      }
     }
   }
-  return null;
+  return best ? best.path : null;
 }
 
 /** The Android package, read from the generated Gradle file. */

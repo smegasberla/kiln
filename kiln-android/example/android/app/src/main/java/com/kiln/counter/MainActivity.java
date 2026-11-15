@@ -65,6 +65,16 @@ public class MainActivity extends WryActivity {
 
     static native void kilnMenuClicked(String id);
 
+    /**
+     * A lifecycle transition: {@code resume}, {@code pause}, {@code stop}, or
+     * {@code destroy}. The page hears it as {@code kiln.listen("lifecycle", ...)}.
+     *
+     * <p>Reported rather than interpreted here. The shell queues a state that
+     * arrives before the page can run a script, so calling this from any of the
+     * overrides below is safe even before the app has started.
+     */
+    static native void kilnLifecycle(String state);
+
     /** True when the click reached the shell, so a too-early tap can be retried. */
     static native boolean kilnTrayClicked(String id);
 
@@ -98,9 +108,34 @@ public class MainActivity extends WryActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        kilnLifecycle("resume");
         // A notification tap that starts the process arrives here rather than at
         // `onNewIntent`, because this activity was created by it.
         tray.deliverClick();
+    }
+
+    @Override
+    protected void onPause() {
+        // Reported before super: the shell has to know the page is going away
+        // while the activity is still usable, because `super.onPause` is what
+        // lets the OS tear the window down.
+        kilnLifecycle("pause");
+        super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        kilnLifecycle("stop");
+        super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        // A configuration change destroys the activity and recreates it, so
+        // `destroy` is not process death. It is the last moment this instance can
+        // report anything, and the shell queues the state either way.
+        kilnLifecycle("destroy");
+        super.onDestroy();
     }
 
     // Rust -> Java. Every one of these may be called from any thread: the Rust

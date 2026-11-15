@@ -19,6 +19,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -214,28 +215,51 @@ final class KilnDialogs {
     /**
      * Turn a picker result into a path Rust can open.
      *
-     * <p>Only the external storage provider names a real file; anything else (a
-     * cloud provider, a downloaded document) has no filesystem path at all. Those
-     * are copied into the app's own cache directory, so the path that comes back
-     * is one this process may actually read. A folder from such a provider cannot
-     * be copied, so it is reported as a failure rather than answered with a path
-     * that names nothing.
+     * <p>Three things have to be true of the answer, and only the first is obvious:
+     * the URI has to name something, a storage provider's document id often spells
+     * out a filesystem path, and this process has to be able to <em>open</em> it.
+     * The third is the one that bites. Under scoped storage the picker will happily
+     * return {@code primary:Download/report.pdf}, and that path exists, but an app
+     * that has not asked for broad storage access cannot read it. Answering with it
+     * would hand Rust a path that names a real file it may not open, which is worse
+     * than copying, because it fails later and somewhere else.
+     *
+     * <p>So a path is only returned when it can be verified by opening it.
+     * Everything else is copied into this app's own cache, which is always
+     * readable. A folder cannot be verified that way and cannot be copied either,
+     * so a tree that is not readable is reported as a failure rather than answered
+     * with a path that leads nowhere.
      */
     String pathOf(Uri uri, boolean tree) throws IOException {
         if ("file".equals(uri.getScheme())) {
             String path = uri.getPath();
-            if (path != null) {
+            if (path != null && readable(new File(path))) {
                 return path;
             }
         }
         String path = pathForDocument(documentId(uri, tree));
-        if (path != null) {
+        if (path != null && readable(new File(path))) {
             return path;
         }
         if (tree) {
-            throw new IOException("that folder is not on this device's storage");
+            throw new IOException(
+                    "this app may not read " + (path == null ? "that folder" : path)
+                            + "; granting it storage access would, but scoped storage does not"
+                            + " let an app open another app's shared files by path");
         }
         return copyToCache(uri);
+    }
+
+    /** Whether this process can actually open {@code file} for reading. */
+    private static boolean readable(File file) {
+        // Opening, not {@code canRead()}: the latter reports the permission bit and
+        // ignores the SELinux and scoped-storage rules that are what refuse the
+        // open. A stream that closes again immediately is the only real answer.
+        try (InputStream probe = new FileInputStream(file)) {
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     private static String documentId(Uri uri, boolean tree) {

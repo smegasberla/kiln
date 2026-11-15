@@ -27,6 +27,16 @@ fn main() -> Result<(), Error> {
             std::thread::sleep(std::time::Duration::from_millis(ms));
             Ok(json!({ "slept_ms": ms }))
         })
+        // Same name and shape as the Android crate's: `kiln android build` checks
+        // the two command lists agree, and a page shared between them calls it.
+        .command("note", |_app, payload: Value| {
+            let message = payload
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            println!("page note: {message}");
+            Ok(Value::Null)
+        })
         // Multi-window: open a second window with its own label.
         .command("open_settings", |app: &AppHandle, _payload| {
             app.open_window(WindowOptions {

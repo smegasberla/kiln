@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { diffCommands, registeredCommands } from "./parity.ts";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { checkParity, diffCommands, registeredCommands } from "./parity.ts";
 
 const source = `
   App::new()
@@ -44,5 +47,53 @@ describe("diffCommands", () => {
     const diff = diffCommands(["a", "b"], ["b", "a"]);
     expect(diff.onlyDesktop).toEqual([]);
     expect(diff.onlyAndroid).toEqual([]);
+  });
+});
+
+/** A throwaway project tree, so these cases touch no real app. */
+function scaffold(files: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), "kiln-parity-"));
+  for (const [path, contents] of Object.entries(files)) {
+    const full = join(root, path);
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, contents);
+  }
+  return root;
+}
+
+describe("checkParity", () => {
+  test("a mobile-only project has nothing to compare", () => {
+    // `kiln init --mobile` writes no desktop crate. Reporting a missing
+    // `native/src/main.rs` would fail every `kiln android build` in that shape.
+    const root = scaffold({
+      "android/src/lib.rs": `.command("greet", |_a, p| Ok(p))`,
+    });
+    const result = checkParity(root);
+    expect(result.ok).toBe(true);
+    expect(result.message).toBe("mobile only; skipping parity");
+  });
+
+  test("a mobile-only project with no android crate is still an error", () => {
+    // Neither shell exists: the tree is not a Kiln project at all.
+    const root = scaffold({ "kiln.json": "{}" });
+    expect(checkParity(root).ok).toBe(false);
+  });
+
+  test("two crates that disagree are reported", () => {
+    const root = scaffold({
+      "native/src/main.rs": `.command("greet", |_a, p| Ok(p))`,
+      "android/src/lib.rs": `.command("wave", |_a, p| Ok(p))`,
+    });
+    const result = checkParity(root);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("greet");
+    expect(result.message).toContain("wave");
+  });
+
+  test("a desktop-only project passes", () => {
+    const root = scaffold({ "native/src/main.rs": `.command("greet", |_a, p| Ok(p))` });
+    const result = checkParity(root);
+    expect(result.ok).toBe(true);
+    expect(result.message).toContain("no android crate");
   });
 });

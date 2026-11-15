@@ -28,7 +28,9 @@ are cargo features, so a minimal app links none of them:
 | `full` | all but `tray` | menu + dialogs + updater + devtools |
 
 `kiln init` scaffolds with `full`. Building with no features gives the 785 KB
-minimal shell; with `full` it is ~2.4 MB.
+minimal shell; with `full` it is ~2.4 MB. An app that calls `.tray(...)` adds
+`"tray"` to that list itself. The Android example in this repo does exactly
+that, because its tray is what proves the notification path on a device.
 
 ## What gets shipped
 
@@ -298,16 +300,33 @@ protocol: `WebResourceRequest` carries no body, so wry would deliver every paylo
 as `null`. Android therefore uses wry's IPC handler and resolves the page's promise
 from Rust. The envelope, registry, allowlist and security policy are shared through
 a transport seam, so app code is identical. The `android` job in
-`.github/workflows/ci.yml` installs the APK on an emulator and asserts the webview
-attached, a command round-tripped into Rust, and the process did not crash.
+`.github/workflows/ci.yml` runs the instrumentation suite on an emulator, then
+launches the app with no instrumentation attached and fails on a `FATAL
+EXCEPTION` or an `UnsatisfiedLinkError`.
 
 The activity template is split by concern rather than kept as one file:
 `MainActivity` holds the natives and the lifecycle, `KilnDialogs` the file picker
 and its URI-to-path resolution, `KilnMenu` the `PopupMenu` build and click
-dispatch, `KilnTray` the notification, `KilnHttp` the blocking `GET`. That split
-is what makes the picker and the menu testable: `KilnDialogsTest` and
-`KilnMenuTest` are instrumentation tests `kiln init` scaffolds alongside the app,
-so a broken MIME mapping or a wrong menu id fails a test instead of a tap.
+dispatch, `KilnTray` the notification, `KilnHttp` the blocking `GET`.
+
+`kiln init` scaffolds instrumentation tests in two layers, because the two answer
+different questions. `KilnMenuTest` and `KilnDialogsTest` assert pure data
+translation — a menu id round-tripping, an intent being built, extensions mapping
+to MIME types — which needs no window and no provider. `KilnDialogsDeviceTest`,
+`KilnTrayDeviceTest` and `KilnHttpDeviceTest` drive the real round trips: the
+system picker answering with a `content://` URI that must become a path, a
+notification that appears only when `POST_NOTIFICATIONS` is held, and a TLS
+request through the system trust store with `update.check` on top of it. The
+second layer is where "it compiles and the symbol resolves" stops being a claim
+about working software.
+
+`KilnDeviceSupport` is their shared plumbing rather than a test: the shell starts
+its Rust event loop from `ProcessLifecycleOwner`, which runs once per process, so
+a second `ActivityScenario.launch` gets an activity whose WebView has no page. The
+device tests therefore share one activity, launch it after granting the
+notification permission (an OS prompt in front of the app pauses the WebView, so a
+page that was not yet loaded never finishes loading), and drive system UI through
+the `UiAutomation` instrumentation already owns instead of adding UiAutomator.
 
 iOS is not supported.
 

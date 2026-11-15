@@ -45,6 +45,25 @@ fn android_main() {
                 std::thread::sleep(std::time::Duration::from_millis(ms));
                 Ok(json!({ "slept_ms": ms }))
             })
+            // The page's way of putting a line where a device can see it. The
+            // shell's own `kiln.listen("lifecycle", ...)` proof needs somewhere
+            // to land, and logcat is the only surface an emulator exposes.
+            .command("note", |_app, payload: Value| {
+                let message = payload
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                kiln_android::log(&format!("page note: {message}"));
+                Ok(Value::Null)
+            })
+            // The tray, which on Android is one notification: the title is the
+            // tooltip and each item becomes an action button. Posted at startup so
+            // opening the app is what proves the notification path, rather than a
+            // button nobody taps.
+            .tray(
+                kiln::tray::TrayConfig::new("Counter")
+                    .item(kiln::tray::TrayItem::new("note", "Write a note")),
+            )
             // Android is one window by design, so this reports why rather than
             // silently doing nothing: a second window has nowhere to go.
             .command("open_settings", |_app: &AppHandle, _payload| {
@@ -110,6 +129,24 @@ pub extern "C" fn Java_com_kiln_counter_MainActivity_kilnMenuClicked(
 ) {
     if let Some(id) = text_of(&mut env, &id) {
         kiln::menu_clicked(&id);
+    }
+}
+
+/// A lifecycle transition the activity reported: `resume`, `pause`, `stop`, or
+/// `destroy`.
+///
+/// Queued rather than answered, and never dropped. tao starts the event loop on
+/// its own thread, so the first `resume` arrives before `App::run` has published
+/// a handle and before the page can run a script; `kiln::lifecycle` keeps the
+/// states until the page has loaded.
+#[no_mangle]
+pub extern "C" fn Java_com_kiln_counter_MainActivity_kilnLifecycle(
+    mut env: jni::JNIEnv,
+    _class: jni::objects::JClass,
+    state: jni::objects::JString,
+) {
+    if let Some(state) = text_of(&mut env, &state) {
+        kiln::lifecycle(&state);
     }
 }
 

@@ -47,4 +47,13 @@ if (window.kiln.platform === "android" || window.kiln.platform === "ios") {
 // Menu clicks arrive as events, so a native menu needs no extra wiring here.
 window.kiln.listen<{ id: string }>("menu", (event) => show(`menu: ${event.id}`));
 
+// Lifecycle is reported, not interpreted: a web page has no state machine to
+// run, but knowing it was paused is what tells it to stop a timer. On Android
+// this is the only signal that the activity left the foreground; on desktop the
+// same event fires for a window that loses or regains focus.
+window.kiln.listen<{ state: string }>("lifecycle", ({ state }) => {
+  if (state === "resume") return;
+  show(`lifecycle: ${state}`);
+});
+
 form.requestSubmit();

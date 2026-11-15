@@ -66,7 +66,7 @@ pub use assets::{content_type, lookup, AssetTable};
 pub use config::Config;
 pub use error::Error;
 pub use ipc::Registry;
-pub use platform::{data_dir, menu_clicked, runtime, tray_clicked};
+pub use platform::{data_dir, lifecycle, menu_clicked, runtime, tray_clicked};
 /// Android only: the outer crate has to hand the activity in when the OS
 /// creates one, because everything that starts an intent lives on it, and to
 /// hand back the answer when the picker it started returns.
@@ -660,11 +660,19 @@ fn build_factory(
                 let handle = handle.clone();
                 builder.with_on_page_load_handler(move |event, _url| {
                     if matches!(event, wry::PageLoadEvent::Finished) {
+                        platform::page_loaded();
                         ready(&handle);
                     }
                 })
             }
-            None => builder,
+            // Without a ready hook the handler still has work: a lifecycle state
+            // reported before the page could run a script is queued, and this is
+            // the moment it can be delivered.
+            None => builder.with_on_page_load_handler(|event, _url| {
+                if matches!(event, wry::PageLoadEvent::Finished) {
+                    platform::page_loaded();
+                }
+            }),
         }
     })
 }
