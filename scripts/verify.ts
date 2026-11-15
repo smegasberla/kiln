@@ -8,7 +8,7 @@
  *  Run: bun scripts/verify.ts
  */
 
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -180,18 +180,29 @@ async function main() {
   // 2. Embedded-asset path: the framework example boots, round-trips a command
   //    over kiln://, and receives a Rust -> JS event. It exits 0 only when both
   //    arrive, so the exit code is the assertion.
+  //
+  //    Built here rather than assumed: the verifier has to work from a clean
+  //    checkout (CI has no prior build), and the baseline binary is needed too.
   {
-    const { out, err, code } = await shWithTimeout(
-      [join(repo, "target", "release", "examples", "hello")],
+    const build = await sh(
+      ["cargo", "build", "--release", "-p", "kiln", "--example", "hello"],
       repo,
-      { KILN_SELFTEST: "1" },
-      30_000,
     );
-    record(
-      "embedded round-trip + emit",
-      code === 0 && out.includes("SELFTEST OK"),
-      code === 0 ? out.trim().split("\n").pop()! : err.slice(-120),
-    );
+    if (build.code !== 0) {
+      record("embedded round-trip + emit", false, build.err.slice(-160));
+    } else {
+      const { out, err, code } = await shWithTimeout(
+        [join(repo, "target", "release", "examples", "hello")],
+        repo,
+        { KILN_SELFTEST: "1" },
+        30_000,
+      );
+      record(
+        "embedded round-trip + emit",
+        code === 0 && out.includes("SELFTEST OK"),
+        code === 0 ? out.trim().split("\n").pop()! : err.slice(-120),
+      );
+    }
   }
 
   // 3. Scaffold a fresh app with the CLI and build it with the CLI.
@@ -339,6 +350,16 @@ async function main() {
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
+
+  // Each run builds a full cargo tree in the scratch directory. Left behind,
+  // a handful of runs fills a small tmpfs and later runs fail for reasons that
+  // look like build errors, so remove it unless asked to keep it.
+  if (!process.env.KILN_KEEP_SCRATCH) {
+    rmSync(work, { recursive: true, force: true });
+  } else {
+    console.log(`scratch kept: ${work}`);
+  }
+
   process.exit(failed.length === 0 ? 0 : 1);
 }
 

@@ -39,6 +39,22 @@ export function ensureToolchain(): void {
       throw new Error(`\`${bin}\` is not on PATH; install it first`);
     }
   }
+  ensureDiskSpace();
+}
+
+/** A Rust build needs a few hundred megabytes; running out mid-compile produces
+ *  "could not compile <random crate>" errors that look like code problems. */
+export function ensureDiskSpace(needMb = 1500): void {
+  const free = Bun.spawnSync(["df", "-Pm", "/"]);
+  if (free.exitCode !== 0) return;
+  const line = free.stdout.toString().trim().split("\n")[1] ?? "";
+  const available = Number(line.split(/\s+/)[3]);
+  if (Number.isFinite(available) && available < needMb) {
+    throw new Error(
+      `only ${available} MB free where the build runs, need about ${needMb} MB.\n` +
+        `Free space, or point CARGO_TARGET_DIR at a larger volume.`,
+    );
+  }
 }
 
 export function project(): Project {
