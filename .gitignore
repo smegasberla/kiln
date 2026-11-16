@@ -17,3 +17,6 @@ kiln-android/example/app/.gradle/
 kiln-android/example/app/src/main/java/com/kiln/example/*.kt
 kiln-android/example/app/src/main/java/com/kiln/example/proguard-wry.pro
 kiln-android/example/app/src/main/jniLibs/
+
+# Kotlin compiler scratch space, written on every Android build
+**/.kotlin

@@ -112,8 +112,16 @@ impl MenuHandle {
         {
             use tao::platform::unix::WindowExtUnix;
 
+            // The menu goes into the window's own vertical box, not the bare
+            // `GtkWindow`. `init_for_gtk_window(window, None)` hands muda the window
+            // itself, and GTK permits one child per `GtkBin`: tao has already put a
+            // box there for the webview, so the bar is refused with "attempting to
+            // add a widget with type GtkMenuBar to a GtkApplicationWindow" and the
+            // window never maps. Passing the box is what makes the bar a sibling of
+            // the webview instead of a second child of the window.
+            let container = window.default_vbox();
             self.menu
-                .init_for_gtk_window(window.gtk_window(), None::<&gtk::Box>)
+                .init_for_gtk_window(window.gtk_window(), container)
                 .map_err(|e| e.to_string())?;
         }
         #[cfg(target_os = "windows")]

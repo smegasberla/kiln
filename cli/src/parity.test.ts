@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkParity, diffCommands, registeredCommands } from "./parity.ts";
+import { checkParity, diffCommands, effectiveCommands, registeredCommands } from "./parity.ts";
 
 const source = `
   App::new()
@@ -95,5 +95,49 @@ describe("checkParity", () => {
     const result = checkParity(root);
     expect(result.ok).toBe(true);
     expect(result.message).toContain("no android crate");
+  });
+});
+
+describe("effectiveCommands", () => {
+  test("a shared command file is followed instead of reporting nothing", () => {
+    // An app that puts one command list in a file both shells include has no
+    // list of its own to compare, so reading only the crate root would report
+    // zero commands on both sides and pass without checking anything.
+    const root = scaffold({
+      "shared/commands.rs": `.command("greet", |_a, p| Ok(p))`,
+      "native/src/main.rs": `#[path = "../../shared/commands.rs"] mod commands;`,
+    });
+    expect(effectiveCommands(`#[path = "../../shared/commands.rs"] mod commands;`, join(root, "native/src"))).toEqual([
+      "greet",
+    ]);
+  });
+
+  test("an include! is followed too", () => {
+    const root = scaffold({
+      "shared/commands.rs": `.command("wave", |_a, p| Ok(p))`,
+      "native/src/main.rs": `include!("../../shared/commands.rs");`,
+    });
+    expect(effectiveCommands(`include!("../../shared/commands.rs");`, join(root, "native/src"))).toEqual([
+      "wave",
+    ]);
+  });
+
+  test("a missing include is ignored rather than fatal", () => {
+    // A crate that is mid-edit should report no commands, not crash the build.
+    const root = scaffold({ "native/src/main.rs": "fn main() {}" });
+    expect(effectiveCommands(`include!("../nope.rs");`, join(root, "native/src"))).toEqual([]);
+  });
+});
+
+describe("mod declarations", () => {
+  test("a plain `mod app;` beside the crate root is followed", () => {
+    // The ordinary way to share one command list, and the one that matters most:
+    // without it a shared list reports zero commands and passes vacuously.
+    const root = scaffold({
+      "native/src/app.rs": `.command("share", |_a, p| Ok(p))`,
+      "native/src/main.rs": `mod app;\nmod assets;\nfn main() { app::build() }`,
+    });
+    const source = readFileSync(join(root, "native/src/main.rs"), "utf8");
+    expect(effectiveCommands(source, join(root, "native/src"))).toEqual(["share"]);
   });
 });

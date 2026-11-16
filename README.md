@@ -374,6 +374,9 @@ cli/                 Bun CLI (dev tooling only)
   src/icon.ts        PNG encoder and default icon (no image dependency)
 .github/workflows/   CI (3 platforms) and release (packaging + optional signing)
 examples/counter/    a real CLI-scaffolded app, kept in-tree and buildable
+examples/scratch/    a notebook app for both platforms: one shared command list,
+                     per-note markdown files, menu bar on desktop, PopupMenu and
+                     drawer on Android
 scripts/verify.ts    13 end-to-end checks (the acceptance gates)
 scripts/bench.ts     cold-start comparison against the baseline
 ```

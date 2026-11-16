@@ -1,0 +1,9 @@
+{
+  "name": "Scratch",
+  "width": 1080,
+  "height": 720,
+  "update": {
+    "url": "https://example.com/releases.json"
+  },
+  "title": "Scratch"
+}

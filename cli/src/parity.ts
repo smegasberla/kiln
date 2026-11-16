@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 /** Names registered with `.command("x", ..)` or `.async_command("x", ..)`.
  *
@@ -43,6 +43,50 @@ export function diffCommands(
   };
 }
 
+/** Files a crate pulls in with `#[path = ".."] mod x;` or `include!("..")`.
+ *
+ *  An app that shares one command list between its two shells has no list of its
+ *  own to drift, and reading only the crate root would report "0 commands on both
+ *  platforms" for it: true, but useless. Following the include is what makes the
+ *  count mean something there. */
+export function includedFiles(source: string, crateDir: string): string[] {
+  const stripped = stripComments(source);
+  const found: string[] = [];
+  const patterns = [
+    /#\[path\s*=\s*"([^"]+)"\]\s*(?:pub\s+)?mod\s+\w+\s*;/g,
+    /include!\s*\(\s*"([^"]+)"\s*\)/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of stripped.matchAll(pattern)) {
+      found.push(resolve(crateDir, match[1]!));
+    }
+  }
+  // A plain `mod app;` is the same sharing, done the ordinary way: the module is
+  // `app.rs` or `app/mod.rs` beside the file that declares it.
+  for (const match of stripped.matchAll(/^\s*(?:pub\s+)?mod\s+(\w+)\s*;/gm)) {
+    const name = match[1]!;
+    for (const candidate of [`${name}.rs`, `${name}/mod.rs`]) {
+      const path = resolve(crateDir, candidate);
+      if (existsSync(path)) {
+        found.push(path);
+        break;
+      }
+    }
+  }
+  return found;
+}
+
+/** Every command a crate registers, following one level of shared includes. */
+export function effectiveCommands(source: string, crateDir: string): string[] {
+  const names = new Set(registeredCommands(source));
+  for (const file of includedFiles(source, crateDir)) {
+    if (existsSync(file)) {
+      for (const name of registeredCommands(readFileSync(file, "utf8"))) names.add(name);
+    }
+  }
+  return [...names].sort();
+}
+
 /** Read both crates and report the difference, ignoring a missing Android crate. */
 export function checkParity(root: string): { ok: boolean; message: string } {
   const desktopFile = join(root, "native", "src", "main.rs");
@@ -61,8 +105,14 @@ export function checkParity(root: string): { ok: boolean; message: string } {
     return { ok: true, message: "no android crate; skipping parity" };
   }
 
-  const desktop = registeredCommands(readFileSync(desktopFile, "utf8"));
-  const android = registeredCommands(readFileSync(androidFile, "utf8"));
+  const desktop = effectiveCommands(
+    readFileSync(desktopFile, "utf8"),
+    join(root, "native", "src"),
+  );
+  const android = effectiveCommands(
+    readFileSync(androidFile, "utf8"),
+    join(root, "android", "src"),
+  );
   const { onlyDesktop, onlyAndroid } = diffCommands(desktop, android);
 
   if (onlyDesktop.length === 0 && onlyAndroid.length === 0) {
