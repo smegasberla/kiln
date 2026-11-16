@@ -401,6 +401,21 @@ impl App {
         self
     }
 
+    /// Install an application sink that receives every crash and error record,
+    /// in addition to the in-memory buffer and the optional log file.
+    ///
+    /// This is the seam for crash telemetry without forking the shell: the
+    /// framework still uploads nothing by itself, an app forwards records to
+    /// its own collector here. Called from the panic hook, so the sink must not
+    /// panic and must not block for long.
+    pub fn report_sink<F>(self, sink: F) -> Self
+    where
+        F: Fn(&str) + Send + Sync + 'static,
+    {
+        reporting::set_reporter(sink);
+        self
+    }
+
     /// Keep devtools available in release builds, bound to F12 / Cmd-Alt-I.
     pub fn devtools(mut self, enabled: bool) -> Self {
         self.want_devtools = enabled;

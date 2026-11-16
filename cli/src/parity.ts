@@ -22,6 +22,30 @@ export function registeredCommands(source: string): string[] {
   return [...names].sort();
 }
 
+/** Registrations whose name this parser cannot read.
+ *
+ *  `registeredCommands` matches a bare string literal, so a name assembled at
+ *  runtime (`concat!`, a const array walked in a loop, a variable) is invisible to
+ *  it. That is worse than a mismatch: the command exists, parity is unverified for
+ *  it, and nothing says so. Counting them turns silence into a line to read.
+ *
+ *  KNOWN LIMITATIONS — this is a regex over source text, not a parser:
+ *  - dynamic names are counted here and never resolved, so two shells can still
+ *    disagree about them while parity passes;
+ *  - a string literal that contains `.command("x"` is reported as a registration;
+ *  - `include!` and `mod` are followed exactly one level deep.
+ *  A pass therefore means "no statically visible mismatch", never "parity". */
+export function unreadableRegistrations(source: string): string[] {
+  const stripped = stripComments(source);
+  const calls = /\.(?:async_)?command\s*\(\s*([^,)\n]*)/g;
+  const names: string[] = [];
+  for (const match of stripped.matchAll(calls)) {
+    const argument = match[1]!.trim();
+    if (!/^"[^"]+"$/.test(argument)) names.push(argument || "<empty>");
+  }
+  return names;
+}
+
 /** Remove `//` and block comments without disturbing string literals enough to
  *  matter here: command names never contain `//` or `/*`. */
 function stripComments(source: string): string {
@@ -114,9 +138,13 @@ export function checkParity(root: string): { ok: boolean; message: string } {
     join(root, "android", "src"),
   );
   const { onlyDesktop, onlyAndroid } = diffCommands(desktop, android);
+  const unreadable =
+    unreadableRegistrations(readFileSync(desktopFile, "utf8")).length +
+    unreadableRegistrations(readFileSync(androidFile, "utf8")).length;
+  const caveat = unreadable > 0 ? ` (${unreadable} registration(s) not statically readable)` : "";
 
   if (onlyDesktop.length === 0 && onlyAndroid.length === 0) {
-    return { ok: true, message: `${desktop.length} commands on both platforms` };
+    return { ok: true, message: `${desktop.length} commands on both platforms${caveat}` };
   }
 
   const parts = [
@@ -124,5 +152,5 @@ export function checkParity(root: string): { ok: boolean; message: string } {
     onlyAndroid.length ? `android only: ${onlyAndroid.join(", ")}` : "",
   ].filter(Boolean);
 
-  return { ok: false, message: parts.join("; ") };
+  return { ok: false, message: `${parts.join("; ")}${caveat}` };
 }

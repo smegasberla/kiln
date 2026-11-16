@@ -210,3 +210,27 @@ them:
 4. Finding 3 — a design decision; decide whether per-window allowlisting is in scope before
    writing code.
 5. Findings 5 and 7 — documentation-level, cheap, and prevent future confusion.
+
+---
+
+## Fix status
+
+Status as of the fix pass that followed this review. Findings 1–5 and 7 are
+addressed; finding 3 remains a design decision, deliberately not coded yet.
+
+| # | Severity | Status | Where |
+| --- | --- | --- | --- |
+| 1 | HIGH | **fixed** — `unsafe-inline` promoted to a documented first-class Android exception with compensating controls and a guard test (`android_policy_documents_its_inline_exception`, which asserts the exact Android release policy on Android and no-ops elsewhere); the contradicting module comment corrected | `kiln/src/security.rs` |
+| 2 | MEDIUM-HIGH | **fixed in CI** — Windows and macOS jobs now run `bun scripts/verify.ts`; the harness gained a `win32` `.exe` suffix, a loud Linux-only skip for the `ldd` composition check, and per-platform skip reporting | `scripts/verify.ts`, `.github/workflows/ci.yml` |
+| 3 | MEDIUM | **open (design decision)** — per-window allowlisting needs a scope decision before code; unchanged | `kiln/src/config.rs`, `kiln/src/ipc.rs` |
+| 4 | MEDIUM | **fixed** — `reporting::set_reporter` installs an application sink that receives every record, so telemetry no longer requires forking the module; philosophy (nothing phones home by default) unchanged | `kiln/src/reporting.rs` |
+| 5 | LOW-MEDIUM | **fixed** — `unreadableRegistrations()` surfaces dynamic-name registrations in the parity result message, and the parser's known limitations are documented in-file | `cli/src/parity.ts` |
+| 6 | LOW | **fixed** — the crash log rotates at 512 KiB to `<name>.old` (the previous file survives); tested by `the_log_file_stays_bounded`, which drives more entries than the cap and asserts the bound and the rotation | `kiln/src/reporting.rs` |
+| 7 | LOW | **fixed** — `CHANGELOG.md` added (Keep a Changelog), README gained a "Compatibility policy" section naming what is and is not breaking | `CHANGELOG.md`, `README.md` |
+
+Caveats kept honest: the Android CSP exception is documented but the underlying
+wry/WebView behaviour was not re-measured on a device in this pass — the comment
+in `security.rs` says exactly that and names the check that must precede any
+tightening. Finding 2's fix is CI-only and proves itself the first time the
+Windows and macOS jobs run; until then the e2e guarantee remains demonstrated on
+Linux.

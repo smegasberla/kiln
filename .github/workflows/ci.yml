@@ -94,6 +94,13 @@ jobs:
       - name: Build the minimal shell
         run: cargo build -p kiln --examples
 
+      # The security guarantees — panic containment, remote-script blocking,
+      # navigation lockdown — are per-webview-engine facts, and Windows ships
+      # WebView2, not WebKitGTK. Run the same harness here so the policy is
+      # proven on the engine users actually get, or fails loudly here.
+      - name: End-to-end verification
+        run: bun scripts/verify.ts
+
   freebsd:
     name: FreeBSD (build, test)
     runs-on: ubuntu-latest
@@ -224,3 +231,9 @@ jobs:
 
       - name: Build the minimal shell
         run: cargo build -p kiln --examples
+
+      # Same harness as Linux and Windows: WKWebView honours custom-protocol
+      # headers and the navigation veto differently from WebKitGTK, so the
+      # guarantees must be asserted on this engine too.
+      - name: End-to-end verification
+        run: bun scripts/verify.ts

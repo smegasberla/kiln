@@ -45,13 +45,26 @@ pub fn navigation_allowed(url: &str, dev_origin: Option<&str>) -> bool {
 ///
 /// In dev the policy is relaxed: Bun's HMR client uses inline scripts and an
 /// eval-based module loader, and `ws:` for the reload channel. That relaxation
-/// is scoped to the dev origin, never to a shipped app.
+/// is scoped to the dev origin, never to a shipped app. The one shipped
+/// relaxation is Android, documented on its branch below as a first-class
+/// exception with its compensating controls.
 fn csp(dev: bool) -> &'static str {
     if cfg!(target_os = "android") {
-        // Android has no custom-scheme interception: wry serves the app from
-        // http://kiln.localhost, so `invoke` is a same-origin http request.
-        // `connect-src 'self'` covers it, and nothing else is allowed.
-        return "default-src 'self'; \
+        // ANDROID EXCEPTION — the one place the shipped policy allows inline
+        // scripts, and the comment/behaviour contract for it. On Android wry has
+        // no custom-scheme interception, so the page is served from
+        // http://kiln.localhost and `invoke` is a same-origin http request
+        // (`connect-src 'self'` covers it). Whether the bridge shim survives
+        // dropping 'unsafe-inline' depends on how wry injects its
+        // initialization script relative to the page CSP, and that has not been
+        // re-verified on a device for this policy — do not tighten this branch
+        // without running the android emulator check (`verify-android.sh`)
+        // against a probe that calls a command. Compensating controls: the
+        // origin lockdown (only http://kiln.localhost passes
+        // `navigation_allowed`) and the shim's foreign-document teardown. The
+        // residual risk is that XSS in the app's own page can call the commands
+        // the allowlist kept; it cannot reach network origins.
+        "default-src 'self'; \
          script-src 'self' 'unsafe-inline'; \
          style-src 'self' 'unsafe-inline'; \
          img-src 'self' data: blob:; \
@@ -59,9 +72,11 @@ fn csp(dev: bool) -> &'static str {
          connect-src 'self'; \
          object-src 'none'; \
          base-uri 'none'; \
-         form-action 'none'";
-    }
-    if dev {
+         form-action 'none'"
+    } else if dev {
+        // Dev-only relaxation, scoped to the dev origin and never shipped: Bun's
+        // HMR client uses inline scripts and an eval-based module loader, and
+        // `ws:` carries the reload channel.
         "default-src 'self'; \
          script-src 'self' 'unsafe-inline' 'unsafe-eval' kiln:; \
          style-src 'self' 'unsafe-inline'; \
@@ -157,6 +172,20 @@ mod tests {
         assert!(!policy.contains("'unsafe-eval'"));
         assert!(policy.contains("object-src 'none'"));
         assert!(policy.contains("frame-ancestors 'none'"));
+    }
+
+    #[test]
+    fn android_policy_documents_its_inline_exception() {
+        if !cfg!(target_os = "android") {
+            // The branch is compile-time, so this assertion can only hold on
+            // Android — where the CI emulator job compiles and runs it.
+            return;
+        }
+        let policy = content_security_policy(false);
+        assert!(policy.contains("script-src 'self' 'unsafe-inline'"));
+        assert!(policy.contains("connect-src 'self'"));
+        assert!(policy.contains("object-src 'none'"));
+        assert!(policy.contains("base-uri 'none'"));
     }
 
     #[test]

@@ -336,6 +336,16 @@ builds and tests both natively on GitHub runners. Treat "compiles" and "runs"
 as different claims: the runtime behaviour on Windows and macOS has not been
 exercised by hand yet.
 
+## Compatibility policy
+
+The crate is 0.x, so [Cargo's 0.x rules](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html) already allow any minor bump to break. What this project promises on top of that:
+
+**Breaking changes** (require a major-ish 0.x bump and a CHANGELOG entry under a `###` heading): command names and the IPC envelope `{"ok"|"error"}`; the `App`/`AppHandle` public signatures; the `kiln.json` schema; the `window.kiln` shim surface (`invoke`, `listen`, and their argument shapes); the meaning of an existing cargo feature.
+
+**Not breaking**: internal module layout; new opt-in features, built-in commands, or `kiln.json` keys (additive); patch bumps, which add no API change.
+
+Every user-visible change is recorded in `CHANGELOG.md` (Keep a Changelog format), so the question "is this upgrade safe for my app?" is answerable from the changelog plus the lists above.
+
 ## Install / use
 
 Requires Rust, Bun, and the platform webview (Linux: `webkit2gtk-4.1`).

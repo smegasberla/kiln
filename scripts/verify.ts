@@ -14,6 +14,8 @@ import { join, resolve } from "node:path";
 
 const repo = resolve(import.meta.dir, "..");
 const cli = join(repo, "cli", "src", "index.ts");
+// Windows suffixes cargo binaries with .exe; every spawned path below needs it.
+const EXE = process.platform === "win32" ? ".exe" : "";
 const results: { name: string; ok: boolean; detail: string }[] = [];
 
 function record(name: string, ok: boolean, detail: string) {
@@ -192,7 +194,7 @@ async function main() {
       record("embedded round-trip + emit", false, build.err.slice(-160));
     } else {
       const { out, err, code } = await shWithTimeout(
-        [join(repo, "target", "release", "examples", "hello")],
+        [join(repo, "target", "release", "examples", `hello${EXE}`)],
         repo,
         { KILN_SELFTEST: "1" },
         30_000,
@@ -226,7 +228,7 @@ async function main() {
     );
   }
 
-  const binary = join(app, "native", "target", "release", "app");
+  const binary = join(app, "native", "target", "release", `app${EXE}`);
 
   // A failed build used to crash here with ENOENT, hiding the compiler error
   // that caused it. Report the remaining checks as failures and move on.
@@ -252,14 +254,21 @@ async function main() {
     record("no JS runtime embedded", found.length === 0, found.join(",") || "clean");
   }
   {
-    const { out } = await sh(["ldd", binary]);
-    const node = /libnode|libv8/.test(out);
-    const webkit = /libwebkit2gtk/.test(out);
-    record(
-      "links OS webview only",
-      !node && (process.platform !== "linux" || webkit),
-      node ? "links libnode/libv8" : "webkit2gtk present, no node/v8",
-    );
+    // ldd does not exist off Linux (macOS has otool, Windows has dumpbin), so
+    // the dynamic-link composition check is a Linux assertion. Skip loudly on
+    // the other platforms rather than pretend the guarantee was tested there.
+    if (process.platform !== "linux") {
+      record("links OS webview only", true, `skipped: not Linux (${process.platform})`);
+    } else {
+      const { out } = await sh(["ldd", binary]);
+      const node = /libnode|libv8/.test(out);
+      const webkit = /libwebkit2gtk/.test(out);
+      record(
+        "links OS webview only",
+        !node && webkit,
+        node ? "links libnode/libv8" : "webkit2gtk present, no node/v8",
+      );
+    }
   }
 
   // 5. The scaffolded binary opens a window with its embedded page and stays
@@ -318,7 +327,7 @@ async function main() {
   //    IPC path. The harness page reports over IPC so no human has to look.
   {
     // Built once, then reused for the hostile-page probe.
-    const probeBin = join(repo, "target", "debug", "kiln-probe");
+    const probeBin = join(repo, "target", "debug", `kiln-probe${EXE}`);
     const build = await sh(["cargo", "build", "-p", "kiln-probe"], repo);
     const reported = build.code === 0 ? await probeGuarantees(probeBin, repo, 5202) : null;
     const parsed = reported ? JSON.parse(reported) : null;
