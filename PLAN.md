@@ -328,7 +328,8 @@ iOS is a further step on top: no JNI, an Xcode project, `WKWebView` inside a
 
 **Done when:** `kiln init --mobile` produces a project that installs and runs on
 an emulator, round-trips a command, survives a rotate, and `kiln build` emits a
-signed-debuggable AAB.
+signed-debuggable AAB. All four hold: a fresh `--mobile` scaffold builds, installs,
+and passes the same 17 instrumentation tests the example does.
 
 **Not promised:** a working iOS build before Android is done. Claiming iOS
 support without a Mac and a device is exactly the mistake this project already
@@ -357,6 +358,12 @@ which is why the call returning true proves nothing) and with it, checking that 
 tooltip became the title and the items became the actions. HTTP is asserted through
 the system trust store, including `update.check` end to end, so the `ureq`/rustls
 replacement on Android is exercised rather than merely compiled.
+
+A release APK and a Play-ready `.aab` are built by `kiln android build --release`
+and `--aab`, signed with `keystore.properties` or the `KILN_KEYSTORE*` environment
+variables when one is configured and with the debug key otherwise. The `.aab`
+assertion in CI is that the task and the signing config both work; Play refuses a
+debug-signed bundle, which is the correct place for that refusal to happen.
 
 `KilnDeviceSupport` holds what those share. Two things in it are there because
 they were learned the hard way. The tests share one activity: the shell starts its

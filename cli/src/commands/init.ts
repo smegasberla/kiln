@@ -130,7 +130,13 @@ export function init(args: Args): number {
   write(`${androidTest}/KilnDeviceSupport.java`, fill(androidDeviceSupport));
   write(`${androidTest}/KilnDeviceTest.java`, fill(androidDeviceTest));
 
-  const next = ["", "Next:", `  cd ${args.positionals[0] ?? "."}`];
+  // `cd .` is what an in-place scaffold would otherwise print, which is not an
+  // instruction. Left out when the project was written into the current directory.
+  const target = args.positionals[0] ?? ".";
+  const next = ["", "Next:"];
+  if (target !== ".") {
+    next.push(`  cd ${target}`);
+  }
   if (!mobile) {
     next.push("  kiln dev              # desktop, with hot reload");
     next.push("  kiln build --size     # desktop release binary");

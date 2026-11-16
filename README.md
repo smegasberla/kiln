@@ -231,7 +231,7 @@ to keep it, and leaving it out removes it.
 | Multi-window, tray, menus, updater | supported | supported, as opt-in features |
 | Crash reporting | plugin / sentry | panic hook + local ring buffer, no upload |
 | Panic in a command | aborts the app by default | contained, reported to the page as an error |
-| Mobile | supported | not present |
+| Mobile | supported | Android: supported. iOS: absent |
 
 The tradeoff is deliberate: Tauri is a full application platform, Kiln is the
 core shell with nothing speculative bolted on. What was cut, and what would bring

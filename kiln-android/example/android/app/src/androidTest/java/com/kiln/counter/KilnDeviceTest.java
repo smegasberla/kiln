@@ -232,7 +232,7 @@ public class KilnDeviceTest {
         KilnDeviceSupport.awaitForeignWindow("the file picker");
         KilnDeviceSupport.click(KilnDeviceSupport.SHOW_ROOTS);
         KilnDeviceSupport.click(KilnDeviceSupport.DOWNLOADS);
-        KilnDeviceSupport.clickRow(PROBE);
+        chooseInPicker(PROBE);
 
         String reply = KilnDeviceSupport.awaitProbe(scenario);
         assertTrue("the picker rejected: " + reply, !reply.startsWith("error:"));
@@ -248,6 +248,24 @@ public class KilnDeviceTest {
         assertTrue(
                 "the answer is neither the storage path nor a cache copy: " + path,
                 path.equals(PROBE_PATH) || path.contains("/cache/"));
+    }
+
+    /**
+     * Click a row and confirm the picker actually closed.
+     *
+     * <p>Retried because a tap can land on a row's preview affordance rather than the
+     * row, which leaves the picker open with nothing chosen. Whether the picker went
+     * away is the only signal that distinguishes that from a picker that is merely
+     * slow, so it is asserted here rather than inferred from a timeout later.
+     */
+    private static void chooseInPicker(String label) {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            KilnDeviceSupport.clickRow(label);
+            if (KilnDeviceSupport.awaitPickerClosed()) {
+                return;
+            }
+        }
+        fail("the picker kept reopening after clicking " + label);
     }
 
     /**
@@ -288,6 +306,7 @@ public class KilnDeviceTest {
         KilnDeviceSupport.click("Use this folder");
         // The provider asks the user to consent to handing the tree over.
         KilnDeviceSupport.click("Allow");
+        assertTrue("the folder picker did not close", KilnDeviceSupport.awaitPickerClosed());
 
         String reply = KilnDeviceSupport.awaitProbe(scenario);
         if (reply.startsWith("error:")) {

@@ -448,6 +448,21 @@ final class KilnDeviceSupport {
         }
     }
 
+    /** Wait until no node in the active window is labelled {@code label}. */
+    static void waitUntilGone(String label) {
+        waitFor(
+                "the " + label + " panel to close",
+                () -> {
+                    AccessibilityNodeInfo root = ui().getRootInActiveWindow();
+                    if (root == null) {
+                        return true;
+                    }
+                    List<AccessibilityNodeInfo> matches = new ArrayList<>();
+                    collect(root, label, 0, matches);
+                    return matches.isEmpty();
+                });
+    }
+
     /** Click the first node labelled {@code label}, waiting for it to appear. */
     static void click(String label) {
         waitFor(label, () -> find(label) != null);
@@ -570,6 +585,31 @@ final class KilnDeviceSupport {
             }
         }
         return null;
+    }
+
+    /**
+     * Whether a picker has handed control back to this app.
+     *
+     * <p>The honest test of a picker click is that the picker went away. A tap can
+     * land on a row's preview affordance instead of the row itself, which leaves the
+     * picker open with nothing chosen, and no assertion about the reply can tell
+     * that apart from a slow picker.
+     */
+    static boolean pickerClosed() {
+        String active = activePackage();
+        return active == null || active.equals(packageName());
+    }
+
+    /** Wait a few seconds for the picker to close, returning whether it did. */
+    static boolean awaitPickerClosed() {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6);
+        while (System.nanoTime() < deadline) {
+            if (pickerClosed()) {
+                return true;
+            }
+            sleep(250);
+        }
+        return pickerClosed();
     }
 
     /** Press the system back button, the way a user dismisses a picker. */
