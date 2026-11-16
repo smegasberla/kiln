@@ -231,8 +231,7 @@ public class KilnDeviceTest {
                 scenario, "dialog.open", "{\"filters\":[{\"extensions\":[\"*\"]}]}");
         KilnDeviceSupport.awaitForeignWindow("the file picker");
         KilnDeviceSupport.click(KilnDeviceSupport.SHOW_ROOTS);
-        KilnDeviceSupport.click(KilnDeviceSupport.VOLUME_ROOT);
-        KilnDeviceSupport.clickRow("Download");
+        KilnDeviceSupport.click(KilnDeviceSupport.DOWNLOADS);
         KilnDeviceSupport.clickRow(PROBE);
 
         String reply = KilnDeviceSupport.awaitProbe(scenario);
@@ -282,8 +281,9 @@ public class KilnDeviceTest {
     private static void checkFolderPicker(ActivityScenario<MainActivity> scenario) throws Exception {
         KilnDeviceSupport.startInvoke(scenario, "dialog.folder", "{}");
         KilnDeviceSupport.awaitForeignWindow("the folder picker");
-        KilnDeviceSupport.click(KilnDeviceSupport.SHOW_ROOTS);
-        KilnDeviceSupport.click(KilnDeviceSupport.DOWNLOADS);
+        // No roots drawer here: the tree picker opens on the volume root and lists
+        // the folders themselves, so it is reached by opening Download directly.
+        KilnDeviceSupport.clickRow("Download");
         KilnDeviceSupport.clickRow(FOLDER);
         KilnDeviceSupport.click("Use this folder");
         // The provider asks the user to consent to handing the tree over.
