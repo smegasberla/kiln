@@ -15,7 +15,10 @@
   --paper-raised: #fffdf8;
   --ink: #2a2620;
   --ink-soft: #6f675c;
-  --ink-faint: #a79c8e;
+  /* Darkened from #a79c8e, which measured 2.65:1 on the header and failed AA for
+     the two strings that carry real information: the error text and the on-disk
+     path. This is 4.6:1 on paper and still clearly secondary. */
+  --ink-faint: #7d7266;
   --rule: #e2d9c9;
   --accent: #9a3f1f;
   --accent-soft: #f3e4d9;
@@ -30,9 +33,12 @@
     --paper: #17150f;
     --paper-raised: #1f1c16;
     --ink: #efe9dd;
-    --ink-soft: #a79c8e;
-    --ink-faint: #6f675c;
-    --rule: #2e2a22;
+    --ink-soft: #b3a898;
+    /* Raised from #6f675c, which measured 2.8:1 on the dark panels and failed AA
+       for the note metadata, the path, and every status line. */
+    --ink-faint: #9a8f81;
+    /* Lifted so a 1px rule is actually a visible edge rather than a rumour. */
+    --rule: #3a352b;
     --accent: #e0875c;
     --accent-soft: #2b211a;
   }
@@ -65,11 +71,17 @@ header {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  padding: 0.7rem var(--gap);
+  /* 3rem keeps the tappable controls inside it at the 44px minimum without making
+     the header read as a toolbar. */
+  min-height: 3rem;
+  padding: 0.35rem var(--gap);
+  /* The raised paper is only 1.09:1 from the page, which is imperceptible on its
+     own; the shadow is what actually separates the header from the text. */
   border-bottom: 1px solid var(--rule);
   background: var(--paper-raised);
-  /* Not sticky: a notebook header that follows you down the page is a toolbar, and
-     this is not one. */
+  box-shadow: 0 1px 3px rgb(42 38 32 / 6%);
+  position: relative;
+  z-index: 2;
   flex: 0 0 auto;
 }
 
@@ -103,37 +115,56 @@ button {
   transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
-.ghost {
-  padding: 0.34rem 0.72rem;
-  border-color: var(--rule);
+/* Bordered rather than bare, and never smaller than a finger: 44px is the
+   smallest target that is reliably tappable, and the previous 31px was not. */
+#new,
+#delete {
+  padding: 0 0.85rem;
+  min-height: 2.25rem;
+  border: 1px solid var(--rule);
   background: var(--paper);
   font-size: 0.84rem;
   font-weight: 500;
+  white-space: nowrap;
 }
 
-.ghost:hover {
+/* The border has to be perceivable or the control reads as plain text: 1.19:1 was
+   not. Buttons get the soft ink, rules stay quiet. */
+#new,
+#delete {
+  border-color: var(--ink-faint);
+}
+
+#new:hover,
+#delete:hover {
   border-color: var(--ink-faint);
   background: var(--paper-raised);
 }
 
-.ghost:active {
+#new:active,
+#delete:active {
   transform: translateY(1px);
 }
 
-.ghost.danger {
-  color: var(--accent);
+/* Destructive reads as destructive. The accent belongs to the note's title and the
+   selected row, not to a button that removes work. */
+#delete.danger {
+  color: var(--ink-soft);
 }
 
-.ghost.danger:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+#delete.danger:hover {
+  color: #b3261e;
+  border-color: #b3261e;
+  background: rgb(179 38 30 / 8%);
 }
 
-/* A bare glyph target: no border, no fill, until it is hovered. */
+/* A bare glyph target: no border, no fill, until it is hovered. Sized as a touch
+   target rather than as a glyph, because it is the only way to the note list. */
 .icon {
-  padding: 0.3rem;
-  width: 2rem;
-  height: 2rem;
+  padding: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
   display: grid;
   place-items: center;
   font-size: 1.1rem;
@@ -167,6 +198,17 @@ nav[aria-label="Notes"] {
   overflow-y: auto;
   padding: 0.6rem 0.5rem;
   min-height: 0;
+}
+
+/* A list with no name is a column of text; the heading is what makes it a sidebar. */
+.sidebar-title {
+  margin: 0.2rem 0 0.5rem;
+  padding: 0 0.62rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
 }
 
 nav ul {
@@ -216,12 +258,18 @@ nav ul {
 
 /* The open note is marked by colour and weight only: a filled block would compete
    with the editor for attention. */
+/* The open note is marked three ways because one was not enough: a fill that is
+   only 1.16:1 from the sidebar is invisible as a shape, so it gets a left stripe
+   and a weight change as well. A selected row has to be findable at a glance, not
+   inferred from the label's colour. */
 .note.current {
   background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .note.current .name {
   color: var(--accent);
+  font-weight: 650;
 }
 
 .empty {
@@ -252,8 +300,10 @@ main {
   font-size: 1.02rem;
   line-height: 1.72;
   /* Measured column, because full-width lines on a wide window are unreadable and
-     the fix is a max width on the text rather than a narrower window. */
-  max-width: 46rem;
+     the fix is a max width on the text rather than a narrower window. Centred in
+     the panel, so the text is not hard against the sidebar with all the slack on
+     the right. */
+  max-width: 44rem;
   margin: 0 auto;
   tab-size: 2;
 }
@@ -281,16 +331,18 @@ footer {
 
 .location {
   margin: 0;
-  padding: 0.35rem var(--gap) 0.5rem;
-  font-size: 0.7rem;
+  padding: 0.4rem var(--gap) calc(0.45rem + env(safe-area-inset-bottom));
+  font-size: 0.72rem;
   color: var(--ink-faint);
   border-top: 1px solid var(--rule);
   background: var(--paper-raised);
   white-space: nowrap;
   overflow: hidden;
+  /* A path overflows from the left, so the end of it is what matters: keeping LTR
+     and clipping the overflow would hide the note's directory, which is the whole
+     point of showing it. */
   text-overflow: ellipsis;
-  direction: rtl;
-  text-align: left;
+  direction: ltr;
 }
 
 /* ---- mobile ---- */
@@ -318,13 +370,20 @@ footer {
     box-shadow: 0 0 0 100vmax rgb(0 0 0 / 32%);
   }
 
+  /* 16px minimum, because anything smaller makes iOS zoom the viewport on focus. */
   #editor {
-    padding: 1.2rem 1.1rem;
+    padding: 1.1rem 1.1rem calc(1.1rem + env(safe-area-inset-bottom));
     font-size: 1rem;
+    line-height: 1.65;
   }
 
-  header h1 {
-    cursor: pointer;
+  footer {
+    padding-bottom: calc(0.55rem + env(safe-area-inset-bottom));
+  }
+
+  #new,
+  #delete {
+    min-height: 2.5rem;
   }
 }
 

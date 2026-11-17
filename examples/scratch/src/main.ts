@@ -39,6 +39,7 @@ const emptyHint = document.getElementById("empty") as HTMLElement;
 const counts = document.getElementById("counts") as HTMLElement;
 const locationLabel = document.getElementById("location") as HTMLElement;
 const sidebar = document.getElementById("sidebar") as HTMLElement;
+const drawer = document.getElementById("drawer") as HTMLElement;
 
 /** The note the editor is showing, and whether the text differs from the disk. */
 let openKey: string | null = null;
@@ -102,15 +103,11 @@ function renderSnapshot(snapshot: Snapshot, options: { keepDraft?: boolean } = {
     locationLabel.title = snapshot.directory;
   }
 
-  // Mobile has no menu bar, so the overflow button is the only way to reach the
-  // shell's PopupMenu. On desktop the menu bar is already there and the button
-  // would be redundant chrome.
-  (document.getElementById("menu") as HTMLElement).hidden = !isMobile;
 }
 
 async function selectNote(key: string) {
   if (key === openKey) {
-    if (isMobile) sidebar.classList.remove("open");
+    if (isMobile) setDrawer(false);
     return;
   }
   await flushSave();
@@ -119,7 +116,7 @@ async function selectNote(key: string) {
   } catch (error) {
     showStatus(`error: ${(error as Error).message}`);
   }
-  if (isMobile) sidebar.classList.remove("open");
+  if (isMobile) setDrawer(false);
 }
 
 function showStatus(text: string) {
@@ -187,7 +184,7 @@ async function createNote() {
   try {
     renderSnapshot(await window.kiln.invoke<Snapshot>("create", {}));
     editor.focus();
-    if (isMobile) sidebar.classList.remove("open");
+    if (isMobile) setDrawer(false);
   } catch (error) {
     showStatus(`error: ${(error as Error).message}`);
   }
@@ -205,16 +202,25 @@ async function deleteNote() {
   }
 }
 
-(document.getElementById("new") as HTMLElement).addEventListener("click", () => void createNote());
-(document.getElementById("delete") as HTMLElement).addEventListener("click", () => void deleteNote());
+function setDrawer(open: boolean) {
+  sidebar.classList.toggle("open", open);
+  drawer.setAttribute("aria-expanded", String(open));
+}
 
-// Mobile: the sidebar is a drawer, because a 400px-wide window cannot afford a
-// permanent column. Desktop: it is always visible, and toggling it would be odd.
+document.getElementById("new")!.addEventListener("click", () => void createNote());
+document.getElementById("delete")!.addEventListener("click", () => void deleteNote());
+
+// Mobile: the sidebar is a drawer, because a phone-width window cannot afford a
+// permanent column, and the header button is the only way to reach it. Desktop:
+// the column is always visible, so the button is removed rather than left as a
+// control that does nothing.
 if (isMobile) {
-  (document.getElementById("menu") as HTMLElement).remove();
-  titleLabel.addEventListener("click", () => sidebar.classList.toggle("open"));
+  drawer.addEventListener("click", () => setDrawer(!sidebar.classList.contains("open")));
+  // A tap outside the drawer closes it, which is what every drawer does and what
+  // makes the editor usable again without hunting for the button.
+  editor.addEventListener("focus", () => setDrawer(false));
 } else {
-  (document.getElementById("menu") as HTMLElement).remove();
+  drawer.remove();
 }
 
 // The shell's own menu, wherever it exists: the desktop menu bar and the Android

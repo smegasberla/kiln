@@ -2,30 +2,31 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Scratch</title>
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
     <header>
-      <button id="menu" type="button" class="icon" aria-label="More">
-        <span aria-hidden="true">⋯</span>
+      <button id="drawer" type="button" class="icon" aria-label="Show notes" aria-expanded="false" aria-controls="sidebar">
+        <span aria-hidden="true">☰</span>
       </button>
       <h1 id="title">Scratch</h1>
       <span id="saved" class="saved" aria-live="polite"></span>
-      <button id="new" type="button" class="ghost">New</button>
+      <button id="new" type="button">New</button>
     </header>
 
     <div class="workspace">
       <nav id="sidebar" aria-label="Notes">
+        <p class="sidebar-title">Notes</p>
         <ul id="documents" role="list"></ul>
         <p id="empty" class="empty" hidden>No notes yet.</p>
       </nav>
       <main>
-        <textarea id="editor" spellcheck="true" aria-label="Note text"></textarea>
+        <textarea id="editor" spellcheck="true" aria-label="Note text" placeholder="Start writing…"></textarea>
         <footer>
           <span id="counts" class="counts"></span>
-          <button id="delete" type="button" class="ghost danger">Delete</button>
+          <button id="delete" type="button" class="danger">Delete</button>
         </footer>
       </main>
     </div>

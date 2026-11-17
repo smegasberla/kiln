@@ -1,9 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
   <!-- wry's WryActivity extends AppCompatActivity, which will not start unless the
        activity theme descends from Theme.AppCompat. NoActionBar keeps the page
        edge-to-edge; your UI owns its own chrome. -->
   <style name="Theme.Kiln" parent="Theme.AppCompat.DayNight.NoActionBar">
     <item name="android:windowBackground">@android:color/white</item>
+    <!-- The page supplies its own paper colour, so the bars are set to the same
+         value rather than left as the platform default grey and black. Without
+         this the app reads as a web page inside a stock shell: a #757575 status
+         bar above warm paper, and a black strip below it. -->
+    <item name="android:statusBarColor">#F7F3EA</item>
+    <item name="android:navigationBarColor">#F7F3EA</item>
+    <!-- Dark icons on a light bar; the app has no dark-mode bar variant. -->
+    <item name="android:windowLightStatusBar">true</item>
+    <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
   </style>
 </resources>
