@@ -100,6 +100,31 @@ export function includedFiles(source: string, crateDir: string): string[] {
   return found;
 }
 
+/** Names in a commands-crate table: `Command { name: "x", .. }`.
+ *
+ *  The scaffolded desktop shell registers its commands by walking that table,
+ *  so the literals live in the commands crate rather than in `.command(…)`
+ *  calls in `main.rs`. Only pass files known to contain command tables. */
+export function tableCommands(source: string): string[] {
+  const names = new Set<string>();
+  const pattern = /\bname:\s*"([^"]+)"/g;
+  for (const match of stripComments(source).matchAll(pattern)) names.add(match[1]!);
+  return [...names].sort();
+}
+
+/** Table entries whose name this parser cannot read — the `tableCommands`
+ *  counterpart of `unreadableRegistrations`, same contract: a dynamic name is
+ *  counted, never resolved, so silence never hides an unverified command. */
+export function unreadableTableRegistrations(source: string): string[] {
+  const found: string[] = [];
+  const entries = /Command\s*\{\s*name:\s*([^,\n]+)/g;
+  for (const match of stripComments(source).matchAll(entries)) {
+    const raw = match[1]!.trim();
+    if (!raw.startsWith('"')) found.push(raw);
+  }
+  return found;
+}
+
 /** Every command a crate registers, following one level of shared includes. */
 export function effectiveCommands(source: string, crateDir: string): string[] {
   const names = new Set(registeredCommands(source));
@@ -114,6 +139,9 @@ export function effectiveCommands(source: string, crateDir: string): string[] {
 /** Read both crates and report the difference, ignoring a missing Android crate. */
 export function checkParity(root: string): { ok: boolean; message: string } {
   const desktopFile = join(root, "native", "src", "main.rs");
+  // The commands crate is where the scaffolded desktop shell keeps its
+  // registration table since commands became hot-reloadable.
+  const commandsFile = join(root, "native", "commands", "src", "lib.rs");
   const androidFile = join(root, "android", "src", "lib.rs");
 
   if (!existsSync(desktopFile)) {
@@ -129,22 +157,22 @@ export function checkParity(root: string): { ok: boolean; message: string } {
     return { ok: true, message: "no android crate; skipping parity" };
   }
 
-  const desktop = effectiveCommands(
-    readFileSync(desktopFile, "utf8"),
-    join(root, "native", "src"),
-  );
-  const android = effectiveCommands(
-    readFileSync(androidFile, "utf8"),
-    join(root, "android", "src"),
-  );
-  const { onlyDesktop, onlyAndroid } = diffCommands(desktop, android);
-  const unreadable =
-    unreadableRegistrations(readFileSync(desktopFile, "utf8")).length +
-    unreadableRegistrations(readFileSync(androidFile, "utf8")).length;
+  const desktopSource = readFileSync(desktopFile, "utf8");
+  const androidSource = readFileSync(androidFile, "utf8");
+  const desktop = new Set(effectiveCommands(desktopSource, join(root, "native", "src")));
+  let unreadable = unreadableRegistrations(desktopSource).length;
+  if (existsSync(commandsFile)) {
+    const commandsSource = readFileSync(commandsFile, "utf8");
+    for (const name of tableCommands(commandsSource)) desktop.add(name);
+    unreadable += unreadableTableRegistrations(commandsSource).length;
+  }
+  const android = effectiveCommands(androidSource, join(root, "android", "src"));
+  unreadable += unreadableRegistrations(androidSource).length;
+  const { onlyDesktop, onlyAndroid } = diffCommands([...desktop].sort(), android);
   const caveat = unreadable > 0 ? ` (${unreadable} registration(s) not statically readable)` : "";
 
   if (onlyDesktop.length === 0 && onlyAndroid.length === 0) {
-    return { ok: true, message: `${desktop.length} commands on both platforms${caveat}` };
+    return { ok: true, message: `${desktop.size} commands on both platforms${caveat}` };
   }
 
   const parts = [

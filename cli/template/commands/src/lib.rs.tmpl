@@ -1,0 +1,301 @@
+//! Your app's commands, in one crate that `kiln dev` can hot-reload.
+//!
+//! # Why this crate exists
+//!
+//! Release builds link this crate statically into the shell binary — exactly
+//! one executable, no dynamic loading, no runtime dependency. `kiln dev`
+//! builds the very same source as a cdylib and swaps it into the *running*
+//! shell, so an edit here shows up without restarting the process or losing
+//! the webview's state. One source of truth, two link modes; there is no
+//! dev-only copy of your command code.
+//!
+//! # The ABI boundary (v1, fixed)
+//!
+//! The dylib exports exactly one dispatch symbol plus its destructor — never
+//! one symbol per command, so nothing can drift out of sync on reload:
+//!
+//! ```text
+//! kiln_dispatch(method, payload) -> envelope   UTF-8 in, UTF-8 out
+//! kiln_free(ptr)                               frees a kiln_dispatch reply
+//! ```
+//!
+//! The reply is the same envelope the statically-linked path produces:
+//! `{"ok": <value>}` or `{"error": "<message>"}`. `kiln_dispatch` catches all
+//! panics internally so nothing unwinds across the dynamic-library boundary;
+//! the shell wraps its call in `catch_unwind` again, so a panic here behaves
+//! like a panic in a static command: an error envelope to the page, window
+//! untouched.
+//!
+//! # What does not survive a reload (state rule)
+//!
+//! Statics and anything else you store *inside this crate* are rebuilt from
+//! scratch on every reload: `static` counters, lazily-initialized cells,
+//! cached values. If state must persist across reloads, the shell owns it and
+//! passes it into each call as part of the payload. This is a documented
+//! constraint, not something the mechanism papers over.
+//!
+//! # Desktop only
+//!
+//! Hot reloading exists for desktop `kiln dev` only. Mobile platforms
+//! restrict or disallow loading dynamic code, and the Android/iOS scaffold
+//! registers its commands statically as always.
+
+use std::ffi::{c_char, CStr, CString};
+use std::panic::{self, AssertUnwindSafe};
+
+use serde_json::{json, Value};
+
+/// How the shell should run a command when it is registered statically.
+///
+/// In a release build the shell consults this to pick `command` (inline, UI
+/// thread) versus `async_command` (worker thread). Under `kiln dev` every
+/// command runs on a worker thread anyway, so `slow_task` cannot freeze the
+/// window even mid-reload.
+#[derive(Clone, Copy)]
+pub enum Kind {
+    Sync,
+    Async,
+}
+
+/// One command: its name as the page spells it, how to schedule it, and what
+/// it does. The payload comes in as JSON; the value (or error message) goes
+/// back through the envelope.
+pub struct Command {
+    pub name: &'static str,
+    pub kind: Kind,
+    pub run: fn(&Value) -> Result<Value, String>,
+}
+
+/// Every command in this app.
+///
+/// The release shell registers these statically, and the parity checker reads
+/// the `name: "…"` literals here to confirm the Android shell registers the
+/// same set. Add commands to this table, not with ad-hoc registrations in
+/// `main.rs` — a name that is not in this table does not exist in release.
+pub static COMMANDS: &[Command] = &[
+    Command {
+        name: "greet",
+        kind: Kind::Sync,
+        run: greet,
+    },
+    Command {
+        name: "slow_task",
+        kind: Kind::Async,
+        run: slow_task,
+    },
+];
+
+/// The table, for the release shell's registration loop.
+pub fn commands() -> &'static [Command] {
+    COMMANDS
+}
+
+/// Sync command: reads state and returns immediately.
+fn greet(payload: &Value) -> Result<Value, String> {
+    let name = payload
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("world");
+    Ok(json!(format!("Hello, {name}! (from Rust)")))
+}
+
+/// Async command: runs off the UI thread, so a slow job cannot freeze the
+/// window. Replace the sleep with real work.
+fn slow_task(payload: &Value) -> Result<Value, String> {
+    let ms = payload.get("ms").and_then(Value::as_u64).unwrap_or(500);
+    std::thread::sleep(std::time::Duration::from_millis(ms));
+    Ok(json!({ "slept_ms": ms }))
+}
+
+/// Route one payload through the table. The error string is exactly what the
+/// static path would tell the page, so dev and release cannot drift.
+fn run_table(table: &[Command], method: &str, payload: Value) -> Result<Value, String> {
+    table
+        .iter()
+        .find(|command| command.name == method)
+        .ok_or_else(|| format!("unknown command: {method}"))
+        .and_then(|command| (command.run)(&payload))
+}
+
+/// Run `method` and produce the response envelope, with panic containment.
+///
+/// A panic becomes `{"error": "command panicked: …"}` — the same message the
+/// statically-linked path produces — instead of unwinding into the caller.
+fn envelope(table: &[Command], method: &str, payload: Value) -> String {
+    match panic::catch_unwind(AssertUnwindSafe(|| run_table(table, method, payload))) {
+        Ok(Ok(value)) => {
+            let mut out = serde_json::Map::new();
+            out.insert("ok".to_owned(), value);
+            Value::Object(out).to_string()
+        }
+        Ok(Err(message)) => error_envelope(&message),
+        Err(payload) => error_envelope(&format!(
+            "command panicked: {}",
+            panic_text(payload.as_ref())
+        )),
+    }
+}
+
+fn error_envelope(message: &str) -> String {
+    // A string always serializes; the fallback mirrors the shell's own.
+    let text = serde_json::to_string(message).unwrap_or_else(|_| "\"command failed\"".to_owned());
+    format!("{{\"error\":{text}}}")
+}
+
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_owned()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "unknown panic".to_owned()
+    }
+}
+
+/// Empty body means JSON `null`, exactly like the shell's payload parser;
+/// anything else that does not parse is reported rather than guessed at.
+fn parse_payload(text: &str) -> Result<Value, String> {
+    if text.is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_str(text).map_err(|_| "payload is not valid JSON".to_owned())
+}
+
+// --- The ABI boundary. Do not change these signatures without bumping the
+// --- convention in the shell's `hot.rs` and PLAN.md together.
+
+/// Resolve one call from the shell. Returns a heap-allocated envelope string
+/// the shell must hand back to `kiln_free`.
+///
+/// Safety: pointers must be valid NUL-terminated UTF-8 (the shell always
+/// passes `CString`s) or null, which is treated as an empty string.
+#[no_mangle]
+pub extern "C" fn kiln_dispatch(method: *const c_char, payload: *const c_char) -> *mut c_char {
+    let method = unsafe { from_c(method) }.unwrap_or_default();
+    let body = match unsafe { from_c(payload) }
+        .map(|text| parse_payload(&text))
+        .unwrap_or(Ok(Value::Null))
+    {
+        Ok(value) => envelope(COMMANDS, &method, value),
+        Err(message) => error_envelope(&message),
+    };
+    // JSON output never contains a NUL byte (control characters are escaped),
+    // so this cannot fail; the fallback is a valid error envelope anyway.
+    CString::new(body)
+        .map(|text| text.into_raw())
+        .unwrap_or(std::ptr::null_mut())
+}
+
+/// Free a pointer returned by `kiln_dispatch`. Cross-allocator safety: the
+/// shell never frees dylib memory itself.
+///
+/// Safety: `ptr` must be null or a pointer this library returned.
+#[no_mangle]
+pub extern "C" fn kiln_free(ptr: *mut c_char) {
+    if !ptr.is_null() {
+        drop(unsafe { CString::from_raw(ptr) });
+    }
+}
+
+/// Safety: null returns `None`; invalid UTF-8 returns `None`.
+unsafe fn from_c(ptr: *const c_char) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+    CStr::from_ptr(ptr).to_str().ok().map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn boom(_payload: &Value) -> Result<Value, String> {
+        panic!("hot boom")
+    }
+
+    fn fail(_payload: &Value) -> Result<Value, String> {
+        Err("no dice".to_owned())
+    }
+
+    static TEST: &[Command] = &[
+        Command {
+            name: "boom",
+            kind: Kind::Sync,
+            run: boom,
+        },
+        Command {
+            name: "fail",
+            kind: Kind::Sync,
+            run: fail,
+        },
+    ];
+
+    #[test]
+    fn a_registered_command_answers_ok() {
+        let body = envelope(COMMANDS, "greet", json!({ "name": "Ada" }));
+        let value: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(value["ok"], "Hello, Ada! (from Rust)");
+    }
+
+    #[test]
+    fn an_unknown_method_says_what_the_static_path_says() {
+        let body = envelope(COMMANDS, "nope", Value::Null);
+        assert_eq!(body, r#"{"error":"unknown command: nope"}"#);
+    }
+
+    #[test]
+    fn a_command_error_becomes_the_error_envelope() {
+        let body = envelope(TEST, "fail", Value::Null);
+        assert_eq!(body, r#"{"error":"no dice"}"#);
+    }
+
+    #[test]
+    fn a_panicking_command_is_contained_and_worded_like_the_static_path() {
+        let body = envelope(TEST, "boom", Value::Null);
+        assert_eq!(body, r#"{"error":"command panicked: hot boom"}"#);
+        // And the process is still here to ask.
+        assert_eq!(
+            envelope(COMMANDS, "greet", Value::Null),
+            r#"{"ok":"Hello, world! (from Rust)"}"#
+        );
+    }
+
+    fn call(method: &str, payload: &str) -> String {
+        let method = CString::new(method).unwrap();
+        let payload = CString::new(payload).unwrap();
+        let ptr = kiln_dispatch(method.as_ptr(), payload.as_ptr());
+        assert!(!ptr.is_null());
+        let body = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned();
+        kiln_free(ptr);
+        body
+    }
+
+    #[test]
+    fn the_ffi_surface_round_trips() {
+        assert_eq!(
+            call("greet", r#"{"name":"Lin"}"#),
+            r#"{"ok":"Hello, Lin! (from Rust)"}"#
+        );
+        // An empty body is JSON null, like the HTTP transport.
+        assert_eq!(call("greet", ""), r#"{"ok":"Hello, world! (from Rust)"}"#);
+    }
+
+    #[test]
+    fn the_ffi_surface_survives_junk_input() {
+        assert_eq!(call("greet", "not json"), r#"{"error":"payload is not valid JSON"}"#);
+        assert_eq!(call("nope", "null"), r#"{"error":"unknown command: nope"}"#);
+        // Null pointers are treated as empty, not dereferenced.
+        let ptr = kiln_dispatch(std::ptr::null(), std::ptr::null());
+        let body = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned();
+        kiln_free(ptr);
+        assert_eq!(body, r#"{"error":"unknown command: "}"#);
+        kiln_free(std::ptr::null_mut()); // must be a no-op
+    }
+
+    #[test]
+    fn slow_task_reports_the_requested_sleep() {
+        let value: Value =
+            serde_json::from_str(&envelope(COMMANDS, "slow_task", json!({ "ms": 1 }))).unwrap();
+        assert_eq!(value["ok"]["slept_ms"], 1);
+    }
+}

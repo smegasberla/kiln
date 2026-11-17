@@ -9,8 +9,17 @@
  *  transformed HTML and watches everything it pulls in, so edits to TS/CSS
  *  reload in the page without touching Rust. `bun --hot` on the CLI process is
  *  what makes the import re-evaluate after an edit.
+ *
+ *  Rust commands hot-reload through a second loop: this process watches
+ *  `native/commands/src`, rebuilds *only* that crate (`--manifest-path`, so a
+ *  shell recompile never enters the loop), and publishes each successful build
+ *  as `target/kiln-hot/commands-<n>.<ext>` plus a `latest.json` pointer. The
+ *  shell polls that pointer and swaps the library in without restarting. A
+ *  failed build publishes nothing, so the running shell keeps the last good
+ *  generation and the compiler error is the feedback.
  */
 
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "../proc.ts";
 import { writeAssetTable } from "../pipeline.ts";
@@ -33,12 +42,37 @@ export async function dev(args: Args): Promise<number> {
 
   const server = await startServer(project.root, project.config.entry, port);
 
-  const shell = spawn(["cargo", "run"], {
+  // A scaffold from before hot reload has no `hot-reload` feature to enable;
+  // running it the old way is correct, just without the command loop.
+  const hotSupported = readFileSync(join(crate, "Cargo.toml"), "utf8").includes("hot-reload");
+  const hotDir = join(crate, "target", "kiln-hot");
+  const artifact = join(crate, "target", "debug", dylibName());
+
+  let initial: { gen: number } | null = null;
+  let stopWatching = () => {};
+  const env: Record<string, string> = {
+    ...process.env,
+    KILN_DEV_URL: `http://127.0.0.1:${port}`,
+  } as Record<string, string>;
+
+  if (hotSupported) {
+    // Generation 1 exists before the shell starts, so its first load is
+    // deterministic instead of racing this process's own build.
+    initial = await rebuild(crate, hotDir, artifact, 1);
+    env.KILN_HOT_LIB = initial ? pointerPath(hotDir, initial.gen) : artifact;
+    env.KILN_HOT_DIR = hotDir;
+    stopWatching = watchCommands(crate, hotDir, artifact, initial?.gen ?? 0);
+  } else {
+    console.log("  (native/Cargo.toml has no hot-reload feature; Rust edits need a restart)");
+  }
+
+  const shell = spawn(["cargo", "run", "--features", "hot-reload"], {
     cwd: crate,
-    env: { ...process.env, KILN_DEV_URL: `http://127.0.0.1:${port}` },
+    env,
   });
 
   const shutdown = () => {
+    stopWatching();
     server.stop(true);
     shell.kill();
   };
@@ -46,8 +80,114 @@ export async function dev(args: Args): Promise<number> {
   process.on("SIGTERM", shutdown);
 
   const code = await shell.exited;
+  stopWatching();
   server.stop(true);
   return code;
+}
+
+/** The platform's cdylib filename for the `commands` lib target. */
+function dylibName(): string {
+  const extension =
+    process.platform === "win32" ? "dll" : process.platform === "darwin" ? "dylib" : "so";
+  return process.platform === "win32" ? `commands.${extension}` : `libcommands.${extension}`;
+}
+
+function pointerPath(hotDir: string, gen: number): string {
+  const name = dylibName().replace(/(\.[^.]+)$/, `-${gen}$1`);
+  return join(hotDir, name);
+}
+
+/** Rebuild the commands crate alone and publish it as the next generation.
+ *
+ *  Returns `null` on failure — which is the feature, not an error state: no
+ *  pointer is written, so the running shell keeps serving the last good
+ *  library and cargo's own output (inherited stdio) is the report. */
+async function rebuild(
+  crate: string,
+  hotDir: string,
+  artifact: string,
+  gen: number,
+): Promise<{ gen: number } | null> {
+  const started = Date.now();
+  const build = spawn(["cargo", "build", "--manifest-path", "commands/Cargo.toml"], { cwd: crate });
+  const code = await build.exited;
+  if (code !== 0) {
+    console.error("kiln: commands failed to build — keeping the last good build");
+    return null;
+  }
+  if (!existsSync(artifact)) {
+    console.error(`kiln: build succeeded but produced no ${artifact}`);
+    return null;
+  }
+
+  mkdirSync(hotDir, { recursive: true });
+  const target = pointerPath(hotDir, gen);
+  // Copy and rename via temporary names: the shell polls these files, and a
+  // rename is atomic where a plain write is not.
+  const artifactTmp = `${target}.tmp`;
+  copyFileSync(artifact, artifactTmp);
+  renameSync(artifactTmp, target);
+  const pointerTmp = join(hotDir, "latest.json.tmp");
+  // `builtAt` is the *start* of the build, so the shell's report is the true
+  // rebuild-to-reload latency, build included.
+  writeFileSync(pointerTmp, JSON.stringify({ gen, path: target, builtAt: started }));
+  renameSync(pointerTmp, join(hotDir, "latest.json"));
+
+  console.log(`  commands rebuilt in ${Date.now() - started} ms (gen ${gen})`);
+  return { gen };
+}
+
+/** Watch the commands crate's sources; rebuild on change until the tree stops
+ *  moving (an edit saved mid-build triggers one more pass).
+ *
+ *  A periodic mtime walk rather than fs.watch: it is recursive without
+ *  platform quirks, cheap for a crate this size, and it cannot miss a change
+ *  that an editor's write-and-rename dance would hide from a watcher. */
+function watchCommands(
+  crate: string,
+  hotDir: string,
+  artifact: string,
+  firstGen: number,
+): () => void {
+  const source = join(crate, "commands", "src");
+  let known = snapshot(source);
+  let gen = firstGen;
+  let building = false;
+
+  const timer = setInterval(async () => {
+    if (building) return;
+    building = true;
+    try {
+      for (;;) {
+        const current = snapshot(source);
+        const changed =
+          current.size !== known.size ||
+          [...current].some(([file, mtime]) => known.get(file) !== mtime);
+        if (!changed) break;
+        known = current;
+        const result = await rebuild(crate, hotDir, artifact, gen + 1);
+        if (result) gen = result.gen;
+      }
+    } finally {
+      building = false;
+    }
+  }, 300);
+
+  return () => clearInterval(timer);
+}
+
+/** Every `.rs` file under `dir` with its mtime; missing dir is an empty map. */
+function snapshot(dir: string): Map<string, number> {
+  const found = new Map<string, number>();
+  const walk = (current: string) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".rs")) found.set(full, statSync(full).mtimeMs);
+    }
+  };
+  if (existsSync(dir)) walk(dir);
+  return found;
 }
 
 /** Import the entry HTML and serve it. Bun's `development: true` gives the

@@ -42,6 +42,10 @@ enum Handler {
 pub struct Registry {
     handlers: HashMap<String, Handler>,
     allow: Option<Vec<String>>,
+    /// The hot-reloaded commands library. Present only in `kiln dev` builds;
+    /// a release build never compiles it.
+    #[cfg(feature = "hot-reload")]
+    hot: Option<std::sync::Arc<crate::hot::HotLib>>,
 }
 
 impl Default for Registry {
@@ -55,7 +59,17 @@ impl Registry {
         Self {
             handlers: HashMap::new(),
             allow: None,
+            #[cfg(feature = "hot-reload")]
+            hot: None,
         }
+    }
+
+    /// Attach the hot-reloaded commands library (`kiln dev`). Static handlers
+    /// keep priority; the library only ever answers names no static handler
+    /// claimed, and only within the config allowlist like everything else.
+    #[cfg(feature = "hot-reload")]
+    pub(crate) fn set_hot(&mut self, hot: std::sync::Arc<crate::hot::HotLib>) {
+        self.hot = Some(hot);
     }
 
     pub fn set_allowlist(&mut self, allow: Option<Vec<String>>) {
@@ -131,30 +145,60 @@ impl Registry {
     where
         F: FnOnce(String) + Send + 'static,
     {
-        let handler = match self.lookup(method) {
-            Ok(handler) => handler,
-            Err(error) => return done(error_envelope(&error)),
-        };
-
-        match handler {
-            Handler::Sync(handler) => done(ok_or_error(run_isolated(handler, handle, payload))),
-            Handler::Async(handler) => {
+        // The allowlist gates everything below, the hot library included:
+        // `commands` in kiln.json can only ever narrow what is reachable.
+        if !self.permitted(method) {
+            return done(error_envelope(&Error::UnknownMethod(method.to_owned())));
+        }
+        match self.handlers.get(method) {
+            Some(Handler::Sync(handler)) => {
+                done(ok_or_error(run_isolated(handler, handle, payload)))
+            }
+            Some(Handler::Async(handler)) => {
                 let handler = std::sync::Arc::clone(handler);
                 let handle = handle.clone();
                 std::thread::spawn(move || {
                     done(ok_or_error(run_isolated_async(&handler, handle, payload)));
                 });
             }
+            None => self.dispatch_unclaimed(method, payload, done),
         }
     }
 
-    fn lookup(&self, method: &str) -> Result<&Handler, Error> {
-        if !self.permitted(method) {
-            return Err(Error::UnknownMethod(method.to_owned()));
+    /// A name no static handler claimed. Release: unknown command, exactly as
+    /// before. `kiln dev` with an attached library: a call into the current
+    /// commands dylib, answered from a worker thread so a slow hot command
+    /// cannot freeze the window either.
+    #[cfg(feature = "hot-reload")]
+    fn dispatch_unclaimed<F>(&self, method: &str, payload: Value, done: F)
+    where
+        F: FnOnce(String) + Send + 'static,
+    {
+        match &self.hot {
+            Some(hot) => {
+                let hot = std::sync::Arc::clone(hot);
+                let method = method.to_owned();
+                std::thread::spawn(move || {
+                    // Belt over the dylib's own catch_unwind: the page gets a
+                    // response even if this outer layer is what failed.
+                    let body =
+                        panic::catch_unwind(AssertUnwindSafe(|| hot.call(&method, &payload)))
+                            .unwrap_or_else(|_| {
+                                error_envelope(&Error::Handler("hot command call failed".to_owned()))
+                            });
+                    done(body);
+                });
+            }
+            None => done(error_envelope(&Error::UnknownMethod(method.to_owned()))),
         }
-        self.handlers
-            .get(method)
-            .ok_or_else(|| Error::UnknownMethod(method.to_owned()))
+    }
+
+    #[cfg(not(feature = "hot-reload"))]
+    fn dispatch_unclaimed<F>(&self, method: &str, _payload: Value, done: F)
+    where
+        F: FnOnce(String) + Send + 'static,
+    {
+        done(error_envelope(&Error::UnknownMethod(method.to_owned())))
     }
 }
 
@@ -197,7 +241,7 @@ fn ok_or_error(result: Result<Value, Error>) -> String {
     }
 }
 
-fn error_envelope(error: &Error) -> String {
+pub(crate) fn error_envelope(error: &Error) -> String {
     let message = serde_json::to_string(&error.to_string())
         .unwrap_or_else(|_| "\"command failed\"".to_owned());
     format!(r#"{{"error":{message}}}"#)
@@ -209,8 +253,9 @@ fn report_panic(payload: &(dyn std::any::Any + Send)) -> Error {
     Error::Panic(message)
 }
 
-/// Best-effort text out of a `panic!` payload, which is usually `&str`.
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+/// Best-effort text out of a `panic!` payload, usually `&str`. Shared with
+/// the hot-reload path, which reports a boundary panic the same way.
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     if let Some(text) = payload.downcast_ref::<&str>() {
         (*text).to_owned()
     } else if let Some(text) = payload.downcast_ref::<String>() {

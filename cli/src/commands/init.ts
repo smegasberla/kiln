@@ -42,6 +42,9 @@ import androidCargo from "../../template/android/Cargo.toml.tmpl" with { type: "
 import androidLib from "../../template/android/lib.rs.tmpl" with { type: "text" };
 import androidAssets from "../../template/android/assets.rs.tmpl" with { type: "text" };
 
+import commandsCargo from "../../template/commands/Cargo.toml.tmpl" with { type: "text" };
+import commandsLib from "../../template/commands/src/lib.rs.tmpl" with { type: "text" };
+
 export function init(args: Args): number {
   const dir = resolve(args.positionals[0] ?? ".");
   const force = boolFlag(args, "force");
@@ -99,6 +102,8 @@ export function init(args: Args): number {
     write("native/Cargo.toml", fill(cargoToml));
     write("native/src/main.rs", fill(mainRs));
     write("native/src/assets.rs", fill(assetsRs));
+    write("native/commands/Cargo.toml", fill(commandsCargo));
+    write("native/commands/src/lib.rs", fill(commandsLib));
   }
 
   // Android shell. Same app, different entry point and packaging.

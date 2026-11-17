@@ -46,6 +46,8 @@
 mod assets;
 mod config;
 mod error;
+#[cfg(feature = "hot-reload")]
+mod hot;
 mod ipc;
 mod platform;
 mod reporting;
@@ -282,6 +284,9 @@ pub struct App {
     #[cfg(feature = "tray")]
     tray: Option<tray::TrayConfig>,
     want_devtools: bool,
+    /// The hot commands library, attached by `hot_commands_from_env`.
+    #[cfg(feature = "hot-reload")]
+    hot: Option<std::sync::Arc<hot::HotLib>>,
 }
 
 impl Default for App {
@@ -305,6 +310,8 @@ impl App {
             #[cfg(feature = "tray")]
             tray: None,
             want_devtools: false,
+            #[cfg(feature = "hot-reload")]
+            hot: None,
         }
     }
 
@@ -422,6 +429,32 @@ impl App {
         self
     }
 
+    /// Attach the hot-reloaded commands library `kiln dev` prepares.
+    ///
+    /// Reads `KILN_HOT_LIB` (the initial cdylib) and `KILN_HOT_DIR` (where
+    /// each rebuild publishes a new generation). This method only exists
+    /// with the `hot-reload` feature, which `kiln build --release` never
+    /// enables — there is nothing here for a shipped app to reach. Every
+    /// failure is loud on stderr: a silently dead command table would look
+    /// like a bug in the app rather than in the tooling.
+    #[cfg(feature = "hot-reload")]
+    pub fn hot_commands_from_env(mut self) -> Self {
+        let lib = std::env::var("KILN_HOT_LIB").unwrap_or_default();
+        if lib.is_empty() {
+            eprintln!(
+                "kiln: `hot-reload` is on but KILN_HOT_LIB is unset; run this app \
+                 through `kiln dev` (commands will not resolve)"
+            );
+            return self;
+        }
+        let dir = std::env::var("KILN_HOT_DIR").ok().map(std::path::PathBuf::from);
+        match hot::HotLib::open(std::path::Path::new(&lib), dir) {
+            Ok(hot) => self.hot = Some(std::sync::Arc::new(hot)),
+            Err(error) => eprintln!("kiln: hot commands unavailable: {error}"),
+        }
+        self
+    }
+
     /// Open the window(s) and run until the last one closes.
     ///
     /// In a debug build, `KILN_DEV_URL` redirects the webview at a dev server so
@@ -445,6 +478,13 @@ impl App {
         let mut registry = self.registry;
         register_builtins(&mut registry, &config);
         registry.set_allowlist(config.commands.clone());
+
+        // Reloads must be running before the first window can call in.
+        #[cfg(feature = "hot-reload")]
+        if let Some(lib) = &self.hot {
+            registry.set_hot(std::sync::Arc::clone(lib));
+            hot::HotLib::watch(lib);
+        }
 
         let registry = Arc::new(registry);
         let handle = AppHandle::new(proxy, Arc::clone(&registry));

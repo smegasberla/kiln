@@ -9,6 +9,15 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Added
 
+- Hot-reloadable commands behind a cargo feature: the scaffold now ships a
+  `commands` crate with one `static COMMANDS: &[Command]` table (with
+  `Kind::Sync` / `Kind::Async`), and `kiln dev` watches its `src/`, rebuilds
+  only that crate, and swaps the new library into the running shell. The
+  harness (`scripts/verify-hot.ts`) proves the swap leaves the page running —
+  one `performance.timeOrigin` across command edits, a panic, a broken build
+  and the recovery — with rebuild-to-reload latency printed by the shell.
+  Release builds are untouched: the feature is never enabled for them, so
+  `libloading` stays out of the release dependency tree.
 - `App::report_sink`: install an application sink that receives every crash and
   error record, so an app can forward reports to its own collector without
   forking the shell. The framework still uploads nothing by itself.
@@ -16,6 +25,15 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
   `<name>.old`, so a panic loop cannot fill a user's disk.
 - `CHANGELOG.md` and a README "Compatibility policy" section stating what a
   breaking change is.
+
+### Changed
+
+- `kiln init` scaffolds commands as a table in a separate crate instead of
+  inline `.command()` calls in `main.rs`, so the same code hot-reloads in dev
+  and links statically in release. `.command()` remains for commands that need
+  the `App` itself; release still builds with every feature, as it did.
+- Documentation now states that hot reload is desktop-only and that statics
+  inside the commands crate do not survive a reload.
 
 ### Changed
 

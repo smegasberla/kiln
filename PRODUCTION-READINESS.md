@@ -234,3 +234,76 @@ in `security.rs` says exactly that and names the check that must precede any
 tightening. Finding 2's fix is CI-only and proves itself the first time the
 Windows and macOS jobs run; until then the e2e guarantee remains demonstrated on
 Linux.
+
+---
+
+## Remediation plan — second review findings
+
+A small, phased plan for the findings of the follow-up whole-project review
+(hot-reload feature work is tracked separately in `PLAN.md`). Phases are
+ordered so each one leaves the tree greener than it found it; A and B are
+mechanical, D is a measurement, C is design work and needs its decisions
+taken before code.
+
+### Phase A — supply-chain and framing (Low, all mechanical)
+
+- **A1: pin appimagetool.** `.github/workflows/ci.yml:68-69` downloads
+  `releases/download/continuous/…`, an artifact that can change under us with
+  no checksum. Pin to a tagged release and `echo "<sha256>  <file>" | sha256sum -c -`
+  before `chmod`.
+  *Acceptance:* CI fails if the downloaded bytes drift; no `continuous` URL
+  remains in the workflow.
+- **A2: `Cargo.lock` — verified, no action beyond keeping it honest.** The
+  second review claimed the lockfile was absent; `git ls-files` says it is
+  tracked and the CI cache key already hashes it (`hashFiles('**/Cargo.lock')`
+  in `ci.yml`), so the claimed gap does not exist. What remains is discipline:
+  keep it committed (the hot-reload work already updates it for `libloading`),
+  and re-check the cache key only if the workflow's `hashFiles` is ever
+  removed. *Acceptance:* `git ls-files Cargo.lock` keeps printing the path —
+  which it does.
+- **A3: frame the README benchmark honestly.** `README.md:49-54` presents
+  one machine's numbers as project facts. Label the table with the machine,
+  the date, and the command that reproduces it (it already exists:
+  `bun scripts/bench.ts`).
+  *Acceptance:* a reader can tell the numbers are a sample, not a guarantee.
+
+### Phase B — workspace correctness (Medium)
+
+- **B1: make `cargo test --workspace` work on a clean host.** Root cause
+  confirmed by reading `kiln-android/Cargo.toml`: `jni`, `ndk` and `tao` are
+  unconditional dependencies, and `ndk` pulls `ndk-sys`, whose lib.rs
+  `compile_error!`s on anything but Android — so the documented, natural
+  contributor command fails before running a single test, while CI silently
+  tests only `-p kiln`. Fix by target-gating the Android crate's deps
+  (`[target.'cfg(target_os = "android")'.dependencies]`) or excluding
+  `kiln-android` from default workspace members with a comment saying why.
+  *Acceptance:* `cargo test --workspace` is green on a Linux host, and a CI
+  step runs exactly that command so the claim stays proven.
+
+### Phase C — design decisions (Medium, needs a decision first)
+
+- **C1: per-window command allowlisting** (this document's open finding 3,
+  re-raised by the second review). The direction stands: key the allowlist by
+  window label in `kiln.json`, resolve the caller's window at dispatch (wry's
+  protocol callback identifies the webview), and narrow `permitted()` — note
+  that the hot-reload path added since then goes through the same
+  `permitted()` gate, so it inherits the scoping for free.
+  *Acceptance:* the same as finding 3 — a second window can be given a strict
+  subset, tested, documented.
+- **C2: Android CSP tightening.** The documented exception (finding 1's fix)
+  stays until the named check exists: run the Android probe with the relaxed
+  `'unsafe-inline'` removed and confirm the shim survives on an emulator.
+  Either the tightening lands green, or the residual risk is re-accepted in
+  writing with a date.
+  *Acceptance:* `verify-android` green against a tightened policy, or an
+  explicit dated re-acceptance next to the exception comment.
+
+### Phase D — measurement refresh
+
+- **D1: re-run `bun scripts/bench.ts`** on a quiet machine and fold the
+  results into the A3 table (this is what makes A3 truthful rather than
+  reworded).
+
+**Suggested order:** A (one sitting, no risk) → B (one PR, unblocks every
+future contributor) → D (minutes) → C1 (design, then code) → C2 (needs an
+emulator session).

@@ -1,34 +1,25 @@
 //! {{NAME}} - a Kiln desktop app.
 //!
-//! Everything shipped is here: the windows, the commands, and the embedded
-//! frontend bytes. `cargo build --release` produces the whole app.
+//! Everything shipped is here: the windows and the embedded frontend bytes.
+//! Commands live in the `commands` crate beside this file — release links them
+//! statically into this binary, `kiln dev` hot-reloads them from a cdylib.
+//! `cargo build --release` produces the whole app.
 
-use kiln::serde_json::{json, Value};
+#[cfg(not(feature = "hot-reload"))]
+use commands::{commands, Kind};
+use kiln::serde_json::Value;
 use kiln::{App, AppHandle, Error, WindowOptions};
 
 mod assets;
 
 fn main() -> Result<(), Error> {
-    App::new()
+    let mut app = App::new()
         .config(include_str!("../../kiln.json"))
         .assets(assets::ASSETS)
-        // Sync command: reads state and returns immediately.
-        .command("greet", |_app, payload: Value| {
-            let name = payload
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("world");
-            Ok(json!(format!("Hello, {name}! (from Rust)")))
-        })
-        // Async command: runs off the UI thread, so a slow job cannot freeze
-        // the window. Replace the sleep with real work.
-        .async_command("slow_task", |_app, payload: Value| {
-            let ms = payload.get("ms").and_then(Value::as_u64).unwrap_or(500);
-            std::thread::sleep(std::time::Duration::from_millis(ms));
-            Ok(json!({ "slept_ms": ms }))
-        })
-        // Multi-window: open a second window with its own label.
-        .command("open_settings", |app: &AppHandle, _payload| {
+        // Shell-service commands stay in the shell: they take an
+        // `&AppHandle`, and a handle type cannot cross the cdylib boundary
+        // soundly, so they register statically in dev and release alike.
+        .command("open_settings", |app: &AppHandle, _payload: Value| {
             app.open_window(WindowOptions {
                 label: Some("settings".to_owned()),
                 title: Some("Settings".to_owned()),
@@ -39,6 +30,31 @@ fn main() -> Result<(), Error> {
             Ok(Value::Null)
         })
         // Keep devtools available in the build your users run (F12).
-        .devtools(true)
-        .run()
+        .devtools(true);
+
+    // Release: the table links in statically. Dev (`--features hot-reload`,
+    // set up by `kiln dev`): the table lives in the dylib instead, so a stale
+    // copy in this binary can never shadow what you just edited.
+    #[cfg(not(feature = "hot-reload"))]
+    for command in commands() {
+        // Deliberately written as an associated call rather than
+        // `app.command(…)`: the parity checker reads command names from the
+        // `name: "…"` literals in the commands crate, and this loop must not
+        // look like a registration whose name it cannot read.
+        app = match command.kind {
+            Kind::Sync => App::command(app, command.name, |_app, payload| {
+                (command.run)(&payload).map_err(kiln::Error::Handler)
+            }),
+            Kind::Async => App::async_command(app, command.name, |_app, payload| {
+                (command.run)(&payload).map_err(kiln::Error::Handler)
+            }),
+        };
+    }
+
+    #[cfg(feature = "hot-reload")]
+    {
+        app = app.hot_commands_from_env();
+    }
+
+    app.run()
 }

@@ -7,8 +7,17 @@ edition = "2021"
 # `full` turns on the native menu bar, file dialogs, update checks, and devtools
 # in release builds. Remove `features` to get the minimal shell.
 kiln = { {{KILN_PATH_INNER}}, features = ["full"] }
+# The command table. Release links it statically; `kiln dev` additionally
+# builds it as a cdylib and hot-swaps it into the running shell.
+commands = { path = "commands", package = "{{CRATE}}-commands" }
+
+[features]
+# Enabled only by `kiln dev`. Release builds never enable it, which is what
+# keeps libloading (the hot-reload loader) out of every shipped binary.
+hot-reload = ["kiln/hot-reload"]
 
 [workspace]
+members = ["commands"]
 
 [profile.release]
 opt-level = "s"

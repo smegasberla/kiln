@@ -16,6 +16,10 @@ wry = { version = "0.57", features = ["linux-body"] }
 tao = { version = "0.37", default-features = false, features = ["rwh_06", "x11"] }
 serde_json = "1"
 
+# Dev-only crate. Never part of `full`: a release shell never enables the
+# `hot-reload` feature, so this stays out of every shipped binary's tree.
+libloading = { version = "0.8", optional = true }
+
 # Opt-in crates. Each is behind a feature so a minimal app pays nothing.
 
 # GTK is Linux-only, and naming it directly is what lets the menu code describe a
@@ -38,6 +42,10 @@ dialogs = ["dep:rfd"]
 updater = ["dep:ureq"]
 # Devtools in release builds (F12). Costs a little binary size.
 devtools = ["wry/devtools"]
+# Swap a hot-reloaded commands cdylib into the running shell (`kiln dev`).
+# Desktop-only in intent and in use: mobile platforms restrict dynamic code
+# loading, and the mobile scaffold never enables this. Never part of `full`.
+hot-reload = ["dep:libloading"]
 # Everything a "real app" normally needs.
 full = ["menu", "dialogs", "updater", "devtools"]
 
