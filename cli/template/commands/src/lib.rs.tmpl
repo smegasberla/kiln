@@ -20,7 +20,7 @@
 //! ```
 //!
 //! The reply is the same envelope the statically-linked path produces:
-//! `{"ok": <value>}` or `{"error": "<message>"}`. `kiln_dispatch` catches all
+//! `{"ok": <value>}` or `{"error": {"message": "<text>", "kind": "<class>"}}`. `kiln_dispatch` catches all
 //! panics internally so nothing unwinds across the dynamic-library boundary;
 //! the shell wraps its call in `catch_unwind` again, so a panic here behaves
 //! like a panic in a static command: an error envelope to the page, window
@@ -107,20 +107,25 @@ fn slow_task(payload: &Value) -> Result<Value, String> {
     Ok(json!({ "slept_ms": ms }))
 }
 
-/// Route one payload through the table. The error string is exactly what the
-/// static path would tell the page, so dev and release cannot drift.
-fn run_table(table: &[Command], method: &str, payload: Value) -> Result<Value, String> {
+/// Route one payload through the table. The error message and kind are exactly
+/// what the static path would tell the page, so dev and release cannot drift.
+fn run_table(
+    table: &[Command],
+    method: &str,
+    payload: Value,
+) -> Result<Value, (String, &'static str)> {
     table
         .iter()
         .find(|command| command.name == method)
-        .ok_or_else(|| format!("unknown command: {method}"))
-        .and_then(|command| (command.run)(&payload))
+        .ok_or_else(|| (format!("unknown command: {method}"), "unknown"))
+        .and_then(|command| (command.run)(&payload).map_err(|message| (message, "handler")))
 }
 
 /// Run `method` and produce the response envelope, with panic containment.
 ///
-/// A panic becomes `{"error": "command panicked: …"}` — the same message the
-/// statically-linked path produces — instead of unwinding into the caller.
+/// A panic becomes `{"error": {"message": "command panicked: …", "kind": "panic"}}` —
+/// the same message the statically-linked path produces — instead of unwinding
+/// into the caller.
 fn envelope(table: &[Command], method: &str, payload: Value) -> String {
     match panic::catch_unwind(AssertUnwindSafe(|| run_table(table, method, payload))) {
         Ok(Ok(value)) => {
@@ -128,18 +133,19 @@ fn envelope(table: &[Command], method: &str, payload: Value) -> String {
             out.insert("ok".to_owned(), value);
             Value::Object(out).to_string()
         }
-        Ok(Err(message)) => error_envelope(&message),
-        Err(payload) => error_envelope(&format!(
-            "command panicked: {}",
-            panic_text(payload.as_ref())
-        )),
+        Ok(Err((message, kind))) => error_envelope(&message, kind),
+        Err(payload) => error_envelope(
+            &format!("command panicked: {}", panic_text(payload.as_ref())),
+            "panic",
+        ),
     }
 }
 
-fn error_envelope(message: &str) -> String {
-    // A string always serializes; the fallback mirrors the shell's own.
+fn error_envelope(message: &str, kind: &str) -> String {
+    // Both fields always serialize; the fallbacks mirror the shell's own.
     let text = serde_json::to_string(message).unwrap_or_else(|_| "\"command failed\"".to_owned());
-    format!("{{\"error\":{text}}}")
+    let kind = serde_json::to_string(kind).unwrap_or_else(|_| "\"handler\"".to_owned());
+    format!("{{\"error\":{{\"message\":{text},\"kind\":{kind}}}}}")
 }
 
 fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
@@ -177,7 +183,7 @@ pub extern "C" fn kiln_dispatch(method: *const c_char, payload: *const c_char) -
         .unwrap_or(Ok(Value::Null))
     {
         Ok(value) => envelope(COMMANDS, &method, value),
-        Err(message) => error_envelope(&message),
+        Err(message) => error_envelope(&message, "payload"),
     };
     // JSON output never contains a NUL byte (control characters are escaped),
     // so this cannot fail; the fallback is a valid error envelope anyway.
@@ -240,19 +246,25 @@ mod tests {
     #[test]
     fn an_unknown_method_says_what_the_static_path_says() {
         let body = envelope(COMMANDS, "nope", Value::Null);
-        assert_eq!(body, r#"{"error":"unknown command: nope"}"#);
+        assert_eq!(
+            body,
+            r#"{"error":{"message":"unknown command: nope","kind":"unknown"}}"#
+        );
     }
 
     #[test]
     fn a_command_error_becomes_the_error_envelope() {
         let body = envelope(TEST, "fail", Value::Null);
-        assert_eq!(body, r#"{"error":"no dice"}"#);
+        assert_eq!(body, r#"{"error":{"message":"no dice","kind":"handler"}}"#);
     }
 
     #[test]
     fn a_panicking_command_is_contained_and_worded_like_the_static_path() {
         let body = envelope(TEST, "boom", Value::Null);
-        assert_eq!(body, r#"{"error":"command panicked: hot boom"}"#);
+        assert_eq!(
+            body,
+            r#"{"error":{"message":"command panicked: hot boom","kind":"panic"}}"#
+        );
         // And the process is still here to ask.
         assert_eq!(
             envelope(COMMANDS, "greet", Value::Null),
@@ -282,13 +294,22 @@ mod tests {
 
     #[test]
     fn the_ffi_surface_survives_junk_input() {
-        assert_eq!(call("greet", "not json"), r#"{"error":"payload is not valid JSON"}"#);
-        assert_eq!(call("nope", "null"), r#"{"error":"unknown command: nope"}"#);
+        assert_eq!(
+            call("greet", "not json"),
+            r#"{"error":{"message":"payload is not valid JSON","kind":"payload"}}"#
+        );
+        assert_eq!(
+            call("nope", "null"),
+            r#"{"error":{"message":"unknown command: nope","kind":"unknown"}}"#
+        );
         // Null pointers are treated as empty, not dereferenced.
         let ptr = kiln_dispatch(std::ptr::null(), std::ptr::null());
         let body = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned();
         kiln_free(ptr);
-        assert_eq!(body, r#"{"error":"unknown command: "}"#);
+        assert_eq!(
+            body,
+            r#"{"error":{"message":"unknown command: ","kind":"unknown"}}"#
+        );
         kiln_free(std::ptr::null_mut()); // must be a no-op
     }
 

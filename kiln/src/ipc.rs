@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! request  body: <payload as JSON, or null>
-//! response body: {"ok": <json>} | {"error": "<message>"}
+//! response body: {"ok": <json>} | {"error": {"message": "<text>", "kind": "<class>"}}
 //! ```
 //!
 //! The whitelist is the set of handlers compiled into the binary. There is no
@@ -241,10 +241,15 @@ fn ok_or_error(result: Result<Value, Error>) -> String {
     }
 }
 
+/// Build the error side of the envelope: a message plus a machine-readable
+/// `kind` so a page branches on the failure class instead of matching text.
+/// `unknown` deliberately covers both an unregistered command and an allowlist
+/// denial, so the page cannot tell which commands exist but were withheld.
 pub(crate) fn error_envelope(error: &Error) -> String {
     let message = serde_json::to_string(&error.to_string())
         .unwrap_or_else(|_| "\"command failed\"".to_owned());
-    format!(r#"{{"error":{message}}}"#)
+    let kind = serde_json::Value::from(error.kind());
+    format!(r#"{{"error":{{"message":{message},"kind":{kind}}}}}"#)
 }
 
 fn report_panic(payload: &(dyn std::any::Any + Send)) -> Error {
@@ -322,7 +327,10 @@ mod tests {
     fn unknown_method_is_an_error_envelope_not_a_panic() {
         let reg = registry_with(&["greet"]);
         let out = reg.dispatch(&empty_handle(), "nope", Value::Null);
-        assert!(out.contains(r#""error":"unknown command: nope""#), "{out}");
+        assert!(
+            out.contains("unknown command: nope") && out.contains(r#""kind":"unknown""#),
+            "{out}"
+        );
     }
 
     #[test]
@@ -339,7 +347,9 @@ mod tests {
         let mut reg = Registry::new();
         reg.add("boom", |_h, _p| Err(Error::Handler("kaboom".into())));
         let out = reg.dispatch(&empty_handle(), "boom", Value::Null);
-        assert_eq!(out, r#"{"error":"kaboom"}"#);
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["error"]["message"], "kaboom");
+        assert_eq!(parsed["error"]["kind"], "handler");
     }
 
     #[test]
@@ -352,7 +362,7 @@ mod tests {
         });
         let out = reg.dispatch(&empty_handle(), "boom", Value::Null);
         let parsed: Value = serde_json::from_str(&out).unwrap();
-        let message = parsed["error"].as_str().expect("error envelope expected");
+        let message = parsed["error"]["message"].as_str().expect("error envelope expected");
         assert!(message.starts_with("command panicked:"), "{message}");
         assert!(message.contains("index out of bounds"), "{message}");
     }
@@ -401,7 +411,8 @@ mod tests {
         });
         let body = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         let parsed: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(parsed["error"], "command panicked: async kaboom");
+        assert_eq!(parsed["error"]["message"], "command panicked: async kaboom");
+        assert_eq!(parsed["error"]["kind"], "panic");
     }
 
     #[test]
@@ -410,7 +421,7 @@ mod tests {
         reg.add("q", |_h, _p| Err(Error::Handler("say \"hi\"\nnow".into())));
         let out = reg.dispatch(&empty_handle(), "q", Value::Null);
         let parsed: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(parsed["error"], "say \"hi\"\nnow");
+        assert_eq!(parsed["error"]["message"], "say \"hi\"\nnow");
     }
 
     #[test]

@@ -255,9 +255,16 @@ fn parse_envelope(body: &str) -> Result<Value, Error> {
     let value: Value = serde_json::from_str(body)
         .map_err(|e| Error::Runtime(format!("malformed response: {e}")))?;
     match (value.get("ok"), value.get("error")) {
-        (_, Some(error)) => Err(Error::Handler(
-            error.as_str().unwrap_or("command failed").to_owned(),
-        )),
+        (_, Some(error)) => {
+            // The structured envelope carries {message, kind}; the plain-string
+            // form is still accepted so an older reply rejects with readable text.
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .or_else(|| error.as_str())
+                .unwrap_or("command failed");
+            Err(Error::Handler(message.to_owned()))
+        }
         (Some(ok), None) => Ok(ok.clone()),
         _ => Err(Error::Runtime("malformed response envelope".to_owned())),
     }

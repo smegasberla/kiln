@@ -110,8 +110,11 @@ async function probe(binary: string, app: string, port: number): Promise<string 
   server.stop(true);
   if (body === null) return null;
   try {
-    const parsed = JSON.parse(body) as { ok?: string; error?: string };
-    return parsed.ok ?? parsed.error ?? null;
+    const parsed = JSON.parse(body) as { ok?: string; error?: string | { message?: string } };
+    // The envelope's error is an object since the structured-kind change; the
+    // plain-string form (and the page's own fetch failures) still arrive.
+    const error = typeof parsed.error === "string" ? parsed.error : parsed.error?.message;
+    return parsed.ok ?? error ?? null;
   } catch {
     return body;
   }

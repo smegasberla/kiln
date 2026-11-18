@@ -339,7 +339,8 @@ mod tests {
         let hot = hot_with(contained_dispatch);
         let body = hot.call("boom", &Value::Null);
         let parsed: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(parsed["error"], "command panicked: dylib kaboom");
+        assert_eq!(parsed["error"]["message"], "command panicked: dylib kaboom");
+        assert_eq!(parsed["error"]["kind"], "panic");
         // And the same instance keeps serving the next call.
         let hot = hot_with(ok_dispatch);
         assert!(hot.call("ok", &Value::Null).contains("ok"));
@@ -356,7 +357,7 @@ mod tests {
         let hot = hot_with(garbage_dispatch);
         let body = hot.call("x", &Value::Null);
         let parsed: Value = serde_json::from_str(&body).unwrap();
-        let message = parsed["error"].as_str().unwrap();
+        let message = parsed["error"]["message"].as_str().unwrap();
         assert!(message.contains("malformed reply"), "{message}");
         assert!(message.contains("definitely not json"), "{message}");
     }
@@ -440,6 +441,8 @@ mod tests {
     fn no_hot_library_means_unknown_command_exactly_as_before() {
         let reg = Registry::new();
         let body = reg.dispatch(&crate::AppHandle::detached_for_tests(), "greet", Value::Null);
-        assert_eq!(body, r#"{"error":"unknown command: greet"}"#);
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["error"]["message"], "unknown command: greet");
+        assert_eq!(parsed["error"]["kind"], "unknown");
     }
 }

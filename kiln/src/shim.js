@@ -48,9 +48,21 @@
     const entry = pending.get(id);
     if (!entry) return;
     pending.delete(id);
-    if (envelope.error !== undefined) entry.reject(new Error(envelope.error));
+    if (envelope.error !== undefined) entry.reject(toError(envelope.error));
     else entry.resolve(envelope.ok);
   };
+
+  // Errors arrive as {message, kind, method} since the structured envelope
+  // shipped; the plain-string form is still accepted so an older shell or the
+  // hot-reload dylib answering a newer page rejects with readable text either
+  // way. The kind rides along on the Error so frontends can branch on it.
+  function toError(error) {
+    if (typeof error === "string") return new Error(error);
+    const err = new Error((error && error.message) || "command failed");
+    if (error && error.kind) err.kind = error.kind;
+    if (error && error.method) err.method = error.method;
+    return err;
+  }
 
   function invokeOverBridge(method, payload) {
     if (typeof window.ipc === "undefined" || !window.ipc.postMessage) {
@@ -81,7 +93,7 @@
     } catch {
       throw new Error("kiln: malformed response for " + method);
     }
-    if (envelope.error !== undefined) throw new Error(envelope.error);
+    if (envelope.error !== undefined) throw toError(envelope.error);
     return envelope.ok;
   }
 

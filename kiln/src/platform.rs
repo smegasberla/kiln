@@ -160,6 +160,16 @@ fn platform_data_dir(_app_name: &str) -> Option<PathBuf> {
     android::files_dir()
 }
 
+#[cfg(target_os = "ios")]
+fn platform_data_dir(app_name: &str) -> Option<PathBuf> {
+    // iOS sets HOME to the app container root inside the sandbox, and
+    // Library/Application Support is the location Apple documents for
+    // app-managed data. Falling through to the XDG branch below would write
+    // outside the container layout the OS expects.
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join("Library/Application Support").join(app_name))
+}
+
 #[cfg(target_os = "macos")]
 fn platform_data_dir(app_name: &str) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
@@ -172,7 +182,12 @@ fn platform_data_dir(app_name: &str) -> Option<PathBuf> {
     Some(PathBuf::from(base).join(app_name))
 }
 
-#[cfg(not(any(target_os = "android", target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "ios"
+)))]
 fn platform_data_dir(app_name: &str) -> Option<PathBuf> {
     // XDG, which is also what the BSDs follow.
     let base = match std::env::var_os("XDG_DATA_HOME") {

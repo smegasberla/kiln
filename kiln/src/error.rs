@@ -7,6 +7,8 @@ pub enum Error {
     UnknownMethod(String),
     /// A handler returned an error; the string is shown to the page.
     Handler(String),
+    /// The request payload could not be read as the handler's argument type.
+    Payload(String),
     /// A handler panicked. The app keeps running; the page gets this message.
     Panic(String),
     /// The webview or event loop failed.
@@ -18,8 +20,25 @@ impl fmt::Display for Error {
         match self {
             Error::UnknownMethod(m) => write!(f, "unknown command: {m}"),
             Error::Handler(m) => f.write_str(m),
+            Error::Payload(m) => write!(f, "invalid payload: {m}"),
             Error::Panic(m) => write!(f, "command panicked: {m}"),
             Error::Runtime(m) => write!(f, "runtime error: {m}"),
+        }
+    }
+}
+
+impl Error {
+    /// Machine-readable class of this failure, carried on the wire so a page
+    /// branches on the kind instead of matching message text. `unknown` covers
+    /// both an unregistered command and an allowlist denial on purpose: the
+    /// page must not learn which commands exist but were withheld.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Error::UnknownMethod(_) => "unknown",
+            Error::Handler(_) => "handler",
+            Error::Payload(_) => "payload",
+            Error::Panic(_) => "panic",
+            Error::Runtime(_) => "runtime",
         }
     }
 }

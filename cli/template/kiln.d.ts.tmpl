@@ -2,7 +2,9 @@
 declare global {
   interface Window {
     kiln: {
-      /** Call a Rust command. Rejects if the handler errored or is unknown. */
+      /** Call a Rust command. Rejects if the handler errored or is unknown.
+       *  The rejection is an Error whose `kind` names the failure class:
+       *  "panic" | "handler" | "payload" | "unknown" | "runtime". */
       invoke<T = unknown>(method: string, payload?: unknown): Promise<T>;
       /** Subscribe to a Rust -> JS event. Returns an unsubscribe function. */
       listen<T = unknown>(event: string, fn: (payload: T) => void): () => void;
