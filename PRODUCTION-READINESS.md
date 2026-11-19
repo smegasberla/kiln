@@ -317,10 +317,12 @@ emulator, and the guard test pins it.
 future contributor) → D (minutes) → C1 (design, then code) → C2 (needs an
 emulator session).
 
-## What was measured for iOS — dated 2026-11-19
+## What the iOS CI job measures — provisional until it goes green (2026-11-19)
 
-Phases I-1 to I-5 of `IOS-PLAN.md` are landed. Measured on the CI macOS runner,
-which is the first real execution of the whole iOS chain:
+Phases I-1 to I-5 of `IOS-PLAN.md` are landed. The CI macOS runner is the
+first real execution of the whole iOS chain, and as of this writing that job
+has not passed once: what follows is what the job asserts, not a measurement,
+until the run is green:
 
 - a fresh `kiln init` builds for the simulator: frontend bundled and embedded
   in the staticlib, staged, linked through the XcodeGen-generated project, and

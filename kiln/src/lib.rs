@@ -47,6 +47,7 @@ mod assets;
 mod config;
 mod dispatch;
 mod error;
+mod event_loop;
 #[cfg(feature = "hot-reload")]
 mod hot;
 mod ipc;
@@ -84,8 +85,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use tao::{
-    event::{ElementState, Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
+    event_loop::{EventLoopBuilder, EventLoopProxy},
     keyboard::{KeyCode, ModifiersState},
     window::{Window, WindowBuilder},
 };
@@ -276,7 +276,7 @@ type ReadyHook = Box<dyn Fn(&AppHandle) + Send + Sync>;
 
 /// Builds a webview for a given target URL. Captures everything a window needs
 /// to share: protocol handler, shim, navigation policy, ready hook.
-type BuilderFactory =
+pub(crate) type BuilderFactory =
     Arc<dyn Fn(String, Option<String>) -> WebViewBuilder<'static> + Send + Sync>;
 
 /// The builder. Chain configuration, then `run()`.
@@ -560,134 +560,31 @@ impl App {
         #[cfg(feature = "tray")]
         let _tray_handle = build_tray(&self.tray, &handle);
 
-        let mut open = windows::Windows::new();
-        windows::insert(
-            &mut open,
-            window.id(),
-            windows::WindowEntry {
-                label: spec.label_for(&first),
-                window,
-                webview,
+        let mut state = event_loop::LoopState {
+            open: {
+                let mut open = windows::Windows::new();
+                windows::insert(
+                    &mut open,
+                    window.id(),
+                    windows::WindowEntry {
+                        label: spec.label_for(&first),
+                        window,
+                        webview,
+                    },
+                );
+                open
             },
-        );
-
-        let mut modifiers = ModifiersState::empty();
+            modifiers: ModifiersState::empty(),
+            spec,
+            factory,
+            handle,
+            show_devtools,
+            #[cfg(feature = "menu")]
+            menu_commands,
+        };
 
         event_loop.run(move |event, event_loop, control_flow| {
-            *control_flow = ControlFlow::Wait;
-            match event {
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    window_id,
-                    ..
-                } => {
-                    open.remove(&window_id);
-                    if open.is_empty() {
-                        *control_flow = ControlFlow::Exit;
-                    }
-                }
-                Event::WindowEvent {
-                    event: WindowEvent::ModifiersChanged(state),
-                    ..
-                } => modifiers = state,
-                Event::WindowEvent {
-                    event:
-                        WindowEvent::KeyboardInput {
-                            event: key,
-                            ..
-                        },
-                    window_id,
-                    ..
-                } => {
-                    if show_devtools
-                        && key.state == ElementState::Pressed
-                        && is_devtools_shortcut(key.physical_key, modifiers)
-                    {
-                        if let Some(entry) = open.get(&window_id) {
-                            open_devtools(&entry.webview);
-                        }
-                    }
-                }
-                Event::UserEvent(UserEvent::Emit {
-                    label,
-                    event,
-                    payload,
-                }) => {
-                    let script = format!(
-                        "window.__kiln_emit&&window.__kiln_emit({},{})",
-                        serde_json::to_string(&event).unwrap_or_else(|_| "\"\"".to_owned()),
-                        payload
-                    );
-                    for entry in open.values() {
-                        if label.as_ref().is_none_or(|l| *l == entry.label) {
-                            if let Err(error) = entry.webview.evaluate_script(&script) {
-                                eprintln!("kiln: emit failed: {error}");
-                            }
-                        }
-                    }
-                }
-                Event::UserEvent(UserEvent::OpenWindow(options)) => {
-                    match windows::create_window(event_loop, &spec, &options, &*factory) {
-                        Ok((id, entry)) => windows::insert(&mut open, id, entry),
-                        Err(error) => eprintln!("kiln: could not open window: {error}"),
-                    }
-                }
-                Event::UserEvent(UserEvent::CloseWindow(label)) => {
-                    if let Some(id) = open
-                        .iter()
-                        .find(|(_, e)| e.label == label)
-                        .map(|(id, _)| *id)
-                    {
-                        open.remove(&id);
-                        if open.is_empty() {
-                            *control_flow = ControlFlow::Exit;
-                        }
-                    }
-                }
-                Event::UserEvent(UserEvent::Tray(id)) => {
-                    handle.emit_to_all("tray", serde_json::json!({ "id": id }));
-                }
-                Event::UserEvent(UserEvent::Menu(id)) => {
-                    handle.emit_to_all("menu", serde_json::json!({ "id": id }));
-                    #[cfg(feature = "menu")]
-                    if let Some(command) = menu_commands.get(&id) {
-                        handle.run_command(command, Value::Null);
-                    }
-                    #[cfg(not(feature = "menu"))]
-                    let _ = &id;
-                }
-                Event::UserEvent(UserEvent::Eval(script)) => {
-                    for entry in open.values() {
-                        if let Err(error) = entry.webview.evaluate_script(&script) {
-                            eprintln!("kiln: eval failed: {error}");
-                        }
-                    }
-                }
-                Event::UserEvent(UserEvent::Signal(signal)) => {
-                    if signal == "devtools" {
-                        for entry in open.values() {
-                            open_devtools(&entry.webview);
-                        }
-                    }
-                    handle.emit_to_all("signal", serde_json::json!({ "id": signal }));
-                }
-                // Mobile lifecycle: tao maps the UIKit callbacks onto
-                // WindowEvent::Suspended/Resumed, and the page hears them as
-                // `lifecycle` through the same queue Android's activity
-                // callbacks use. Desktop never raises either, so this is
-                // mobile-only in practice.
-                #[cfg(any(target_os = "android", target_os = "ios"))]
-                Event::WindowEvent {
-                    event: WindowEvent::Suspended,
-                    ..
-                } => platform::lifecycle("pause"),
-                #[cfg(any(target_os = "android", target_os = "ios"))]
-                Event::WindowEvent {
-                    event: WindowEvent::Resumed,
-                    ..
-                } => platform::lifecycle("resume"),
-                _ => {}
-            }
+            event_loop::dispatch(&mut state, event, event_loop, control_flow);
         });
     }
 }
@@ -836,7 +733,7 @@ fn build_tray(config: &Option<tray::TrayConfig>, handle: &AppHandle) -> Option<t
 /// automatic in debug builds and requires the `devtools` feature in release. The
 /// shell promises the shortcut, so it must not fail to compile without it; a
 /// release build that opted out simply gets no devtools.
-fn open_devtools(webview: &WebView) {
+pub(crate) fn open_devtools(webview: &WebView) {
     #[cfg(any(debug_assertions, feature = "devtools"))]
     webview.open_devtools();
     #[cfg(not(any(debug_assertions, feature = "devtools")))]
@@ -847,7 +744,7 @@ fn open_devtools(webview: &WebView) {
 }
 
 /// F12 on Linux and Windows, Cmd-Alt-I on macOS.
-fn is_devtools_shortcut(key: KeyCode, modifiers: ModifiersState) -> bool {
+pub(crate) fn is_devtools_shortcut(key: KeyCode, modifiers: ModifiersState) -> bool {
     #[cfg(target_os = "macos")]
     {
         key == KeyCode::KeyI && modifiers.super_key() && modifiers.alt_key()

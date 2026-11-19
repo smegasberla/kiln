@@ -285,7 +285,7 @@ to keep it, and leaving it out removes it.
 | Multi-window, tray, menus, updater | supported | supported, as opt-in features |
 | Crash reporting | plugin / sentry | panic hook + local ring buffer, no upload |
 | Panic in a command | aborts the app by default | contained, reported to the page as an error |
-| Mobile | supported | Android: supported. iOS: supported on the simulator — `kiln ios build\|run\|verify`, verified in CI; device builds need signing, which stays with the app owner |
+| Mobile | supported | Android: supported. iOS: supported on the simulator — `kiln ios build\|run\|verify`, provisional until the CI simulator job goes green once; device builds need signing, which stays with the app owner |
 
 The tradeoff is deliberate: Tauri is a full application platform, Kiln is the
 core shell with nothing speculative bolted on. What was cut, and what would bring
@@ -337,7 +337,7 @@ kiln package --icon icon.png
 | FreeBSD | CI (VM) | CI (VM) | GTK 3 + WebKit2GTK, same code path as Linux |
 | NetBSD | `cargo check` | graph only | unverified at runtime |
 | Android arm64 / x86_64 | yes | yes (emulator, CI) | wry's IPC handler, same commands and security policy |
-| iOS aarch64 (simulator) | yes | yes (simulator, CI) | WKWebView via wry's `WKURLSchemeHandler`: the desktop origin and policy, no branch |
+| iOS aarch64 (simulator) | yes | provisional (simulator, CI not yet green) | WKWebView via wry's `WKURLSchemeHandler`: the desktop origin and policy, no branch |
 
 BSD works because wry and tao already treat it as a webkitgtk/GTK platform: two
 things blocked it (tao's default `dbus` feature and a Linux-only `gtk`
@@ -414,8 +414,8 @@ the staticlib, stages it and runs `xcodebuild` for the simulator (or `--target
 device`, unsigned); `run` boots and drives a simulator over `simctl`; `verify`
 asserts the app reaches its Rust entry. Command parity is now three-way.
 What is *not* done yet: nothing iOS-side has been executed on a Mac — every
-build and verify above needs macOS with Xcode, and the CI job that proves it
-is Phase I-4.
+build and verify above needs macOS with Xcode, and the Phase I-4 CI job that
+proves it has not gone green yet.
 
 `cargo check` for Windows and macOS runs in this repo. macOS cannot be *fully*
 compiled off a Mac (its Objective-C shims need the Apple SDK), so `ci.yml`

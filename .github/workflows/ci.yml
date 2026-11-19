@@ -219,6 +219,7 @@ jobs:
           script: |
             adb install -r /tmp/app/android/app/build/outputs/apk/debug/*.apk
             (cd /tmp/app/android/app && gradle connectedDebugAndroidTest --no-daemon)
+            adb shell pm list packages | grep ci_app || true
             adb shell am start -n com.kiln.ci_app/.MainActivity
             sleep 15
             adb logcat -d -s Kiln:* || true
