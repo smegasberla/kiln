@@ -1,0 +1,158 @@
+//! Registry dispatch behind the transport seam.
+//!
+//! Both transports land here: the custom protocol (`serve_async`, every
+//! platform) and the Android bridge (`serve_bridge`, where a POST cannot carry
+//! a body). The envelope, the per-window allowlist and the security headers
+//! are decided in this one module, so a new transport joins by calling in
+//! rather than by re-implementing the rules.
+
+use std::borrow::Cow;
+use std::sync::Arc;
+
+use serde_json::Value;
+use wry::http::{header, Request, Response};
+
+use crate::assets::{content_type, lookup, AssetTable};
+use crate::ipc;
+use crate::security::content_security_policy;
+use crate::transport;
+use crate::{AppHandle, Registry};
+
+/// Answer a bridge message: parse `{id, method, payload}`, run the command, then
+/// resolve the page's promise by evaluating `__kiln_resolve(id, envelope)`.
+///
+/// Used on Android, where a custom-protocol POST cannot carry a body. The
+/// envelope is identical to the protocol transport, so a command behaves the same
+/// on both platforms.
+pub(crate) fn serve_bridge(
+    registry: &Arc<Registry>,
+    handle: &AppHandle,
+    label: Option<&str>,
+    message: &str,
+) {
+    let parsed: Value = match serde_json::from_str(message) {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("kiln: bridge message is not valid JSON");
+            return;
+        }
+    };
+
+    let id = parsed.get("id").cloned().unwrap_or(Value::Null);
+    let Some(method) = parsed.get("method").and_then(Value::as_str).map(str::to_owned) else {
+        eprintln!("kiln: bridge message has no method");
+        return;
+    };
+    let payload = parsed.get("payload").cloned().unwrap_or(Value::Null);
+
+    let script_handle = handle.clone();
+    registry.dispatch_for_window(handle, label, &method, payload, move |body| {
+        // `body` is already an envelope; hand it to the page as JSON, not as a
+        // string, so the shim does not have to parse twice.
+        let script = format!(
+            "window.__kiln_resolve&&window.__kiln_resolve({}, {})",
+            id, body
+        );
+        script_handle.eval_all(&script);
+    });
+}
+
+/// Serve one request, replying through wry's async responder so async commands
+/// and slow handlers do not block the UI thread.
+pub(crate) fn serve_async(
+    registry: Arc<Registry>,
+    handle: AppHandle,
+    assets: AssetTable,
+    dev_origin: Option<String>,
+    label: Option<String>,
+    request: Request<Vec<u8>>,
+    responder: wry::RequestAsyncResponder,
+) {
+    let dev = dev_origin.is_some();
+    let mut builder = base_headers(dev);
+    if let Some(origin) = &dev_origin {
+        builder = with_cors(builder, origin);
+    }
+
+    if request.method() == "OPTIONS" {
+        responder.respond(builder.status(204).body(Cow::Borrowed(&[][..])).unwrap());
+        return;
+    }
+
+    let path = request.uri().path().to_owned();
+
+    if let Some(method) = ipc::method_from_path(&path) {
+        if request.method() != "POST" {
+            responder.respond(json_error(builder, 405, "invoke requires POST"));
+            return;
+        }
+        let payload = match transport::parse_payload(request.body()) {
+            Ok(value) => value,
+            Err(message) => {
+                responder.respond(json_error(builder, 400, &message));
+                return;
+            }
+        };
+        // The response is built here, not from `builder`, so the CORS header has
+        // to be re-applied: in dev the page is served from a different origin and
+        // without it the browser rejects the reply before the page ever sees it.
+        let cors_origin = dev_origin.clone();
+        registry.dispatch_for_window(&handle, label.as_deref(), &method, payload, move |body| {
+            let mut response = base_headers(dev);
+            if let Some(origin) = &cors_origin {
+                response = with_cors(response, origin);
+            }
+            responder.respond(
+                response
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .status(200)
+                    .body(Cow::Owned(body.into_bytes()))
+                    .unwrap(),
+            );
+        });
+        return;
+    }
+
+    let response = match lookup(assets, &path) {
+        Some((name, bytes)) => builder
+            .header(header::CONTENT_TYPE, content_type(name))
+            .status(200)
+            .body(bytes)
+            .unwrap(),
+        None => builder
+            .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+            .status(404)
+            .body(Cow::Borrowed(b"not found".as_slice()))
+            .unwrap(),
+    };
+    responder.respond(response);
+}
+
+/// Headers every response carries. CSP is the important one: without it a page
+/// could pull a remote script into a context that holds the IPC bridge.
+fn base_headers(dev: bool) -> wry::http::response::Builder {
+    Response::builder()
+        .header(header::CONTENT_SECURITY_POLICY, content_security_policy(dev))
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .header(header::REFERRER_POLICY, "no-referrer")
+}
+
+fn with_cors(builder: wry::http::response::Builder, origin: &str) -> wry::http::response::Builder {
+    builder
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin)
+        .header(header::ACCESS_CONTROL_ALLOW_METHODS, "POST, GET, OPTIONS")
+        .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "content-type")
+}
+
+fn json_error(
+    response: wry::http::response::Builder,
+    status: u16,
+    message: &str,
+) -> Response<Cow<'static, [u8]>> {
+    let body = format!(r#"{{"error":{}}}"#, serde_json::Value::from(message));
+    response
+        .header(header::CONTENT_TYPE, "application/json")
+        .status(status)
+        .body(Cow::Owned(body.into_bytes()))
+        .unwrap()
+}

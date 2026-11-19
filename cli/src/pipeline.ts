@@ -74,7 +74,10 @@ export async function cargoBuild(project: Project, release: boolean): Promise<st
   const args = ["cargo", "build"];
   if (release) args.push("--release");
   await run(args, { cwd: crate });
-  const bin = join(crate, "target", release ? "release" : "debug", binaryName(crate));
+  // Windows suffixes cargo binaries with .exe; stat'ing the bare name reports
+  // "cargo finished but ... is missing" on every successful build there.
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  const bin = join(crate, "target", release ? "release" : "debug", `${binaryName(crate)}${suffix}`);
   if (!statSync(bin, { throwIfNoEntry: false })) {
     throw new Error(`cargo finished but ${bin} is missing`);
   }

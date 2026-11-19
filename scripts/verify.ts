@@ -8,7 +8,7 @@
  *  Run: bun scripts/verify.ts
  */
 
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -291,7 +291,15 @@ async function main() {
       repo,
     );
     if (build.code !== 0) {
-      record("embedded round-trip + emit", false, build.err.slice(-160));
+      // Keep cargo's own error lines, not the tail: the tail is the
+      // "For more information" footer, and the head is what names the failure.
+      const detail =
+        build.err
+          .split("\n")
+          .filter((line) => line.includes("error"))
+          .slice(0, 4)
+          .join(" | ") || "(cargo failed with no stderr captured)";
+      record("embedded round-trip + emit", false, detail);
     } else {
       const { out, err, code } = await shWithTimeout(
         [join(repo, "target", "release", "examples", `hello${EXE}`)],
@@ -441,10 +449,13 @@ async function main() {
     if (compiled.code !== 0) {
       record("compiled CLI", false, compiled.err.slice(-140));
     } else {
+      // bun appends .exe to --compile output on Windows; spawning resolves
+      // the bare name through CreateProcess, node's stat does not.
+      const bin = existsSync(out) ? out : `${out}.exe`;
       const bare = join(work, "cli-only-air");
       const env = { PATH: "/usr/bin:/bin", HOME: bare };
-      const init = await sh([out, "init", join(bare, "app")], work, env);
-      const size = (statSync(out).size / 1048576).toFixed(0);
+      const init = await sh([bin, "init", join(bare, "app")], work, env);
+      const size = (statSync(bin).size / 1048576).toFixed(0);
       record(
         "compiled CLI (no bun on PATH)",
         init.code === 0,
