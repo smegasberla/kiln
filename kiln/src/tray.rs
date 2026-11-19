@@ -92,7 +92,7 @@ impl TrayConfig {
 }
 
 /// A live tray icon. Dropping it removes the icon from the status area.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub struct TrayHandle {
     _icon: tray_icon::TrayIcon,
 }
@@ -107,7 +107,7 @@ pub struct TrayHandle {
 }
 
 /// Build the tray icon and wire its menu to the app's event loop.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn build(config: &TrayConfig, handle: &AppHandle) -> Result<TrayHandle, Error> {
     use tray_icon::menu::{Menu, MenuItem as TrayMenuItem};
     use tray_icon::{Icon, TrayIconBuilder};
@@ -165,6 +165,24 @@ pub fn build(config: &TrayConfig, _handle: &AppHandle) -> Result<TrayHandle, Err
                 .to_owned(),
         ))
     }
+}
+
+/// A live tray on iOS, which does not exist.
+///
+/// iOS has no status area a tray can occupy and no background service an app
+/// can own. `build` reports that honestly rather than silently doing
+/// nothing: an app that wants a visible affordance on iOS uses the page's
+/// own UI, the way the scaffold hides its tray on mobile.
+#[cfg(target_os = "ios")]
+pub struct TrayHandle {
+    _private: (),
+}
+
+#[cfg(target_os = "ios")]
+pub fn build(_config: &TrayConfig, _handle: &AppHandle) -> Result<TrayHandle, Error> {
+    Err(Error::Handler(
+        "the system tray does not exist on iOS; use in-page UI instead".to_owned(),
+    ))
 }
 
 /// The event payload the page receives for a tray click.

@@ -285,7 +285,7 @@ to keep it, and leaving it out removes it.
 | Multi-window, tray, menus, updater | supported | supported, as opt-in features |
 | Crash reporting | plugin / sentry | panic hook + local ring buffer, no upload |
 | Panic in a command | aborts the app by default | contained, reported to the page as an error |
-| Mobile | supported | Android: supported. iOS: absent |
+| Mobile | supported | Android: supported. iOS: in progress — bootstrap and platform gates landed, simulator runs land with the CLI and CI phases |
 
 The tradeoff is deliberate: Tauri is a full application platform, Kiln is the
 core shell with nothing speculative bolted on. What was cut, and what would bring
@@ -382,7 +382,14 @@ notification permission (an OS prompt in front of the app pauses the WebView, so
 page that was not yet loaded never finishes loading), and drive system UI through
 the `UiAutomation` instrumentation already owns instead of adding UiAutomator.
 
-iOS is not supported.
+iOS: the bootstrap crate (`kiln-ios`) and the platform gates are in place
+(IOS-PLAN.md Phases I-1 and I-2). Menus, dialogs, tray, and the updater's
+endpoint fetch report honestly on iOS instead of compiling desktop code that
+cannot exist there, the app's data directory is the sandbox's documented
+location, and the UIKit suspend/resume callbacks feed the same `lifecycle`
+events Android emits. What is *not* done is the toolchain: no Xcode project
+template, no `kiln ios build`, no simulator run yet, so nothing iOS-side has
+been executed (Phases I-3 and I-4).
 
 `cargo check` for Windows and macOS runs in this repo. macOS cannot be *fully*
 compiled off a Mac (its Objective-C shims need the Apple SDK), so `ci.yml`

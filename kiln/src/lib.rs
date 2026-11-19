@@ -670,6 +670,21 @@ impl App {
                     }
                     handle.emit_to_all("signal", serde_json::json!({ "id": signal }));
                 }
+                // Mobile lifecycle: tao maps the UIKit callbacks onto
+                // WindowEvent::Suspended/Resumed, and the page hears them as
+                // `lifecycle` through the same queue Android's activity
+                // callbacks use. Desktop never raises either, so this is
+                // mobile-only in practice.
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                Event::WindowEvent {
+                    event: WindowEvent::Suspended,
+                    ..
+                } => platform::lifecycle("pause"),
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                Event::WindowEvent {
+                    event: WindowEvent::Resumed,
+                    ..
+                } => platform::lifecycle("resume"),
                 _ => {}
             }
         });

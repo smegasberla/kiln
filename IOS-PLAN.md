@@ -106,6 +106,18 @@ Small, already half-done pieces:
 it can reach answering `ok`, and each cfg'd-out feature is documented as
 desktop/Android-only in README (the "supported" table at `README.md:288`).
 
+*Landed 2026-11-19, code side.* The opt-in crates (muda, tray-icon, rfd,
+ureq) are gated off iOS with the desktop deps, so a feature-`full` iOS build
+no longer compiles code that cannot exist there; menus build as an inert
+handle, dialogs and the tray report honest errors, and the updater's fetch
+declines while the comparison logic stays shared. The data-dir branch was
+already correct and is now documented as the sandbox's
+`Library/Application Support`. Lifecycle needed no new platform layer: tao
+maps the UIKit callbacks onto `Suspended`/`Resumed`, and the run loop turns
+those into the same `lifecycle` events Android emits. Still open, and owned
+by I-3/I-4: executing any of it — the simulator run that makes the
+acceptance line more than code review.
+
 ## Phase I-3 — `kiln ios build|run|verify` in the CLI
 
 Mirror `cli/src/commands/android.ts` (276 lines) command-for-command:

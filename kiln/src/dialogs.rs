@@ -20,7 +20,7 @@
 
 use serde_json::Value;
 
-#[cfg(any(not(target_os = "android"), test))]
+#[cfg(any(not(any(target_os = "android", target_os = "ios")), test))]
 use serde_json::json;
 
 use crate::Registry;
@@ -39,7 +39,7 @@ pub fn register(registry: &mut Registry) {
 }
 
 /// One dialog command, from payload to the reply the page sees.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn open(payload: &Value, kind: &str) -> Result<Value, crate::Error> {
     let dialog = build(payload);
     let picked: Option<Value> = match kind {
@@ -77,10 +77,21 @@ fn open(payload: &Value, kind: &str) -> Result<Value, crate::Error> {
     }
 }
 
+/// iOS has no system file picker a webview app may drive: `UIDocumentPicker`
+/// needs the Swift side, which the IOS-PLAN Phase I-3 template owns. The
+/// honest answer until then is an error, not a silent `null` a page would
+/// read as “nothing selected”.
+#[cfg(target_os = "ios")]
+fn open(_payload: &Value, kind: &str) -> Result<Value, crate::Error> {
+    Err(crate::Error::Handler(format!(
+        "dialog {kind} is not available on iOS yet"
+    )))
+}
+
 /// Paths cross the IPC boundary as UTF-8 strings. A path that is not valid UTF-8
 /// cannot be represented in JSON at all, so it is reported rather than mangled
 /// into replacement characters that would name a different file.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn path_string(path: &std::path::Path) -> String {
     match path.to_str() {
         Some(text) => text.to_owned(),
@@ -95,7 +106,7 @@ fn path_string(path: &std::path::Path) -> String {
 }
 
 /// Apply the payload's optional settings to a fresh dialog.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn build(payload: &Value) -> rfd::FileDialog {
     let mut dialog = rfd::FileDialog::new();
 
@@ -188,7 +199,7 @@ mod tests {
         }
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[test]
     fn paths_convert_to_utf8_strings() {
         let path = std::path::Path::new("/tmp/file.txt");

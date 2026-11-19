@@ -146,19 +146,21 @@ impl MenuHandle {
     }
 }
 
-/// A built menu on Android, which is the groups themselves.
+/// A built menu on mobile, which is the groups themselves.
 ///
-/// There is nothing to build: a `PopupMenu` is constructed per display, from the
-/// activity, when the app asks for it. Keeping the groups here means an app can
-/// declare one menu and get the platform's own presentation on both.
-#[cfg(target_os = "android")]
+/// There is nothing to build on Android: a `PopupMenu` is constructed per
+/// display, from the activity, when the app asks for it. iOS has no menu
+/// system at all; `build` still succeeds so an app declaring menus on every
+/// platform compiles, and keeping the groups here means an app can declare
+/// one menu and get the platform's own presentation where one exists.
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub struct MenuHandle {
     groups: Vec<MenuGroup>,
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 impl MenuHandle {
-    /// No-op: Android menus are not attached to anything.
+    /// No-op: mobile menus are not attached to anything.
     pub fn attach(&self, _window: &tao::window::Window) -> Result<(), String> {
         Ok(())
     }
@@ -173,7 +175,7 @@ impl MenuHandle {
 ///
 /// `app_name` is used for the macOS application menu's title, About item, and
 /// Quit item; other platforms use it only to label the quit entry.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn build(_app_name: &str, groups: &[MenuGroup]) -> Result<MenuHandle, String> {
     Ok(MenuHandle {
         groups: groups.to_vec(),
@@ -184,7 +186,7 @@ pub fn build(_app_name: &str, groups: &[MenuGroup]) -> Result<MenuHandle, String
 ///
 /// `app_name` is used for the macOS application menu's title, About item, and
 /// Quit item; other platforms use it only to label the quit entry.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn build(app_name: &str, groups: &[MenuGroup]) -> Result<MenuHandle, String> {
     use muda::{Menu, MenuItem as MudaItem, PredefinedMenuItem, Submenu};
 

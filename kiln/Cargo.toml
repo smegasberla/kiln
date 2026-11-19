@@ -54,12 +54,12 @@ full = ["menu", "dialogs", "updater", "devtools"]
 name = "hello"
 path = "examples/hello.rs"
 
-# These four have no Android backend: muda and rfd do not compile for the target
-# at all, and ureq pulls in `ring`, whose build script refuses to cross-build for
-# it without a C toolchain dance. Android gets native equivalents in
-# `src/platform`, so gating them here is what lets one app declare the same
-# features on both platforms.
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# These four have no mobile backend: muda and rfd do not compile for Android or
+# iOS at all, tray-icon has no mobile concept, and ureq pulls in `ring`, whose
+# build script refuses to cross-build for Android without a C toolchain dance.
+# Mobile gets native equivalents in `src/platform`, so gating them here is what
+# lets one app declare the same features on every platform.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 muda = { version = "0.21", optional = true }
 tray-icon = { version = "0.26", optional = true }
 rfd = { version = "0.18", optional = true }

@@ -70,7 +70,7 @@ pub fn register(registry: &mut Registry, config: &Config) {
 /// On Android this goes through the activity's `HttpURLConnection`, because a
 /// bundled TLS stack has to carry its own root certificates while the platform
 /// one already trusts the system store.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn fetch(url: &str) -> Result<String, Error> {
     let response = ureq::get(url)
         .call()
@@ -90,6 +90,19 @@ fn fetch(url: &str) -> Result<String, Error> {
 fn fetch(url: &str) -> Result<String, Error> {
     crate::platform::http_get(url)
         .ok_or_else(|| Error::Handler("update check failed: no activity can make the request".to_owned()))
+}
+
+/// On iOS the honest answer is that there is nothing to fetch: apps update
+/// through the App Store, and a bundled TLS stack would be the kind of
+/// dynamic-policy surface Apple reviews line by line. `update.check` stays
+/// registered so an app declaring the feature on every platform compiles,
+/// and the version comparison stays testable; the endpoint fetch waits for
+/// the Swift glue (IOS-PLAN Phase I-3) if a diagnostic fetch is ever wanted.
+#[cfg(target_os = "ios")]
+fn fetch(_url: &str) -> Result<String, Error> {
+    Err(Error::Handler(
+        "update checks are diagnostic on iOS; the App Store owns updates".to_owned(),
+    ))
 }
 
 /// Whether `latest` is newer than `current`, comparing dotted numeric segments.
