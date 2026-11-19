@@ -793,21 +793,25 @@ fn build_menu(
     // `platform::menu_clicked`, so it only needs the groups in a form the
     // activity can render, and emits through `platform::handle` when a click
     // arrives.
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let proxy = handle.clone();
         muda::MenuEvent::set_event_handler(Some(move |event: muda::MenuEvent| {
             proxy.emit_signal(&format!("menu:{}", event.id.0));
         }));
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = handle;
-        // There is no menu bar to hang the items on, so they are handed over once
-        // and shown later by `__kiln_show_menu`, when there is an anchor view.
-        let json = menu::to_json(&built.groups()).to_string();
-        if !crate::platform::install_menu(&json) {
-            eprintln!("kiln: menu installed before the activity existed; it will not show");
+        // There is no menu bar to hang the items on, so Android hands them over
+        // once and shows them later by `__kiln_show_menu`, when there is an
+        // anchor view. iOS has no menu backend at all yet: the handle is inert.
+        #[cfg(target_os = "android")]
+        {
+            let json = menu::to_json(&built.groups()).to_string();
+            if !crate::platform::install_menu(&json) {
+                eprintln!("kiln: menu installed before the activity existed; it will not show");
+            }
         }
     }
 

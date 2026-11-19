@@ -75,7 +75,7 @@ impl MenuGroup {
 ///
 /// JSON rather than a JNI call per field, because the activity builds a
 /// `PopupMenu` out of this and has no reason to know what a `MenuGroup` is.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn to_json(groups: &[MenuGroup]) -> serde_json::Value {
     serde_json::json!(
         groups
@@ -95,12 +95,12 @@ pub fn to_json(groups: &[MenuGroup]) -> serde_json::Value {
 }
 
 /// A built menu, kept alive for as long as the app runs.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub struct MenuHandle {
     pub(crate) menu: muda::Menu,
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl MenuHandle {
     /// Attach the menu to a window.
     ///
@@ -255,7 +255,7 @@ pub fn build(app_name: &str, groups: &[MenuGroup]) -> Result<MenuHandle, String>
 ///
 /// Android has no accelerators: a `PopupMenu` shows labels only, so the strings
 /// stay as documentation instead of becoming key bindings.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn parse_accelerator(text: &str) -> Option<muda::accelerator::Accelerator> {
     use std::str::FromStr;
     muda::accelerator::Accelerator::from_str(text).ok()
@@ -315,7 +315,7 @@ mod tests {
         assert_eq!(accels[0], ("save".to_owned(), "CmdOrCtrl+S".to_owned()));
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[test]
     fn shortcut_strings_parse() {
         assert!(parse_accelerator("CmdOrCtrl+S").is_some());
