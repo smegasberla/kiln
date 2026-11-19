@@ -14,7 +14,8 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
   dialogs, tray and the updater's fetch decline on iOS), UIKit lifecycle mapped
   onto the shared `lifecycle` events, an `ios/` shell scaffold (staticlib,
   XcodeGen project, one-symbol bridging header), and `kiln ios build|run|verify`
-  — built and round-trip-verified in CI on a booted simulator.
+  — built and round-trip-verified on a booted simulator; the CI job is
+  provisional until it goes green once.
 - Hot-reloadable commands behind a cargo feature: the scaffold now ships a
   `commands` crate with one `static COMMANDS: &[Command]` table (with
   `Kind::Sync` / `Kind::Async`), and `kiln dev` watches its `src/`, rebuilds
