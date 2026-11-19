@@ -226,6 +226,21 @@ jobs:
             grep -q "UnsatisfiedLinkError" /tmp/logcat.txt && exit 1
             exit 0
 
+  # Phase I-1 of IOS-PLAN.md. The bootstrap crate compiles to nothing off iOS,
+  # so only an Apple target proves its code type-checks; this is a check rather
+  # than a build, because the SDK-linking build scripts belong to the `kiln ios
+  # build` work in Phase I-3.
+  ios-check:
+    name: iOS (cross-check)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - name: Check the iOS bootstrap for the device target
+        run: cargo check -p kiln-ios --target aarch64-apple-ios
+
   macos:
     name: macOS (build, test)
     runs-on: macos-latest

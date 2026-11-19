@@ -71,6 +71,13 @@ Contents:
 a macOS runner; `cargo test --workspace` stays green on Linux (the crate is
 empty off-iOS, like `kiln-android` off-Android).
 
+*Landed 2026-11-19.* The crate is in place (`kiln-ios/`, `staticlib` + `rlib`,
+target-gated deps) and the CI `ios-check` job runs the device-target check on
+macOS. On this Linux host, every dependency type-checks for
+`aarch64-apple-ios` once `rustc` is pinned to the rustup toolchain; the only
+failure left is `objc2-exception-helper`'s build script, which needs the Apple
+SDK's `xcrun` — precisely the split the CI job resolves.
+
 ## Phase I-2 — platform correctness inside `kiln`
 
 Small, already half-done pieces:
