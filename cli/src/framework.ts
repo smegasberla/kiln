@@ -23,6 +23,13 @@ export function kilnAndroidDependency(): string {
   return 'path = "../kiln/kiln-android"';
 }
 
+/** The iOS bootstrap crate, resolved the same way. */
+export function kilnIosDependency(): string {
+  const found = locate("kiln-ios");
+  if (found) return `path = "${found}"`;
+  return 'path = "../kiln/kiln-ios"';
+}
+
 /** Absolute path to a sibling crate in this workspace, or null when installed. */
 function locate(crate: string): string | null {
   const cliDir = dirname(fileURLToPath(import.meta.url));

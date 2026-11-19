@@ -1,0 +1,5 @@
+// The Rust static library owns the UIApplicationMain call (through tao's event
+// loop), so the process entry is a single call into it, made before anything
+// UIKit exists. Anything Swift-side owns — document picker glue, for example —
+// hooks in through exported symbols, the way the Android activity does over JNI.
+main_rs()

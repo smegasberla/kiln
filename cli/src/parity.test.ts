@@ -27,6 +27,26 @@ describe("registeredCommands", () => {
   test("an empty shell registers nothing", () => {
     expect(registeredCommands("App::new()")).toEqual([]);
   });
+
+  test("a cfg(test) table is not a registration", () => {
+    // The scaffold ships exactly this shape: the real table plus a panic-probe
+    // table that only exists under `cargo test`. Counting its names made every
+    // fresh scaffold fail parity with "desktop only: boom, fail".
+    const withTests = `
+      pub static COMMANDS: &[Command] = &[
+        Command { name: "greet", kind: Kind::Sync, run: greet },
+      ];
+
+      #[cfg(test)]
+      mod tests {
+        static TEST: &[Command] = &[
+          Command { name: "boom", kind: Kind::Sync, run: boom },
+          Command { name: "fail", kind: Kind::Sync, run: fail },
+        ];
+      }
+    `;
+    expect(registeredCommands(withTests)).toEqual([]);
+  });
 });
 
 describe("diffCommands", () => {

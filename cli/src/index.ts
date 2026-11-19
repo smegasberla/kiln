@@ -12,6 +12,7 @@ import { build } from "./commands/build.ts";
 import { doctor } from "./commands/doctor.ts";
 import { runPackage } from "./commands/package.ts";
 import * as android from "./commands/android.ts";
+import * as ios from "./commands/ios.ts";
 
 const HELP = `kiln - minimal desktop apps with a Rust shell and a Bun toolchain
 
@@ -25,6 +26,9 @@ Commands
   package        build, then wrap the binary in a platform installer
   android build  cross-compile and package an APK (or AAB with --aab)
   android run    install and launch on a device or emulator
+  ios build      cross-compile and build the simulator app (or --target device)
+  ios run        install and launch on a booted iOS simulator
+  ios verify     build, install, launch and assert the Rust entry is reached
   doctor         check the toolchain and report what is missing
 
 Options
@@ -41,6 +45,7 @@ Options
   --abi          android build: arm64-v8a (default), x86_64, armeabi-v7a
   --release      android build: signed release APK instead of debug
   --aab          android build: signed Android App Bundle for Play upload
+  --target       ios build: sim (default) or device (unsigned build)
   --json         doctor: machine-readable output
   -h, --help     show this help
 
@@ -89,6 +94,27 @@ switch (args.command) {
         break;
       default:
         console.error("kiln android: expected `build` or `run`\n");
+        console.log(HELP);
+        code = 1;
+    }
+    break;
+  }
+  case "ios": {
+    // `kiln ios <subcommand>`: same shape as the android one.
+    const sub = args.positionals[0];
+    const rest: Args = { ...args, command: sub ?? "help", positionals: args.positionals.slice(1) };
+    switch (sub) {
+      case "build":
+        code = await ios.build(rest);
+        break;
+      case "run":
+        code = await ios.runOnDevice(rest);
+        break;
+      case "verify":
+        code = await ios.verify(rest);
+        break;
+      default:
+        console.error("kiln ios: expected `build`, `run` or `verify`\n");
         console.log(HELP);
         code = 1;
     }

@@ -147,6 +147,19 @@ Mirror `cli/src/commands/android.ts` (276 lines) command-for-command:
 *Acceptance:* `bun cli/src/index.ts ios build` produces a simulator app from a
 fresh `kiln init`; `ios verify` green in CI.
 
+*Landed 2026-11-19, code side.* `kiln init` writes the `ios/` shell (staticlib
+crate, `main_rs` entry, XcodeGen `project.yml`, Info.plist, `main.swift`,
+bridging header) and `kiln ios build|run|verify` mirror the android commands:
+build cross-compiles, stages `lib<name>.a` and runs `xcodebuild` with signing
+disabled; run drives `simctl` including booting a simulator; verify asserts the
+app reaches its Rust entry through `--console-pty`. Command parity is now
+three-way (desktop, android, iOS), and the checker gained the fix it needed for
+that to be meaningful: a `#[cfg(test)]` command table no longer counts as a
+registration, which had made every fresh desktop+mobile scaffold fail parity.
+On this Linux host everything up to the cargo cross-compile is exercised (the
+cargo step needs the Apple toolchain); the first real execution of all three
+commands is Phase I-4's macOS CI job.
+
 ## Phase I-4 — CI
 
 Add a `ios` job mirroring the `android` job (`ci.yml:150-220`): macOS runner,

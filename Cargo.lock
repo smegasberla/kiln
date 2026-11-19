@@ -1170,6 +1170,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kiln-ios"
+version = "0.1.0"
+dependencies = [
+ "kiln",
+ "tao",
+ "wry",
+]
+
+[[package]]
 name = "kiln-probe"
 version = "0.1.0"
 dependencies = [

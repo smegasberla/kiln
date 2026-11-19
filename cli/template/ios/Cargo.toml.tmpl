@@ -1,0 +1,18 @@
+[package]
+name = "{{CRATE}}-ios"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "{{LIB}}"
+crate-type = ["staticlib"]
+
+[dependencies]
+kiln = { {{KILN_PATH_INNER}}, features = ["full"] }
+kiln-ios = { {{KILN_IOS_PATH_INNER}} }
+# The iOS half of tao and wry: the window and webview come from their UIKit glue,
+# which needs both crates on the link line.
+tao = { version = "0.37", default-features = false }
+wry = { version = "0.57" }
+
+[workspace]

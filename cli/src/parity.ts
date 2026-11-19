@@ -49,9 +49,49 @@ export function unreadableRegistrations(source: string): string[] {
 /** Remove `//` and block comments without disturbing string literals enough to
  *  matter here: command names never contain `//` or `/*`. */
 function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+  return stripTestModules(
+    source
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, ""),
+  );
+}
+
+/** Remove `#[cfg(test)] mod x { … }` blocks, with balanced braces.
+ *
+ *  A test-only table's `name: "boom"` literals are not runtime registrations,
+ *  but the name-literal regex above cannot tell them apart from the real table
+ *  — and the scaffold ships exactly such a test module, so every fresh scaffold
+ *  would fail parity on commands that do not exist in release. A regex cannot
+ *  balance braces, so this walks the text: an attribute that is followed by a
+ *  `mod` before its first brace marks a block, and the scan skips to its
+ *  matching brace. */
+function stripTestModules(source: string): string {
+  let out = "";
+  let i = 0;
+  const attribute = "#[cfg(test)]";
+  while (i < source.length) {
+    const start = source.indexOf(attribute, i);
+    if (start === -1) return out + source.slice(i);
+    const open = source.indexOf("{", start);
+    if (open === -1 || !/\bmod\b/.test(source.slice(start, open))) {
+      // Not a module: keep the attribute and look for the next one.
+      out += source.slice(i, start + attribute.length);
+      i = start + attribute.length;
+      continue;
+    }
+    let depth = 0;
+    let end = open;
+    for (; end < source.length; end++) {
+      if (source[end] === "{") depth++;
+      else if (source[end] === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    out += source.slice(i, start);
+    i = depth === 0 ? end + 1 : open;
+  }
+  return out;
 }
 
 /** Commands one platform has that the other does not. */
@@ -136,13 +176,19 @@ export function effectiveCommands(source: string, crateDir: string): string[] {
   return [...names].sort();
 }
 
-/** Read both crates and report the difference, ignoring a missing Android crate. */
+/** Read the crates and report the difference, ignoring a missing Android or
+ *  iOS crate.
+ *
+ *  The iOS crate is only included in the comparison when it exists, so a
+ *  desktop+Android project behaves exactly as it did before Phase I-3; the iOS
+ *  shell joins the parity set the moment `kiln init` writes one. */
 export function checkParity(root: string): { ok: boolean; message: string } {
   const desktopFile = join(root, "native", "src", "main.rs");
   // The commands crate is where the scaffolded desktop shell keeps its
   // registration table since commands became hot-reloadable.
   const commandsFile = join(root, "native", "commands", "src", "lib.rs");
   const androidFile = join(root, "android", "src", "lib.rs");
+  const iosFile = join(root, "ios", "src", "lib.rs");
 
   if (!existsSync(desktopFile)) {
     if (existsSync(androidFile)) {
@@ -168,16 +214,34 @@ export function checkParity(root: string): { ok: boolean; message: string } {
   }
   const android = effectiveCommands(androidSource, join(root, "android", "src"));
   unreadable += unreadableRegistrations(androidSource).length;
+
+  let ios: string[] = [];
+  const platforms = ["desktop", "android"];
+  if (existsSync(iosFile)) {
+    const iosSource = readFileSync(iosFile, "utf8");
+    ios = effectiveCommands(iosSource, join(root, "ios", "src"));
+    unreadable += unreadableRegistrations(iosSource).length;
+    platforms.push("iOS");
+  }
   const { onlyDesktop, onlyAndroid } = diffCommands([...desktop].sort(), android);
+  const onlyIos = ios.filter((name) => !desktop.has(name));
+  const missingIos = ios.length === 0 ? [] : [...desktop].filter((name) => !ios.includes(name));
   const caveat = unreadable > 0 ? ` (${unreadable} registration(s) not statically readable)` : "";
 
-  if (onlyDesktop.length === 0 && onlyAndroid.length === 0) {
-    return { ok: true, message: `${desktop.size} commands on both platforms${caveat}` };
+  if (
+    onlyDesktop.length === 0 &&
+    onlyAndroid.length === 0 &&
+    onlyIos.length === 0 &&
+    missingIos.length === 0
+  ) {
+    return { ok: true, message: `${desktop.size} commands on ${platforms.join(", ")}${caveat}` };
   }
 
   const parts = [
     onlyDesktop.length ? `desktop only: ${onlyDesktop.join(", ")}` : "",
     onlyAndroid.length ? `android only: ${onlyAndroid.join(", ")}` : "",
+    onlyIos.length ? `iOS only: ${onlyIos.join(", ")}` : "",
+    missingIos.length ? `desktop+android missing on iOS: ${missingIos.join(", ")}` : "",
   ].filter(Boolean);
 
   return { ok: false, message: `${parts.join("; ")}${caveat}` };

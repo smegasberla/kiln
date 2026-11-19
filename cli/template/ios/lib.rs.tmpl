@@ -1,0 +1,55 @@
+//! iOS entry point for {{NAME}}.
+//!
+//! The counterpart of `native/src/main.rs` and `android/src/lib.rs`: same app,
+//! same commands. iOS owns the process, but not through Rust's `main`: Swift's
+//! `main.swift` calls `main_rs` as the first thing the process does, and tao's
+//! `EventLoop::run` then calls `UIApplicationMain` with its own `AppDelegate`,
+//! which is why this must run before any UIKit object exists.
+//!
+//! Lifecycle needs no JNI-style plumbing: tao turns `applicationWillResignActive`
+//! and `applicationWillEnterForeground` into window events the shell maps onto
+//! the same `lifecycle` events Android emits.
+
+use kiln::serde_json::{json, Value};
+use kiln::{App, AppHandle};
+
+mod assets;
+
+/// The process entry: `main.swift` calls exactly this, first thing.
+///
+/// The marker line is what `kiln ios verify` waits for: it proves the static
+/// library loaded and Rust is running, before anything else can be observed.
+#[no_mangle]
+pub extern "C" fn main_rs() {
+    println!("KILN_IOS_START");
+    // The same command set as the other shells. The frontend is shared, so a
+    // command registered on only one platform is a missing command at runtime;
+    // `kiln ios build` warns when the lists differ.
+    kiln_ios::run(
+        App::new()
+            .config(include_str!("../../kiln.json"))
+            .assets(assets::ASSETS)
+            .command("greet", |_app, payload: Value| {
+                let name = payload
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("world");
+                Ok(json!(format!("Hello, {name}! (from Rust)")))
+            })
+            // Async work runs off the UI thread, so a slow job cannot freeze the
+            // page while the reply is pending.
+            .async_command("slow_task", |_app, payload: Value| {
+                let ms = payload.get("ms").and_then(Value::as_u64).unwrap_or(500);
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                Ok(json!({ "slept_ms": ms }))
+            })
+            // iOS is one window by design, so this reports why rather than
+            // silently doing nothing: a second window has nowhere to go.
+            .command("open_settings", |_app: &AppHandle, _payload| {
+                Err(kiln::Error::Handler(
+                    "second windows are desktop-only; use an in-page panel on iOS"
+                        .to_owned(),
+                ))
+            }),
+    );
+}

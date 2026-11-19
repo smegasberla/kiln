@@ -285,7 +285,7 @@ to keep it, and leaving it out removes it.
 | Multi-window, tray, menus, updater | supported | supported, as opt-in features |
 | Crash reporting | plugin / sentry | panic hook + local ring buffer, no upload |
 | Panic in a command | aborts the app by default | contained, reported to the page as an error |
-| Mobile | supported | Android: supported. iOS: in progress — bootstrap and platform gates landed, simulator runs land with the CLI and CI phases |
+| Mobile | supported | Android: supported. iOS: build tooling landed (`kiln ios build\|run\|verify`, XcodeGen project); simulator runs need macOS with Xcode, CI lands with Phase I-4 |
 
 The tradeoff is deliberate: Tauri is a full application platform, Kiln is the
 core shell with nothing speculative bolted on. What was cut, and what would bring
@@ -382,14 +382,17 @@ notification permission (an OS prompt in front of the app pauses the WebView, so
 page that was not yet loaded never finishes loading), and drive system UI through
 the `UiAutomation` instrumentation already owns instead of adding UiAutomator.
 
-iOS: the bootstrap crate (`kiln-ios`) and the platform gates are in place
-(IOS-PLAN.md Phases I-1 and I-2). Menus, dialogs, tray, and the updater's
-endpoint fetch report honestly on iOS instead of compiling desktop code that
-cannot exist there, the app's data directory is the sandbox's documented
-location, and the UIKit suspend/resume callbacks feed the same `lifecycle`
-events Android emits. What is *not* done is the toolchain: no Xcode project
-template, no `kiln ios build`, no simulator run yet, so nothing iOS-side has
-been executed (Phases I-3 and I-4).
+iOS: the bootstrap crate (`kiln-ios`), the platform gates, and now the build
+tooling are in place (IOS-PLAN.md Phases I-1 to I-3). `kiln init` writes an
+`ios/` shell — a Rust staticlib whose `main_rs` Swift calls first, an XcodeGen
+`project.yml` you own, and a bridging header with exactly one symbol — and
+`kiln ios build|run|verify` mirror the android commands: `build` cross-compiles
+the staticlib, stages it and runs `xcodebuild` for the simulator (or `--target
+device`, unsigned); `run` boots and drives a simulator over `simctl`; `verify`
+asserts the app reaches its Rust entry. Command parity is now three-way.
+What is *not* done yet: nothing iOS-side has been executed on a Mac — every
+build and verify above needs macOS with Xcode, and the CI job that proves it
+is Phase I-4.
 
 `cargo check` for Windows and macOS runs in this repo. macOS cannot be *fully*
 compiled off a Mac (its Objective-C shims need the Apple SDK), so `ci.yml`

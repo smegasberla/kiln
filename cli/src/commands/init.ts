@@ -8,7 +8,7 @@
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { kilnAndroidDependency, kilnDependency } from "../framework.ts";
+import { kilnAndroidDependency, kilnDependency, kilnIosDependency } from "../framework.ts";
 import { boolFlag, stringFlag, type Args } from "../args.ts";
 import { identifiers } from "../naming.ts";
 
@@ -42,6 +42,14 @@ import androidCargo from "../../template/android/Cargo.toml.tmpl" with { type: "
 import androidLib from "../../template/android/lib.rs.tmpl" with { type: "text" };
 import androidAssets from "../../template/android/assets.rs.tmpl" with { type: "text" };
 
+import iosCargo from "../../template/ios/Cargo.toml.tmpl" with { type: "text" };
+import iosLib from "../../template/ios/lib.rs.tmpl" with { type: "text" };
+import iosAssets from "../../template/ios/assets.rs.tmpl" with { type: "text" };
+import iosProjectYml from "../../template/ios/project.yml.tmpl" with { type: "text" };
+import iosPlist from "../../template/ios/Info.plist.tmpl" with { type: "text" };
+import iosMainSwift from "../../template/ios/main.swift.tmpl" with { type: "text" };
+import iosBridge from "../../template/ios/KilnBridge.h.tmpl" with { type: "text" };
+
 import commandsCargo from "../../template/commands/Cargo.toml.tmpl" with { type: "text" };
 import commandsLib from "../../template/commands/src/lib.rs.tmpl" with { type: "text" };
 
@@ -72,6 +80,7 @@ export function init(args: Args): number {
     KILN_PATH: kilnDependency(),
     KILN_PATH_INNER: kilnDependency(),
     KILN_ANDROID_PATH_INNER: kilnAndroidDependency(),
+    KILN_IOS_PATH_INNER: kilnIosDependency(),
   };
 
   // Every placeholder in one pass, so a template can reference any of them and a
@@ -135,6 +144,17 @@ export function init(args: Args): number {
   write(`${androidTest}/KilnDeviceSupport.java`, fill(androidDeviceSupport));
   write(`${androidTest}/KilnDeviceTest.java`, fill(androidDeviceTest));
 
+  // iOS shell. Same app a third time: Swift's `main.swift` calls the staticlib's
+  // entry as the first thing the process does, and XcodeGen generates the
+  // .xcodeproj from the committed project.yml, which is the file you own.
+  write("ios/Cargo.toml", fill(iosCargo));
+  write("ios/src/lib.rs", fill(iosLib));
+  write("ios/src/assets.rs", fill(iosAssets));
+  write("ios/project.yml", fill(iosProjectYml));
+  write("ios/app/Info.plist", fill(iosPlist));
+  write("ios/app/main.swift", fill(iosMainSwift));
+  write("ios/app/KilnBridge.h", fill(iosBridge));
+
   // `cd .` is what an in-place scaffold would otherwise print, which is not an
   // instruction. Left out when the project was written into the current directory.
   const target = args.positionals[0] ?? ".";
@@ -149,6 +169,8 @@ export function init(args: Args): number {
   next.push("  kiln android build    # APK");
   next.push("  kiln android build --aab  # Play-ready bundle");
   next.push("  kiln android run      # install and launch on a device or emulator");
+  next.push("  kiln ios build        # simulator app (macOS with Xcode)");
+  next.push("  kiln ios run          # install and launch on a booted simulator");
   next.push("");
   console.log(next.join("\n"));
   return 0;
