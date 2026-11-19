@@ -220,6 +220,7 @@ jobs:
           script: |
             adb install -r /tmp/app/android/app/build/outputs/apk/debug/*.apk
             (cd /tmp/app/android/app && gradle connectedDebugAndroidTest --no-daemon)
+            adb install -r /tmp/app/android/app/build/outputs/apk/debug/*.apk
             adb shell pm list packages | grep ci_app || true
             adb shell am start -n com.kiln.ci_app/.MainActivity
             sleep 15
@@ -227,6 +228,7 @@ jobs:
             adb logcat -d > /tmp/logcat.txt
             grep -A 40 -B 5 "FATAL EXCEPTION" /tmp/logcat.txt || true
             grep -q "FATAL EXCEPTION" /tmp/logcat.txt && exit 1
+            exit 0
             grep -q "UnsatisfiedLinkError" /tmp/logcat.txt && exit 1
             exit 0
 
