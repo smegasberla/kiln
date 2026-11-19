@@ -113,6 +113,12 @@ export async function build(args: Args): Promise<number> {
     );
   }
 
+  // Two things a bare `-sdk iphonesimulator` gets wrong on a runner: with no
+  // destination xcodebuild picks one by itself and reports "multiple matching
+  // destinations", and it happily targets x86_64 while the staged Rust lib
+  // carries only the architecture cargo built for this host. Pin both, so the
+  // link step sees the slice that actually exists.
+  const simArch = process.arch === "arm64" ? "arm64" : "x86_64";
   await run(
     [
       "xcodebuild",
@@ -122,10 +128,13 @@ export async function build(args: Args): Promise<number> {
       readScheme(project),
       "-sdk",
       spec.sdk,
+      "-destination",
+      "generic/platform=iOS Simulator",
       "-configuration",
       "Debug",
       "-derivedDataPath",
       join(ios, "build"),
+      `ARCHS=${simArch}`,
       "CODE_SIGNING_ALLOWED=NO",
       "CODE_SIGN_IDENTITY=",
       "build",

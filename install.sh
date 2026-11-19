@@ -173,7 +173,7 @@ install_deps() {
       if gtk_platform && ! webkit_present; then
         try_pkgs gtk3 || warn "gtk3 install failed"
         # The port's name moved across releases; CI tries the same chain.
-        try_pkgs webkit2-gtk41 || try_pkgs webkit2gtk41 ||
+        try_pkgs webkit2-gtk_41 || try_pkgs webkit2-gtk41 ||
           try_pkgs webkit2-gtk || try_pkgs webkit2-gtk4 ||
           warn "no webkit2gtk package found; install it with pkg before kiln build"
       fi

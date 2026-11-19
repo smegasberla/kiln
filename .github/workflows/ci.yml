@@ -137,7 +137,7 @@ jobs:
           prepare: |
             pkg update -f || true
             pkg install -y rust gtk3 pkgconf
-            pkg install -y webkit2-gtk41 || pkg install -y webkit2gtk41 || pkg install -y webkit2-gtk || pkg install -y webkit2-gtk4 || (pkg search -q webkit; exit 1)
+            pkg install -y webkit2-gtk_41 || pkg install -y webkit2-gtk41 || pkg install -y webkit2-gtk || pkg install -y webkit2-gtk4 || (pkg search -q webkit; exit 1)
           run: |
             cargo test -p kiln --features full --lib
             cargo build -p kiln --features full --examples

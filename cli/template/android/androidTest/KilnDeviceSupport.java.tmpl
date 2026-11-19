@@ -285,7 +285,7 @@ final class KilnDeviceSupport {
             }
             sleep(100);
         }
-        fail("timed out waiting for " + what);
+        fail("timed out waiting for " + what + "; active window labels: " + activeWindowLabels());
     }
 
     static void sleep(long millis) {
@@ -445,6 +445,33 @@ final class KilnDeviceSupport {
         }
         for (int i = 0; i < node.getChildCount(); i++) {
             collect(node.getChild(i), label, depth + 1, out);
+        }
+    }
+
+    /** Every label the active window exposes, so a timeout says what IS there. */
+    private static String activeWindowLabels() {
+        AccessibilityNodeInfo root = ui().getRootInActiveWindow();
+        if (root == null) {
+            return "<no active window>";
+        }
+        List<String> labels = new ArrayList<>();
+        collectLabels(root, labels, 0);
+        return labels.toString();
+    }
+
+    private static void collectLabels(AccessibilityNodeInfo node, List<String> out, int depth) {
+        if (node == null || depth > 40) {
+            return;
+        }
+        CharSequence text = node.getText();
+        CharSequence description = node.getContentDescription();
+        if (text != null && text.length() > 0) {
+            out.add(text.toString());
+        } else if (description != null && description.length() > 0) {
+            out.add(description.toString());
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            collectLabels(node.getChild(i), out, depth + 1);
         }
     }
 

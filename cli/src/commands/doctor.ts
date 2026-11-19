@@ -110,7 +110,7 @@ export async function doctor(args: Args): Promise<number> {
 export function webkitPackageHint(platform: string): string {
   switch (platform) {
     case "freebsd":
-      return "pkg install webkit2gtk41";
+      return "pkg install webkit2-gtk_41";
     case "netbsd":
     case "openbsd":
     case "dragonfly":
