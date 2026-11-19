@@ -241,6 +241,46 @@ jobs:
       - name: Check the iOS bootstrap for the device target
         run: cargo check -p kiln-ios --target aarch64-apple-ios
 
+  # Phase I-4 of IOS-PLAN.md: the counterpart of the Android emulator job.
+  # The runner image ships Xcode and its simulators, so the only installs are
+  # the toolchain target and xcodegen. No code signing and no device build:
+  # both are documented out of scope, and a simulator is the only target a CI
+  # runner can install into anyway. The workspace tests on a Mac double as the
+  # proof that the iOS-gated crates compile to nothing where they are off.
+  ios:
+    name: iOS (build, run on simulator)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Workspace tests
+        run: cargo test --workspace --quiet
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Scaffold a project and build it for the simulator
+        run: |
+          bun cli/src/index.ts init /tmp/app --name "CI App"
+          cd /tmp/app
+          bun "$GITHUB_WORKSPACE/cli/src/index.ts" ios build
+          ls -l ios/build/Build/Products/Debug-iphonesimulator/
+
+      # This is the check that fails loudly when the transport or the shim
+      # regresses: the scaffolded page loads from the app's own scheme, calls
+      # `greet`, and the shell's answer proves the whole loop works — the same
+      # shape the emulator job gets from `connectedDebugAndroidTest`.
+      - name: Verify on a booted simulator
+        run: |
+          cd /tmp/app
+          bun "$GITHUB_WORKSPACE/cli/src/index.ts" ios verify --no-build
+
   macos:
     name: macOS (build, test)
     runs-on: macos-latest

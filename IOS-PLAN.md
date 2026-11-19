@@ -172,6 +172,16 @@ out of scope.
 *Acceptance:* green iOS job on every PR; the iOS verify check fails loudly if
 the transport or the shim regresses, the way the Android emulator job does.
 
+*Landed 2026-11-19.* The `ios` CI job mirrors the android one: macOS runner,
+`aarch64-apple-ios-sim`, xcodegen from brew, then scaffold → `ios build` →
+`ios verify --no-build` on a booted simulator. Verify now asserts both halves
+of the round trip through the console, the only observer that sees both sides
+on iOS: `KILN_IOS_START` (the staticlib reached its Rust entry) and
+`KILN_IOS_ROUND_TRIP`, printed by the scaffold shell's `greet` when the page's
+call has crossed the bridge and been answered. The workspace test suite runs
+on the Mac too, where it doubles as the proof that the mobile-gated crates
+compile to nothing off mobile. Signing and device builds stay out of scope.
+
 ## Phase I-5 — docs and the guard tests
 
 - README: compatibility table row (`iOS: supported (simulator)`, with the same

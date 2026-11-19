@@ -285,7 +285,7 @@ to keep it, and leaving it out removes it.
 | Multi-window, tray, menus, updater | supported | supported, as opt-in features |
 | Crash reporting | plugin / sentry | panic hook + local ring buffer, no upload |
 | Panic in a command | aborts the app by default | contained, reported to the page as an error |
-| Mobile | supported | Android: supported. iOS: build tooling landed (`kiln ios build\|run\|verify`, XcodeGen project); simulator runs need macOS with Xcode, CI lands with Phase I-4 |
+| Mobile | supported | Android: supported. iOS: supported on the simulator — `kiln ios build\|run\|verify`, verified in CI; device builds need signing, which stays with the app owner |
 
 The tradeoff is deliberate: Tauri is a full application platform, Kiln is the
 core shell with nothing speculative bolted on. What was cut, and what would bring

@@ -34,6 +34,11 @@ pub extern "C" fn main_rs() {
                     .get("name")
                     .and_then(Value::as_str)
                     .unwrap_or("world");
+                // One line per completed round trip: the page called this, the
+                // envelope crossed the bridge, and the answer below goes back.
+                // On iOS there is no logcat, so this console line is what
+                // `kiln ios verify` waits for as its proof of the whole loop.
+                println!("KILN_IOS_ROUND_TRIP name={name}");
                 Ok(json!(format!("Hello, {name}! (from Rust)")))
             })
             // Async work runs off the UI thread, so a slow job cannot freeze the

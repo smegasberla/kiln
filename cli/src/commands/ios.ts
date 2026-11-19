@@ -172,12 +172,14 @@ export async function runOnDevice(args: Args): Promise<number> {
   return 0;
 }
 
-/** Build (unless told not to), install, launch, and assert the app stayed up.
+/** Build (unless told not to), install, launch, and assert the round trip.
  *
- *  The console marker from the shell's entry proves the staticlib loaded and
- *  Rust ran; six seconds without a crash then covers window creation. The page
- *  round-trip on a simulator is Phase I-4's job, where CI can assert it the way
- *  the Android emulator job does. */
+ *  Two markers, both read from the app's own stdout through `--console-pty`,
+ *  because on iOS there is no logcat: the console is the only observer that
+ *  sees both sides. `KILN_IOS_START` proves the staticlib loaded and Rust is
+ *  running; `KILN_IOS_ROUND_TRIP` is printed by the shell's `greet` command,
+ *  so it only appears after the page has loaded, called a command, and had
+ *  that command answered — the full transport, shim and registry loop. */
 export async function verify(args: Args): Promise<number> {
   const project = requireProject();
   const bundle = readBundle(project);
@@ -199,44 +201,68 @@ export async function verify(args: Args): Promise<number> {
   const proc = Bun.spawn(["xcrun", "simctl", "launch", "--console-pty", udid, bundle], {
     stdout: "pipe",
   });
-  const timer = setTimeout(() => proc.kill(), 20000);
-  const text = await new Response(proc.stdout).text();
-  clearTimeout(timer);
+  const timer = setTimeout(() => proc.kill(), 45000);
+  let text = "";
+  const reader = proc.stdout.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += value;
+      // Stop waiting as soon as the round trip lands; a healthy launch needs
+      // seconds, and the timeout only exists for a wedged one.
+      if (text.includes("KILN_IOS_ROUND_TRIP")) {
+        proc.kill();
+        break;
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+  }
 
+  const problems: string[] = [];
   if (!text.includes("KILN_IOS_START")) {
-    console.error("kiln ios verify: the app never reached its Rust entry");
+    problems.push("the app never reached its Rust entry");
+  }
+  if (!text.includes("KILN_IOS_ROUND_TRIP")) {
+    problems.push("the page never completed a command round trip");
+  }
+  if (problems.length > 0) {
+    console.error(`kiln ios verify: ${problems.join("; ")}`);
+    const tail = text.trimEnd().split("\n").slice(-20).join("\n");
+    if (tail) console.error(tail);
     return 1;
   }
-  console.log(`ok   ios: Rust entry reached, app running (${bundle})`);
+  console.log(`ok   ios: entry reached and page round trip completed (${bundle})`);
   return 0;
 }
 
-/** The UDID of a booted simulator, booting the first available one otherwise. */
+/** The UDID of a booted simulator, booting the first available one otherwise.
+ *
+ *  `simctl boot` returns before the OS is up, and an install into a still
+ *  booting device fails; `bootstatus -b` is the documented way to wait. */
 async function bootedSimulator(): Promise<string> {
   const listed = Bun.spawnSync(["xcrun", "simctl", "list", "devices"], {
     stdout: "pipe",
   });
-  const text = listed.stdout.toString();
-  for (const line of text.split("\n")) {
+  const lines = listed.stdout.toString().split("\n");
+  for (const line of lines) {
     if (line.includes("(Booted)")) {
-      const match = /\(([0-9A-Fa-f-]+)\)/.exec(line);
+      const match = /\(([0-9A-Fa-f-]{36})\)/.exec(line);
       if (match) return match[1]!;
     }
   }
-  const available = Bun.spawnSync(["xcrun", "simctl", "list", "devices", "available"], {
-    stdout: "pipe",
-  });
-  for (const line of available.stdout.toString().split("\n")) {
-    if (!line.includes("com.apple.CoreSimulator.SimDeviceType")) {
-      const match = /\(([0-9A-Fa-f-]{36})\)/.exec(line);
-      if (match) {
-        await run(["xcrun", "simctl", "boot", match[1]!], { silent: true });
-        return match[1]!;
-      }
+  for (const line of lines) {
+    if (line.includes("unavailable")) continue;
+    const match = /\(([0-9A-Fa-f-]{36})\)/.exec(line);
+    if (match) {
+      await run(["xcrun", "simctl", "boot", match[1]!], { silent: true });
+      await run(["xcrun", "simctl", "bootstatus", match[1]!, "-b"], { silent: true });
+      return match[1]!;
     }
   }
   throw new Error(
-    "no iOS simulator found. Install Xcode and create one with\n" +
+    "no iOS simulator available. Install Xcode and create one with\n" +
       "  xcrun simctl create 'iPhone 16' 'iPhone 16'",
   );
 }
