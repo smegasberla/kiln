@@ -65,6 +65,11 @@ jobs:
           bun run typecheck
           bun test
 
+      - name: Install script (checkout build)
+        run: |
+          sh -n install.sh
+          sh install.sh --no-deps --prefix "$RUNNER_TEMP/kiln-prefix"
+
       - name: Install Xvfb and appimagetool
         run: |
           sudo apt-get install -y xvfb
@@ -109,6 +114,9 @@ jobs:
       - name: Build the minimal shell
         run: cargo build -p kiln --examples
 
+      - name: Install script (checkout build)
+        run: ./install.ps1 -NoDeps -Prefix "$env:RUNNER_TEMP\kiln-prefix"
+
       # The security guarantees — panic containment, remote-script blocking,
       # navigation lockdown — are per-webview-engine facts, and Windows ships
       # WebView2, not WebKitGTK. Run the same harness here so the policy is
@@ -129,7 +137,7 @@ jobs:
           prepare: |
             pkg update -f || true
             pkg install -y rust gtk3 pkgconf
-            pkg install -y webkit2-gtk41 || pkg install -y webkit2-gtk || pkg install -y webkit2-gtk4 || (pkg search -q webkit; exit 1)
+            pkg install -y webkit2-gtk41 || pkg install -y webkit2gtk41 || pkg install -y webkit2-gtk || pkg install -y webkit2-gtk4 || (pkg search -q webkit; exit 1)
           run: |
             cargo test -p kiln --features full --lib
             cargo build -p kiln --features full --examples
@@ -307,6 +315,9 @@ jobs:
 
       - name: Build the minimal shell
         run: cargo build -p kiln --examples
+
+      - name: Install script (checkout build)
+        run: sh install.sh --no-deps --prefix "$RUNNER_TEMP/kiln-prefix"
 
       # Same harness as Linux and Windows: WKWebView honours custom-protocol
       # headers and the navigation veto differently from WebKitGTK, so the

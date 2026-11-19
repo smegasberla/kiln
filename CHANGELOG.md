@@ -9,6 +9,15 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Added
 
+- Install scripts: `install.sh` for Linux, macOS and the BSDs, `install.ps1`
+  for Windows. Each installs the toolchain dependencies (system webview dev
+  files, Git, Bun, Rust) when they are missing, builds the CLI from source —
+  from the checkout when run inside one, a fresh clone otherwise — and puts
+  `kiln` on the user's PATH, finishing with an execution check of the
+  installed binary. Dependency steps are skipped when the tool is already
+  present, and a failed package install warns instead of aborting, so
+  `kiln doctor` reports any remaining gap by name.
+
 - iOS support through the simulator, per Phases I-1 to I-4 of `IOS-PLAN.md`:
   the `kiln-ios` bootstrap crate, platform gates with honest fallbacks (menus,
   dialogs, tray and the updater's fetch decline on iOS), UIKit lifecycle mapped

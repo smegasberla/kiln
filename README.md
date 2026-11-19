@@ -435,7 +435,29 @@ Every user-visible change is recorded in `CHANGELOG.md` (Keep a Changelog format
 
 ## Install / use
 
-Requires Rust, Bun, and the platform webview (Linux: `webkit2gtk-4.1`).
+One script installs the dependencies (system webview, Git, Bun, Rust), builds
+the CLI, and puts `kiln` on PATH:
+
+```sh
+# Linux, macOS, FreeBSD, NetBSD, OpenBSD
+./install.sh                          # from a checkout (builds your tree)
+curl -fsSL https://raw.githubusercontent.com/smegasberla/kiln/master/install.sh | sh   # from anywhere
+```
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File install.ps1          # from a checkout
+irm https://raw.githubusercontent.com/smegasberla/kiln/master/install.ps1 | iex       # from anywhere
+```
+
+Flags: `--prefix`/`-Prefix` (install location), `--no-deps`/`-NoDeps` (skip
+dependency installation), `--repo`/`-Repo` (clone URL). Every dependency step
+is skipped when the tool is already present, and a failed package install
+warns instead of aborting, so `kiln doctor` reports any remaining gap by
+name.
+
+Manual equivalent — Requires Rust, Bun, and the platform webview (Linux:
+`webkit2gtk-4.1`).
 
 ```sh
 # from this repo
