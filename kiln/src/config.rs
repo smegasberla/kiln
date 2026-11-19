@@ -4,6 +4,7 @@
 //! optional; unknown fields are ignored so a newer config does not break an
 //! older shell.
 
+use std::collections::HashMap;
 use serde_json::Value;
 
 const DEFAULT_NAME: &str = "Kiln App";
@@ -20,6 +21,11 @@ pub struct Config {
     /// Optional allowlist. When present, only these commands may be dispatched,
     /// even if more were registered. `None` means "everything registered".
     pub commands: Option<Vec<String>>,
+    /// Per-window allowlists keyed by window label. A window named here can
+    /// only call commands from the intersection of its list and the global
+    /// allowlist, so a `kiln.json` entry can only ever narrow a window's
+    /// surface, never widen it.
+    pub window_commands: HashMap<String, Vec<String>>,
     /// Update endpoint, read by the `updater` feature. `None` disables checks.
     pub update_url: Option<String>,
 }
@@ -33,6 +39,7 @@ impl Default for Config {
             height: 600.0,
             entry: "index.html".to_owned(),
             commands: None,
+            window_commands: HashMap::new(),
             update_url: None,
         }
     }
@@ -83,6 +90,18 @@ impl Config {
                 .collect();
             config.commands = Some(names);
         }
+        if let Some(windows) = map.get("windows").and_then(Value::as_object) {
+            for (label, spec) in windows {
+                if let Some(list) = spec.get("commands").and_then(Value::as_array) {
+                    let names = list
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect();
+                    config.window_commands.insert(label.clone(), names);
+                }
+            }
+        }
 
         Ok(config)
     }
@@ -119,6 +138,20 @@ mod tests {
     fn command_allowlist_parses() {
         let c = Config::from_json(r#"{"commands":["greet","save"]}"#).unwrap();
         assert_eq!(c.commands.unwrap(), vec!["greet", "save"]);
+    }
+
+    #[test]
+    fn per_window_allowlists_parse_by_label() {
+        let c = Config::from_json(
+            r#"{"commands":["greet","save"],"windows":{"preview":{"commands":["greet"]}}}"#,
+        )
+        .unwrap();
+        assert_eq!(c.window_commands["preview"], vec!["greet"]);
+        // A window without an entry falls back to the global list.
+        assert!(!c.window_commands.contains_key("main"));
+        // A window entry without a commands array is ignored.
+        let c = Config::from_json(r#"{"windows":{"preview":{"width":300}}}"#).unwrap();
+        assert!(c.window_commands.is_empty());
     }
 
     #[test]

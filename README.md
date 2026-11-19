@@ -44,14 +44,16 @@ The webview is the OS's:
 | macOS | WKWebView |
 | Windows | WebView2 |
 
-Measured on this machine (Linux x64, release profile, `strip` on):
+A sample, not a guarantee: measured 2026-11-19 on one Linux x64 machine,
+release profile, `strip` on, with `bun scripts/bench.ts` (the script flags its
+own noisy runs — re-run it on a quiet machine before quoting these):
 
 | | Bare `wry` + `tao` | Kiln shell |
 | --- | --- | --- |
-| Median cold start (to page-load finished) | ~390 ms | ~394 ms (**+1.5%**) |
-| Binary size, minimal shell | 707 KB | 785 KB |
+| Median cold start (to page-load finished) | ~376 ms | ~323 ms (**−14.1%**) |
+| Binary size, minimal shell | 743 KB | 848 KB |
 | Binary size, `full` features | — | 2.4 MB |
-| Direct dependencies | 2 | 3 (minimal) |
+| Direct dependencies | 2 | 3 portable (4 on Linux) |
 
 `bun scripts/bench.ts` and `bun scripts/verify.ts` reproduce those numbers and
 assert the rest of the guarantees. The verifier runs 14 checks and exits non-zero
@@ -193,12 +195,22 @@ One file, eight-ish keys, all optional:
   "width": 900,
   "height": 680,
   "entry": "index.html",
-  "commands": ["greet", "save"]
+  "commands": ["greet", "save"],
+  "windows": { "untrusted": { "commands": ["greet"] } }
 }
 ```
 
 It is `include_str!`-ed into the binary. A shipped app does not read config from
 disk, so it cannot be redirected by a writable working directory.
+
+The optional `windows` map narrows the command surface per window, keyed by
+window label. A window named there can only call what is in *both* its list and
+the global `commands` list, so an entry can only ever narrow, never widen — a
+window that renders untrusted content (a markdown preview, an embedded OAuth
+page) can be given a reduced surface without forking the app. The label comes
+from the webview the request arrived on, not from anything the page could send.
+`verify.ts` proves the narrowed path: a second window with an empty list gets
+`unknown command` for what the main window can still call.
 
 ## Guarantees (and how they are proved)
 
@@ -239,6 +251,11 @@ Windows are addressed by label. `__kiln_open_window` (and `AppHandle::open_windo
 take `{label, title, width, height, entry}`; creation happens on the UI thread
 because tao handles are not `Send`. `emit_to(Some("settings"), ...)` targets one
 window; `emit(...)` targets all. The app exits when the last window closes.
+
+A label can also carry a narrower command allowlist: put the label under `windows`
+in `kiln.json` (see Configuration) and that window can call only the listed
+commands. The label is resolved by the shell from the calling webview, so a page
+cannot claim a different window's permissions by sending a label of its own.
 
 ## Built-in commands
 

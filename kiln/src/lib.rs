@@ -275,7 +275,8 @@ type ReadyHook = Box<dyn Fn(&AppHandle) + Send + Sync>;
 
 /// Builds a webview for a given target URL. Captures everything a window needs
 /// to share: protocol handler, shim, navigation policy, ready hook.
-type BuilderFactory = Arc<dyn Fn(String) -> WebViewBuilder<'static> + Send + Sync>;
+type BuilderFactory =
+    Arc<dyn Fn(String, Option<String>) -> WebViewBuilder<'static> + Send + Sync>;
 
 /// The builder. Chain configuration, then `run()`.
 pub struct App {
@@ -485,6 +486,7 @@ impl App {
         let mut registry = self.registry;
         register_builtins(&mut registry, &config);
         registry.set_allowlist(config.commands.clone());
+        registry.set_window_allowlist(config.window_commands.clone());
 
         // Reloads must be running before the first window can call in.
         #[cfg(feature = "hot-reload")]
@@ -533,7 +535,13 @@ impl App {
             .with_inner_size(windows::size_for(&first, spec.default_size))
             .build(&event_loop)
             .map_err(|e| Error::Runtime(e.to_string()))?;
-        let webview = build_webview(factory(spec.url_for(&spec.entry_for(&first))), &window)?;
+        let webview = build_webview(
+            factory(
+                spec.url_for(&spec.entry_for(&first)),
+                Some(spec.label_for(&first)),
+            ),
+            &window,
+        )?;
 
         #[cfg(feature = "menu")]
         let menu_commands = {
@@ -678,11 +686,12 @@ fn build_factory(
     devtools: bool,
 ) -> BuilderFactory {
     let shim = build_shim(dev_origin.as_deref());
-    Arc::new(move |target: String| {
+    Arc::new(move |target: String, label: Option<String>| {
         let nav_origin = dev_origin.clone();
         let protocol_registry = Arc::clone(&registry);
         let protocol_handle = handle.clone();
         let protocol_origin = dev_origin.clone();
+        let bridge_label = label.clone();
 
         let builder = WebViewBuilder::new()
             // Debug builds always have devtools; a release build gets them only
@@ -700,6 +709,7 @@ fn build_factory(
                         protocol_handle.clone(),
                         assets,
                         protocol_origin.clone(),
+                        label.clone(),
                         request,
                         responder,
                     )
@@ -711,7 +721,7 @@ fn build_factory(
                 let registry = Arc::clone(&registry);
                 let handle = handle.clone();
                 move |request: Request<String>| {
-                    serve_bridge(&registry, &handle, request.body().as_str());
+                    serve_bridge(&registry, &handle, bridge_label.as_deref(), request.body().as_str());
                 }
             })
             .with_url(target);
@@ -942,7 +952,7 @@ pub mod transport {
 /// Used on Android, where a custom-protocol POST cannot carry a body. The
 /// envelope is identical to the protocol transport, so a command behaves the same
 /// on both platforms.
-fn serve_bridge(registry: &Arc<Registry>, handle: &AppHandle, message: &str) {
+fn serve_bridge(registry: &Arc<Registry>, handle: &AppHandle, label: Option<&str>, message: &str) {
     let parsed: Value = match serde_json::from_str(message) {
         Ok(value) => value,
         Err(_) => {
@@ -959,7 +969,7 @@ fn serve_bridge(registry: &Arc<Registry>, handle: &AppHandle, message: &str) {
     let payload = parsed.get("payload").cloned().unwrap_or(Value::Null);
 
     let script_handle = handle.clone();
-    registry.dispatch_deferred(handle, &method, payload, move |body| {
+    registry.dispatch_for_window(handle, label, &method, payload, move |body| {
         // `body` is already an envelope; hand it to the page as JSON, not as a
         // string, so the shim does not have to parse twice.
         let script = format!(
@@ -977,6 +987,7 @@ fn serve_async(
     handle: AppHandle,
     assets: AssetTable,
     dev_origin: Option<String>,
+    label: Option<String>,
     request: Request<Vec<u8>>,
     responder: wry::RequestAsyncResponder,
 ) {
@@ -1009,7 +1020,7 @@ fn serve_async(
         // to be re-applied: in dev the page is served from a different origin and
         // without it the browser rejects the reply before the page ever sees it.
         let cors_origin = dev_origin.clone();
-        registry.dispatch_deferred(&handle, &method, payload, move |body| {
+        registry.dispatch_for_window(&handle, label.as_deref(), &method, payload, move |body| {
             let mut response = base_headers(dev);
             if let Some(origin) = &cors_origin {
                 response = with_cors(response, origin);

@@ -157,7 +157,7 @@ pub(crate) fn create_window(
     event_loop: &EventLoopWindowTarget<crate::UserEvent>,
     spec: &Spec,
     options: &WindowOptions,
-    build: &dyn Fn(String) -> wry::WebViewBuilder<'static>,
+    build: &dyn Fn(String, Option<String>) -> wry::WebViewBuilder<'static>,
 ) -> Result<(WindowId, WindowEntry), Error> {
     use tao::window::WindowBuilder;
 
@@ -168,7 +168,7 @@ pub(crate) fn create_window(
         .map_err(|e| Error::Runtime(e.to_string()))?;
 
     let target = spec.url_for(&spec.entry_for(options));
-    let webview = crate::build_webview(build(target), &window)?;
+    let webview = crate::build_webview(build(target, Some(spec.label_for(options))), &window)?;
 
     Ok((
         window.id(),

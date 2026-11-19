@@ -42,6 +42,10 @@ enum Handler {
 pub struct Registry {
     handlers: HashMap<String, Handler>,
     allow: Option<Vec<String>>,
+    /// Per-window allowlists keyed by window label, from `kiln.json`'s
+    /// `windows` map. A listed window's surface is the intersection of its
+    /// list with the global allowlist, so a config entry can only narrow.
+    window_allow: HashMap<String, Vec<String>>,
     /// The hot-reloaded commands library. Present only in `kiln dev` builds;
     /// a release build never compiles it.
     #[cfg(feature = "hot-reload")]
@@ -59,6 +63,7 @@ impl Registry {
         Self {
             handlers: HashMap::new(),
             allow: None,
+            window_allow: HashMap::new(),
             #[cfg(feature = "hot-reload")]
             hot: None,
         }
@@ -74,6 +79,26 @@ impl Registry {
 
     pub fn set_allowlist(&mut self, allow: Option<Vec<String>>) {
         self.allow = allow;
+    }
+
+    /// Attach per-window allowlists keyed by window label.
+    pub fn set_window_allowlist(&mut self, allow: HashMap<String, Vec<String>>) {
+        self.window_allow = allow;
+    }
+
+    /// Whether `method` is registered and allowed, globally or for `label`.
+    ///
+    /// A window with a config entry can only call what is in *both* the global
+    /// allowlist and its own list, so a per-window entry can never widen what
+    /// the app already allows.
+    fn permitted_for(&self, method: &str, label: Option<&str>) -> bool {
+        if !self.permitted(method) {
+            return false;
+        }
+        match label.and_then(|l| self.window_allow.get(l)) {
+            Some(list) => list.iter().any(|a| a == method),
+            None => true,
+        }
     }
 
     /// Register a handler that runs on the UI thread. Registering the same name
@@ -145,9 +170,42 @@ impl Registry {
     where
         F: FnOnce(String) + Send + 'static,
     {
-        // The allowlist gates everything below, the hot library included:
-        // `commands` in kiln.json can only ever narrow what is reachable.
-        if !self.permitted(method) {
+        self.dispatch_gated(handle, None, method, payload, done)
+    }
+
+    /// Dispatch a request that claims to come from the window `label`.
+    ///
+    /// The page cannot be trusted to name its window, so `label` comes from the
+    /// webview the request arrived on, not from the payload. `None` means the
+    /// request is app-level (a menu item, an Android bridge fallback) and gets
+    /// the global allowlist.
+    pub fn dispatch_for_window<F>(
+        &self,
+        handle: &AppHandle,
+        label: Option<&str>,
+        method: &str,
+        payload: Value,
+        done: F,
+    ) where
+        F: FnOnce(String) + Send + 'static,
+    {
+        self.dispatch_gated(handle, label, method, payload, done)
+    }
+
+    fn dispatch_gated<F>(
+        &self,
+        handle: &AppHandle,
+        label: Option<&str>,
+        method: &str,
+        payload: Value,
+        done: F,
+    ) where
+        F: FnOnce(String) + Send + 'static,
+    {
+        // The allowlists gate everything below, the hot library included:
+        // `commands` and per-window lists in kiln.json can only ever narrow
+        // what is reachable.
+        if !self.permitted_for(method, label) {
             return done(error_envelope(&Error::UnknownMethod(method.to_owned())));
         }
         match self.handlers.get(method) {
@@ -340,6 +398,54 @@ mod tests {
         assert_eq!(reg.callable(), vec!["a"]);
         assert!(reg.dispatch(&empty_handle(), "b", Value::Null).contains("error"));
         assert!(reg.dispatch(&empty_handle(), "a", Value::Null).contains(r#""ok""#));
+    }
+
+    fn dispatch_for(reg: &Registry, label: Option<&str>, method: &str) -> String {
+        let (tx, rx) = mpsc::channel();
+        reg.dispatch_for_window(&empty_handle(), label, method, Value::Null, move |body| {
+            let _ = tx.send(body);
+        });
+        rx.recv().unwrap()
+    }
+
+    #[test]
+    fn a_window_entry_narrows_to_a_strict_subset() {
+        let mut reg = registry_with(&["a", "b"]);
+        reg.set_window_allowlist(HashMap::from([(
+            "preview".to_owned(),
+            vec!["a".to_owned()],
+        )]));
+
+        // The preview window can only call "a"; the denial looks like an
+        // unknown command, so the page cannot tell which commands exist.
+        assert!(dispatch_for(&reg, Some("preview"), "a").contains(r#""ok""#));
+        assert!(dispatch_for(&reg, Some("preview"), "b").contains(r#""kind":"unknown""#));
+
+        // A window without a config entry keeps the global surface.
+        assert!(dispatch_for(&reg, Some("main"), "b").contains(r#""ok""#));
+
+        // App-level dispatch (menus, the Android fallback) is untouched.
+        assert!(reg.dispatch(&empty_handle(), "b", Value::Null).contains(r#""ok""#));
+    }
+
+    #[test]
+    fn a_window_entry_cannot_widen_the_global_allowlist() {
+        let mut reg = registry_with(&["a", "b"]);
+        reg.set_allowlist(Some(vec!["a".to_owned()]));
+        reg.set_window_allowlist(HashMap::from([(
+            "preview".to_owned(),
+            vec!["a".to_owned(), "b".to_owned()],
+        )]));
+        assert!(dispatch_for(&reg, Some("preview"), "a").contains(r#""ok""#));
+        assert!(dispatch_for(&reg, Some("preview"), "b").contains(r#""kind":"unknown""#));
+    }
+
+    #[test]
+    fn an_unlabelled_window_request_uses_the_global_allowlist() {
+        let mut reg = registry_with(&["a", "b"]);
+        reg.set_allowlist(Some(vec!["a".to_owned()]));
+        assert!(dispatch_for(&reg, None, "a").contains(r#""ok""#));
+        assert!(dispatch_for(&reg, None, "b").contains(r#""kind":"unknown""#));
     }
 
     #[test]

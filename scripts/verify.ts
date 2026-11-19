@@ -120,6 +120,103 @@ async function probe(binary: string, app: string, port: number): Promise<string 
   }
 }
 
+/** The page a *narrowed* second window loads. It calls `greet` — a command the
+ *  window's `kiln.json` entry withholds — and reports the envelope with a
+ *  `narrow` marker so the harness can tell which window replied. */
+const NARROW_PAGE = `<!doctype html><html><body><script>
+(async () => {
+  let body;
+  try {
+    const res = await fetch('kiln://localhost/__kiln/greet', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'scaffold' }),
+    });
+    body = await res.text();
+  } catch (e) {
+    body = JSON.stringify({ error: { message: String(e) } });
+  }
+  await fetch('/result', { method: 'POST', body: JSON.stringify({ narrow: body }) });
+})();
+</script></body></html>`;
+
+/** Like `probe`, but the first window's page opens a second window labelled
+ *  `untrusted` (whose `kiln.json` entry withholds every command) before doing
+ *  its own round-trip. Resolves with both envelopes once each window has
+ *  reported, or null on timeout. */
+async function probeSecondWindow(
+  binary: string,
+  app: string,
+  port: number,
+): Promise<{ main: string; narrow: string } | null> {
+  let resolveMain: (value: string) => void = () => {};
+  let resolveNarrow: (value: string) => void = () => {};
+  const main = new Promise<string>((r) => (resolveMain = r));
+  const narrow = new Promise<string>((r) => (resolveNarrow = r));
+
+  const opener = `<!doctype html><html><body><script>
+(async () => {
+  try {
+    await fetch('kiln://localhost/__kiln/__kiln_open_window', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ label: 'untrusted', entry: 'untrusted.html' }),
+    });
+  } catch (e) {
+    await fetch('/result', { method: 'POST', body: JSON.stringify({ main: JSON.stringify({ error: { message: String(e) } }) }) });
+    return;
+  }
+  try {
+    const res = await fetch('kiln://localhost/__kiln/greet', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'scaffold' }),
+    });
+    await fetch('/result', { method: 'POST', body: JSON.stringify({ main: await res.text() }) });
+  } catch (e) {
+    await fetch('/result', { method: 'POST', body: JSON.stringify({ main: JSON.stringify({ error: { message: String(e) } }) }) });
+  }
+})();
+</script></body></html>`;
+
+  const server = Bun.serve({
+    port,
+    async fetch(req) {
+      const url = new URL(req.url);
+      if (url.pathname === "/result" && req.method === "POST") {
+        const parsed = JSON.parse(await req.text()) as { main?: string; narrow?: string };
+        if (parsed.narrow !== undefined) resolveNarrow(parsed.narrow);
+        else resolveMain(parsed.main ?? JSON.stringify(parsed));
+        return new Response("ok");
+      }
+      if (url.pathname === "/" || url.pathname === "/index.html") {
+        return new Response(opener, { headers: { "content-type": "text/html" } });
+      }
+      if (url.pathname === "/untrusted.html") {
+        return new Response(NARROW_PAGE, { headers: { "content-type": "text/html" } });
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+
+  const proc = Bun.spawn([binary], {
+    cwd: app,
+    env: { ...process.env, KILN_DEV_URL: `http://127.0.0.1:${port}` },
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+
+  const [m, n] = await Promise.all([
+    Promise.race([main, Bun.sleep(25_000).then(() => null)]),
+    Promise.race([narrow, Bun.sleep(25_000).then(() => null)]),
+  ]);
+
+  proc.kill();
+  server.stop(true);
+  if (m === null || n === null) return null;
+  return { main: m, narrow: n };
+}
+
 /** Run the probe fixture against a hostile server and collect what it saw.
  *
  *  The fixture loads its page from the binary's own embedded assets, so the
@@ -302,6 +399,36 @@ async function main() {
         "dev-mode round-trip",
         reported !== null && reported.includes("from Rust"),
         reported ?? "no reply",
+      );
+    }
+  }
+
+  // 6b. A second window can be given a strict subset of the main window's
+  //     commands. The scaffold's kiln.json lists every command for the main
+  //     window and *no* commands for the window labelled `untrusted`; the
+  //     narrowed window's page must still round-trip on the main window while
+  //     its own call comes back as an unknown command.
+  {
+    const cfgPath = join(app, "kiln.json");
+    const cfg = await Bun.file(cfgPath).json();
+    cfg.commands = ["greet", "__kiln_open_window"];
+    cfg.windows = { untrusted: { commands: [] } };
+    await Bun.write(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+
+    const rebuilt = await sh(["bun", cli, "build", "--debug"], app);
+    if (rebuilt.code !== 0) {
+      record("second window narrowed by kiln.json", false, "debug rebuild failed");
+    } else {
+      const bin = join(app, "native", "target", "debug", "app");
+      const result = await probeSecondWindow(bin, app, 5193);
+      record(
+        "second window narrowed by kiln.json",
+        result !== null &&
+          result.main.includes("from Rust") &&
+          result.narrow.includes('"kind":"unknown"'),
+        result
+          ? `main: round-trip ok | narrow: ${result.narrow.slice(0, 70)}`
+          : "no reply",
       );
     }
   }
