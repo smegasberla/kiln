@@ -48,6 +48,13 @@ jobs:
       - name: Unit tests
         run: cargo test -p kiln --features full --lib
 
+      # The documented contributor command. It used to die inside ndk-sys
+      # before running a single test (the android crate's deps were
+      # unconditional); now that they are target-gated, run it verbatim so
+      # the claim in the docs stays proven.
+      - name: Workspace tests
+        run: cargo test --workspace
+
       - name: Clippy
         run: cargo clippy -p kiln --features full --all-targets -- -D warnings
 
@@ -65,8 +72,13 @@ jobs:
           # build so `kiln package` produces a real AppImage instead of a bare
           # AppDir.
           mkdir -p ~/.local/bin
+          # Pinned to a tagged release with its SHA-256: the `continuous` tag
+          # moves without notice, and a silent change upstream must fail here
+          # rather than ship inside the packaged AppImage.
           curl -fsSL -o ~/.local/bin/appimagetool \
-            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  $HOME/.local/bin/appimagetool" \
+            | sha256sum -c -
           chmod +x ~/.local/bin/appimagetool
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 

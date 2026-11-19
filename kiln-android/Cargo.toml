@@ -6,7 +6,12 @@ description = "Android bootstrap for Kiln: JNI entry, activity glue, and an invo
 license = "MIT OR Apache-2.0"
 publish = false
 
-[dependencies]
+# The crate root is `#![cfg(target_os = "android")]`, so off Android this
+# library compiles to nothing — and its dependencies must not compile either:
+# `ndk` pulls `ndk-sys`, whose build script refuses to build on any other
+# target, which is exactly what used to break `cargo test --workspace` on a
+# desktop before a single test ran.
+[target.'cfg(target_os = "android")'.dependencies]
 kiln = { path = "../kiln" }
 jni = "0.21"
 # `ThreadLooper` is the type tao hands to its activity-create hook.
