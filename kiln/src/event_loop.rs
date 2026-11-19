@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+#[cfg(feature = "menu")]
 use serde_json::Value;
 use tao::{
     event::{ElementState, Event, WindowEvent},
