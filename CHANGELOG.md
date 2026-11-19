@@ -34,13 +34,11 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
   the `App` itself; release still builds with every feature, as it did.
 - Documentation now states that hot reload is desktop-only and that statics
   inside the commands crate do not survive a reload.
-
-### Changed
-
-- The Android release CSP's `'unsafe-inline'` is now documented on its branch as
-  a first-class exception with its compensating controls and the check that must
-  precede any tightening; a guard test asserts the exact Android policy on
-  Android.
+- The Android release CSP no longer allows `'unsafe-inline'` in `script-src`; it
+  now matches the desktop release policy. The removal is backed by an emulator
+  measurement (android-36, system WebView 133) in which the injected bridge shim
+  round-tripped a command with the tightened policy; a guard test asserts the
+  Android `script-src`.
 - The desktop↔Android parity checker warns when a command registration is not a
   statically readable string literal, and documents its known limitations.
 
@@ -50,6 +48,9 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
   containment, remote-script and navigation guarantees are asserted on WebView2
   and WKWebView too, not only on WebKitGTK. The harness gained a Windows `.exe`
   suffix and explicit per-platform skip reporting for Linux-only checks.
+- The Linux job pins `appimagetool` to the 1.9.1 release by SHA-256 instead of
+  the moving `continuous` tag, and runs `cargo test --workspace` verbatim now
+  that `kiln-android`'s dependencies are target-gated to Android.
 
 ## [0.1.0]
 

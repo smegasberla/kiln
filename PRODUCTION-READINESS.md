@@ -216,24 +216,23 @@ them:
 ## Fix status
 
 Status as of the fix pass that followed this review. Findings 1–5 and 7 are
-addressed; finding 3 remains a design decision, deliberately not coded yet.
+addressed; finding 3 is now fixed by the per-window allowlist (2026-11-19).
 
 | # | Severity | Status | Where |
 | --- | --- | --- | --- |
 | 1 | HIGH | **fixed** — `unsafe-inline` promoted to a documented first-class Android exception with compensating controls and a guard test (`android_policy_documents_its_inline_exception`, which asserts the exact Android release policy on Android and no-ops elsewhere); the contradicting module comment corrected | `kiln/src/security.rs` |
 | 2 | MEDIUM-HIGH | **fixed in CI** — Windows and macOS jobs now run `bun scripts/verify.ts`; the harness gained a `win32` `.exe` suffix, a loud Linux-only skip for the `ldd` composition check, and per-platform skip reporting | `scripts/verify.ts`, `.github/workflows/ci.yml` |
-| 3 | MEDIUM | **open (design decision)** — per-window allowlisting needs a scope decision before code; unchanged | `kiln/src/config.rs`, `kiln/src/ipc.rs` |
+| 3 | MEDIUM | **fixed** — `kiln.json` gains a `windows` map keyed by window label; a listed window's surface is the intersection of its list and the global allowlist, resolved from the calling webview, never from anything the page sends. Unit tests cover narrowing and the no-widening rule; `verify.ts` opens a second window with an empty list and asserts the denied envelope | `kiln/src/config.rs`, `kiln/src/ipc.rs`, `kiln/src/lib.rs`, `scripts/verify.ts` |
 | 4 | MEDIUM | **fixed** — `reporting::set_reporter` installs an application sink that receives every record, so telemetry no longer requires forking the module; philosophy (nothing phones home by default) unchanged | `kiln/src/reporting.rs` |
 | 5 | LOW-MEDIUM | **fixed** — `unreadableRegistrations()` surfaces dynamic-name registrations in the parity result message, and the parser's known limitations are documented in-file | `cli/src/parity.ts` |
 | 6 | LOW | **fixed** — the crash log rotates at 512 KiB to `<name>.old` (the previous file survives); tested by `the_log_file_stays_bounded`, which drives more entries than the cap and asserts the bound and the rotation | `kiln/src/reporting.rs` |
 | 7 | LOW | **fixed** — `CHANGELOG.md` added (Keep a Changelog), README gained a "Compatibility policy" section naming what is and is not breaking | `CHANGELOG.md`, `README.md` |
 
-Caveats kept honest: the Android CSP exception is documented but the underlying
-wry/WebView behaviour was not re-measured on a device in this pass — the comment
-in `security.rs` says exactly that and names the check that must precede any
-tightening. Finding 2's fix is CI-only and proves itself the first time the
-Windows and macOS jobs run; until then the e2e guarantee remains demonstrated on
-Linux.
+Caveats kept honest: finding 2's fix is CI-only and proves itself the first time
+the Windows and macOS jobs run; until then the e2e guarantee remains demonstrated
+on Linux. The Android CSP exception that finding 1's fix documented was later
+removed after the emulator measurement recorded under C2, so that caveat is
+closed.
 
 ---
 
@@ -244,6 +243,15 @@ A small, phased plan for the findings of the follow-up whole-project review
 ordered so each one leaves the tree greener than it found it; A and B are
 mechanical, D is a measurement, C is design work and needs its decisions
 taken before code.
+
+**Status (2026-11-19):** A1, A2, A3, B1, D1 and C1 are implemented and verified —
+the workflow pins appimagetool 1.9.1 by SHA-256, the benchmark table carries
+its date and framing, `cargo test --workspace` is green on Linux and runs in
+CI, the table's numbers come from a fresh `bun scripts/bench.ts`, and a second
+window can be given a strict command subset from `kiln.json` (tested and
+documented). C2 is also landed: the Android release CSP now ships
+`script-src 'self'`, verified against a scaffold probe on the android-36
+emulator, and the guard test pins it.
 
 ### Phase A — supply-chain and framing (Low, all mechanical)
 
@@ -290,13 +298,14 @@ taken before code.
   `permitted()` gate, so it inherits the scoping for free.
   *Acceptance:* the same as finding 3 — a second window can be given a strict
   subset, tested, documented.
-- **C2: Android CSP tightening.** The documented exception (finding 1's fix)
-  stays until the named check exists: run the Android probe with the relaxed
-  `'unsafe-inline'` removed and confirm the shim survives on an emulator.
-  Either the tightening lands green, or the residual risk is re-accepted in
-  writing with a date.
-  *Acceptance:* `verify-android` green against a tightened policy, or an
-  explicit dated re-acceptance next to the exception comment.
+- **C2: Android CSP tightening — landed (2026-11-19).** The probe ran on the
+  android-36 emulator (system WebView 133.0.6943.137): a scaffolded app whose
+  page calls a command on load round-tripped with `'unsafe-inline'` removed
+  from `script-src`, and nothing it needs was blocked. The tightening is in
+  `kiln/src/security.rs` and the guard test now asserts the Android
+  `script-src 'self'`. Honest caveat: one emulator image, one WebView version;
+  if an older WebView regressed this, the symptom is a dead `window.kiln` on
+  first load, which the scaffold page makes loud.
 
 ### Phase D — measurement refresh
 
