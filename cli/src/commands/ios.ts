@@ -11,7 +11,7 @@
  *  that belongs to whoever owns the Apple account, not to a scaffold.
  */
 
-import { existsSync, mkdirSync, copyFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, copyFileSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { boolFlag, stringFlag, type Args } from "../args.ts";
 import { bundle, writeAssetTable } from "../pipeline.ts";
@@ -35,7 +35,7 @@ export function iosLibName(project: Project): string {
   if (!existsSync(manifest)) {
     throw new Error(`no iOS crate at ${manifest}; run kiln init in this project`);
   }
-  const text = require("node:fs").readFileSync(manifest, "utf8") as string;
+  const text = readFileSync(manifest, "utf8");
   const match = /\[lib\][\s\S]*?name\s*=\s*"([^"]+)"/.exec(text);
   if (!match) {
     throw new Error(`${manifest} has no [lib] name; the app has nothing to link`);
@@ -49,8 +49,8 @@ export function iosLibName(project: Project): string {
  *  the target and the scheme, so the first `name:` line is the single source. */
 export function readScheme(project: Project): string {
   const file = join(iosDir(project), "project.yml");
-  const text = existsSync(file) ? require("node:fs").readFileSync(file, "utf8") : "";
-  const match = /^name:\s*(\S+)/m.exec(text as string);
+  const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+  const match = /^name:\s*(\S+)/m.exec(text);
   if (!match) throw new Error(`${file} has no name; cannot derive the scheme`);
   return match[1]!;
 }
@@ -58,8 +58,8 @@ export function readScheme(project: Project): string {
 /** The bundle identifier, read from the generated project.yml. */
 function readBundle(project: Project): string {
   const file = join(iosDir(project), "project.yml");
-  const text = existsSync(file) ? require("node:fs").readFileSync(file, "utf8") : "";
-  const match = /PRODUCT_BUNDLE_IDENTIFIER:\s*(\S+)/.exec(text as string);
+  const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+  const match = /PRODUCT_BUNDLE_IDENTIFIER:\s*(\S+)/.exec(text);
   if (!match) throw new Error(`${file} has no PRODUCT_BUNDLE_IDENTIFIER`);
   return match[1]!;
 }
@@ -275,7 +275,7 @@ export function findApp(project: Project, variant: keyof typeof TARGETS): string
   if (!existsSync(base)) return null;
   let best: string | null = null;
   let bestTime = 0;
-  for (const entry of require("node:fs").readdirSync(base, { withFileTypes: true })) {
+  for (const entry of readdirSync(base, { withFileTypes: true })) {
     const full = join(base, entry.name);
     if (entry.isDirectory() && entry.name.endsWith(".app")) {
       const time = statSync(full).mtimeMs;

@@ -338,6 +338,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "muda needs an initialized NSApplication on the main thread; unit tests run on worker threads without one, so this asserts on every other platform and the macOS path is covered by the desktop e2e"
+    )]
     fn a_menu_builds_on_every_platform() {
         // Desktop wraps the groups in a native menu; Android keeps them for the
         // activity to render. Either way declaring one menu must not fail.
