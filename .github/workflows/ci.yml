@@ -127,7 +127,8 @@ jobs:
         uses: vmactions/freebsd-vm@v1.6.0
         with:
           prepare: |
-            pkg install -y rust gtk3 webkit2-gtk41 pkgconf
+            pkg install -y rust gtk3 pkgconf
+            pkg install -y webkit2-gtk41 || pkg install -y webkit2-gtk || pkg install -y webkit2-gtk4
           run: |
             cargo test -p kiln --features full --lib
             cargo build -p kiln --features full --examples
@@ -222,6 +223,7 @@ jobs:
             sleep 15
             adb logcat -d -s Kiln:* || true
             adb logcat -d > /tmp/logcat.txt
+            grep -A 40 -B 5 "FATAL EXCEPTION" /tmp/logcat.txt || true
             grep -q "FATAL EXCEPTION" /tmp/logcat.txt && exit 1
             grep -q "UnsatisfiedLinkError" /tmp/logcat.txt && exit 1
             exit 0

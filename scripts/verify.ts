@@ -310,7 +310,9 @@ async function main() {
       record(
         "embedded round-trip + emit",
         code === 0 && out.includes("SELFTEST OK"),
-        code === 0 ? out.trim().split("\n").pop()! : err.slice(-120),
+        code === 0
+          ? out.trim().split("\n").pop()!
+          : err.slice(-120) || "(no stderr: killed by the timeout)",
       );
     }
   }
