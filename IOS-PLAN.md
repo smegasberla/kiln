@@ -194,6 +194,16 @@ compile to nothing off mobile. Signing and device builds stay out of scope.
   caveat style of the C2 entry.
 - CHANGELOG entry under the current section.
 
+*Landed 2026-11-19.* The README gained an iOS row in the platform table and a
+full section next to Android's, spelling the ownership difference and the
+desktop-only footnotes. The spike's verdict held: iOS keeps the desktop
+scheme-handler transport, so `security.rs` needed no iOS branch — instead a
+guard test named for what it pins asserts the policy iOS serves is the desktop
+release one. The stale "one shipped relaxation is Android" comment is fixed
+(it has been false since the C2 measurement). PRODUCTION-READINESS records
+what the CI runner actually measured and what stays unmeasured on purpose, and
+the CHANGELOG carries the phase under [Unreleased].
+
 ## Order, estimates, risks
 
 **Spike → I-1 → I-2 → I-3 → I-4 → I-5.** The spike gates the transport choice;

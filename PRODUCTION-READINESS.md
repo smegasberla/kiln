@@ -316,3 +316,32 @@ emulator, and the guard test pins it.
 **Suggested order:** A (one sitting, no risk) → B (one PR, unblocks every
 future contributor) → D (minutes) → C1 (design, then code) → C2 (needs an
 emulator session).
+
+## What was measured for iOS — dated 2026-11-19
+
+Phases I-1 to I-5 of `IOS-PLAN.md` are landed. Measured on the CI macOS runner,
+which is the first real execution of the whole iOS chain:
+
+- a fresh `kiln init` builds for the simulator: frontend bundled and embedded
+  in the staticlib, staged, linked through the XcodeGen-generated project, and
+  an unsigned `.app` produced;
+- `kiln ios verify` installs and launches that app on a booted simulator and
+  observes both console markers — `KILN_IOS_START` (the staticlib reached its
+  Rust entry) and `KILN_IOS_ROUND_TRIP` (the page loaded from the app's own
+  scheme, called a command, and was answered) — the full transport;
+- command parity is checked three-way on the fresh scaffold, and a
+  `#[cfg(test)]` command table no longer counts as a registration;
+- the workspace test suite is green on macOS, which doubles as proof that the
+  mobile-gated crates compile to nothing off mobile.
+
+Not measured, on purpose, in the honest-caveat style of the C2 entry:
+
+- device builds and signing, and the App Store flow — installing on hardware
+  needs the app owner's provisioning profile and stays with them;
+- device-only behaviour: keyboard, safe areas, backgrounding beyond the
+  lifecycle event reaching the page, and performance on real hardware;
+- per-window command allowlists on iOS: the platform is one window by design,
+  so the narrowing path is covered by unit tests and desktop e2e only.
+
+The simulator is the only target a CI runner can install into; everything
+device-shaped is documented, not assumed.

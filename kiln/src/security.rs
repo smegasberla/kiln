@@ -45,9 +45,9 @@ pub fn navigation_allowed(url: &str, dev_origin: Option<&str>) -> bool {
 ///
 /// In dev the policy is relaxed: Bun's HMR client uses inline scripts and an
 /// eval-based module loader, and `ws:` for the reload channel. That relaxation
-/// is scoped to the dev origin, never to a shipped app. The one shipped
-/// relaxation is Android, documented on its branch below as a first-class
-/// exception with its compensating controls.
+/// is scoped to the dev origin, never to a shipped app. The only mobile branch
+/// is Android's, documented below — and since the C2 measurement it serves the
+/// same release policy as desktop, just spelled for its rewritten origin.
 fn csp(dev: bool) -> &'static str {
     if cfg!(target_os = "android") {
         // On Android wry has no custom-scheme interception, so the page is
@@ -133,6 +133,22 @@ mod tests {
         // A naive starts_with("kiln://localhost") would wrongly allow these.
         assert!(!navigation_allowed("kiln://localhost.evil.com/", None));
         assert!(!navigation_allowed("kiln://localhost@evil.com/", None));
+    }
+
+    #[test]
+    fn ios_serves_the_desktop_policy_because_the_scheme_handler_exists_there() {
+        // WKURLSchemeHandler intercepts kiln://localhost natively on iOS, so
+        // the page is the app's own origin exactly as on desktop, and the
+        // rewritten-origin branch Android needs has no counterpart. Pin the
+        // consequence instead of maintaining an iOS copy of the branch: the
+        // policy iOS serves is the desktop release one, script-src tight, with
+        // `kiln:` reachable for the same-origin scheme requests.
+        if !cfg!(target_os = "ios") {
+            return;
+        }
+        assert!(content_security_policy(false).contains("script-src 'self'"));
+        assert!(content_security_policy(false).contains("connect-src 'self' kiln:"));
+        assert!(navigation_allowed("kiln://localhost/index.html", None));
     }
 
     #[test]

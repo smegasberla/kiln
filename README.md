@@ -337,6 +337,7 @@ kiln package --icon icon.png
 | FreeBSD | CI (VM) | CI (VM) | GTK 3 + WebKit2GTK, same code path as Linux |
 | NetBSD | `cargo check` | graph only | unverified at runtime |
 | Android arm64 / x86_64 | yes | yes (emulator, CI) | wry's IPC handler, same commands and security policy |
+| iOS aarch64 (simulator) | yes | yes (simulator, CI) | WKWebView via wry's `WKURLSchemeHandler`: the desktop origin and policy, no branch |
 
 BSD works because wry and tao already treat it as a webkitgtk/GTK platform: two
 things blocked it (tao's default `dbus` feature and a Linux-only `gtk`
@@ -362,6 +363,28 @@ The activity template is split by concern rather than kept as one file:
 `MainActivity` holds the natives and the lifecycle, `KilnDialogs` the file picker
 and its URI-to-path resolution, `KilnMenu` the `PopupMenu` build and click
 dispatch, `KilnTray` the notification, `KilnHttp` the blocking `GET`.
+
+iOS is the same story with a different ownership shape. The platform keeps its
+custom-scheme transport (`WKURLSchemeHandler` intercepts `kiln://localhost` the
+way the desktop does), so the origin and security policy are the desktop ones
+byte for byte — the only mobile branch in `security.rs` is Android's. What
+changes is who owns the process: the event loop must own the main thread, so
+there is no Rust `main`; Swift's `main.swift` calls the staticlib's exported
+`main_rs` as the first thing the process does, and tao calls `UIApplicationMain`
+from inside it. `kiln init` scaffolds the `ios/` shell — the staticlib crate, an
+XcodeGen `project.yml` the app owns, the `Info.plist`, and the one-symbol
+bridging header — and `kiln ios build|run|verify` mirror the android commands:
+`build` cross-compiles the staticlib, stages it, and runs `xcodebuild` for the
+simulator (`--target device` builds unsigned; installing on hardware needs the
+app owner's provisioning profile, which stays theirs). The `ios` CI job builds
+and verifies on a booted simulator; `verify` asserts the console shows the Rust
+entry marker and the `greet` reply, the full round trip.
+
+Menus, dialogs, tray, and the updater's endpoint fetch report honestly on iOS
+(theirs cannot exist there) while the update comparison logic stays shared, and
+the UIKit suspend/resume callbacks feed the same `lifecycle` events Android's
+activity callbacks do. The desktop-only feature footnotes in the table above
+apply to iOS as they do to Android.
 
 `kiln init` scaffolds instrumentation tests in two layers, because the two answer
 different questions. `KilnMenuTest` and `KilnDialogsTest` assert pure data

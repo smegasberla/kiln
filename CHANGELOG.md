@@ -9,6 +9,12 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Added
 
+- iOS support through the simulator, per Phases I-1 to I-4 of `IOS-PLAN.md`:
+  the `kiln-ios` bootstrap crate, platform gates with honest fallbacks (menus,
+  dialogs, tray and the updater's fetch decline on iOS), UIKit lifecycle mapped
+  onto the shared `lifecycle` events, an `ios/` shell scaffold (staticlib,
+  XcodeGen project, one-symbol bridging header), and `kiln ios build|run|verify`
+  — built and round-trip-verified in CI on a booted simulator.
 - Hot-reloadable commands behind a cargo feature: the scaffold now ships a
   `commands` crate with one `static COMMANDS: &[Command]` table (with
   `Kind::Sync` / `Kind::Async`), and `kiln dev` watches its `src/`, rebuilds
@@ -41,6 +47,9 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
   Android `script-src`.
 - The desktop↔Android parity checker warns when a command registration is not a
   statically readable string literal, and documents its known limitations.
+- Command parity is now three-way (desktop, Android, iOS), and a `#[cfg(test)]`
+  command table no longer counts as a registration — it had made every fresh
+  desktop+mobile scaffold fail parity on commands that only exist in tests.
 
 ### CI
 
