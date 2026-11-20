@@ -211,8 +211,21 @@ mod tests {
 
     #[test]
     fn the_android_release_string_is_pinned_where_every_target_runs() {
-        // The branch above is compile-time, so the same policy is asserted
-        // through the const the branch returns, on host CI as well.
+        // The exact string the branch ships: a policy edit must be made in two
+        // places, on purpose.
+        assert_eq!(
+            ANDROID_RELEASE_CSP,
+            "default-src 'self'; \
+             script-src 'self'; \
+             style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data: blob:; \
+             font-src 'self' data:; \
+             connect-src 'self'; \
+             object-src 'none'; \
+             base-uri 'none'; \
+             form-action 'none'"
+        );
+        // And through the properties the guarantee rests on, on every target.
         let policy = ANDROID_RELEASE_CSP;
         assert!(policy.contains("script-src 'self'"));
         assert!(
