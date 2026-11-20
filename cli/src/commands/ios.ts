@@ -166,7 +166,7 @@ export async function runOnDevice(args: Args): Promise<number> {
 
   console.log(`kiln ios run: ${bundle}`);
   await run(["xcrun", "simctl", "install", udid, app], { silent: true });
-  await run(["xcrun", "simctl", "terminate", udid, bundle], { silent: true });
+  await run(["xcrun", "simctl", "terminate", udid, bundle], { silent: true }).catch(() => {});
 
   console.log("  launched. output:\n");
   const proc = Bun.spawn(
@@ -205,7 +205,7 @@ export async function verify(args: Args): Promise<number> {
   }
 
   await run(["xcrun", "simctl", "install", udid, app], { silent: true });
-  await run(["xcrun", "simctl", "terminate", udid, bundle], { silent: true });
+  await run(["xcrun", "simctl", "terminate", udid, bundle], { silent: true }).catch(() => {});
 
   const proc = Bun.spawn(["xcrun", "simctl", "launch", "--console-pty", udid, bundle], {
     stdout: "pipe",
