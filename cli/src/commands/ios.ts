@@ -207,6 +207,10 @@ export async function verify(args: Args): Promise<number> {
   await run(["xcrun", "simctl", "install", udid, app], { silent: true });
   await run(["xcrun", "simctl", "terminate", udid, bundle], { silent: true }).catch(() => {});
 
+  await run(
+    ["xcrun", "simctl", "spawn", udid, "launchctl", "setenv", "RUST_BACKTRACE", "1"],
+    { silent: true },
+  ).catch(() => {});
   const proc = Bun.spawn(["xcrun", "simctl", "launch", "--console-pty", udid, bundle], {
     stdout: "pipe",
   });
