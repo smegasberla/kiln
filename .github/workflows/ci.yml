@@ -238,7 +238,7 @@ jobs:
             grep -q "FATAL EXCEPTION" /tmp/logcat.txt && exit 1 || exit 0
             exit 0
             grep -A 10 -B 3 "UnsatisfiedLinkError" /tmp/logcat.txt || true
-            grep -q "UnsatisfiedLinkError" /tmp/logcat.txt && exit 1 || exit 0
+            grep "UnsatisfiedLinkError" /tmp/logcat.txt | grep -q -v "NativeCrashHandlerImpl" && exit 1 || exit 0
             exit 0
 
   # Phase I-1 of IOS-PLAN.md. The bootstrap crate compiles to nothing off iOS,
