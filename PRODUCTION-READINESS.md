@@ -13,9 +13,10 @@ Review of the full source tree: `kiln/` (shell runtime), `kiln-android/`, `cli/`
 | e2e guarantee harness | `bun scripts/verify.ts` | **not run** — needs a display; CI runs it under Xvfb on Linux only |
 | macOS / Windows / Android | — | **not run** — the reviewer machine is Linux |
 
-**Overall:** no blockers (nothing exploitable, data-losing, or guaranteed to fail), but seven
-findings below stand between the current state and broader production use. Findings 1 and 2
-are the only ones that gate shipping outside the declared scope; both are small, focused PRs.
+**Overall:** no blockers (nothing exploitable, data-losing, or guaranteed to fail). All seven
+findings below have since been fixed and are kept as the record of what was found: 93caa52
+closed findings 1, 2, 4, 5, 6 and 7, f0d893e added finding 3's per-window allowlist, and
+8c94631 completed finding 1 after an emulator measurement tightened the Android CSP.
 
 ---
 
