@@ -221,7 +221,7 @@ export async function verify(args: Args): Promise<number> {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      text += value;
+      text += new TextDecoder().decode(value);
       // Stop waiting as soon as the round trip lands; a healthy launch needs
       // seconds, and the timeout only exists for a wedged one.
       if (text.includes("KILN_IOS_ROUND_TRIP")) {
