@@ -230,8 +230,11 @@ addressed; finding 3 is now fixed by the per-window allowlist (2026-11-19).
 | 7 | LOW | **fixed** — `CHANGELOG.md` added (Keep a Changelog), README gained a "Compatibility policy" section naming what is and is not breaking | `CHANGELOG.md`, `README.md` |
 
 Caveats kept honest: finding 2's fix is CI-only and proves itself the first time
-the Windows and macOS jobs run; until then the e2e guarantee remains demonstrated
-on Linux. The Android CSP exception that finding 1's fix documented was later
+the Windows and macOS jobs run. macOS has: its `End-to-end verification` step passed
+in run 44788618663, so the WKWebView harness is green on real hardware; the Windows
+job of that run was still running when this was written, so WebView2 is the one
+engine whose e2e result is not yet recorded. The Android CSP exception that
+finding 1's fix documented was later
 removed after the emulator measurement recorded under C2, so that caveat is
 closed.
 
