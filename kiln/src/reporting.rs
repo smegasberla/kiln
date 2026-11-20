@@ -139,8 +139,15 @@ fn payload_text(payload: &(dyn std::any::Any + Send)) -> String {
 mod tests {
     use super::*;
 
+    static LOCK: Mutex<()> = Mutex::new(());
+
+    fn serialized() -> std::sync::MutexGuard<'static, ()> {
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn records_are_kept_and_readable() {
+        let _guard = serialized();
         record("test message one", "unit");
         let entries = entries();
         assert!(
@@ -151,6 +158,7 @@ mod tests {
 
     #[test]
     fn the_buffer_is_bounded() {
+        let _guard = serialized();
         for i in 0..(MAX_ENTRIES + 30) {
             record(&format!("flood {i}"), "unit");
         }
@@ -159,6 +167,7 @@ mod tests {
 
     #[test]
     fn a_log_file_receives_entries() {
+        let _guard = serialized();
         let dir = std::env::temp_dir().join(format!("kiln-report-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join("crash.log");
@@ -177,6 +186,7 @@ mod tests {
 
     #[test]
     fn the_log_file_stays_bounded() {
+        let _guard = serialized();
         let dir = std::env::temp_dir().join(format!("kiln-report-cap-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join("crash.log");
@@ -205,6 +215,7 @@ mod tests {
     fn an_installed_reporter_sees_records() {
         use std::sync::OnceLock;
 
+        let _guard = serialized();
         static SEEN: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
         let seen = SEEN.get_or_init(|| Mutex::new(Vec::new()));
         seen.lock().unwrap().clear();
