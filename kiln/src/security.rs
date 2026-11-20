@@ -48,6 +48,20 @@ pub fn navigation_allowed(url: &str, dev_origin: Option<&str>) -> bool {
 /// is scoped to the dev origin, never to a shipped app. The only mobile branch
 /// is Android's, documented below — and since the C2 measurement it serves the
 /// same release policy as desktop, just spelled for its rewritten origin.
+/// The Android release policy, spelled out where every target can test it:
+/// the branch in [`csp`] is compile-time, so an assertion inside it only ever
+/// runs on Android. The string itself is what the emulator measurement
+/// proved the WebView accepts with the bridge intact.
+const ANDROID_RELEASE_CSP: &str = "default-src 'self'; \
+                                   script-src 'self'; \
+                                   style-src 'self' 'unsafe-inline'; \
+                                   img-src 'self' data: blob:; \
+                                   font-src 'self' data:; \
+                                   connect-src 'self'; \
+                                   object-src 'none'; \
+                                   base-uri 'none'; \
+                                   form-action 'none'";
+
 fn csp(dev: bool) -> &'static str {
     if cfg!(target_os = "android") {
         // On Android wry has no custom-scheme interception, so the page is
@@ -59,15 +73,7 @@ fn csp(dev: bool) -> &'static str {
         // round-tripped with `script-src 'self'` and no 'unsafe-inline'. This
         // branch therefore matches the desktop release policy; inline scripts
         // in an app's own page are blocked, exactly as they are on desktop.
-        "default-src 'self'; \
-         script-src 'self'; \
-         style-src 'self' 'unsafe-inline'; \
-         img-src 'self' data: blob:; \
-         font-src 'self' data:; \
-         connect-src 'self'; \
-         object-src 'none'; \
-         base-uri 'none'; \
-         form-action 'none'"
+        ANDROID_RELEASE_CSP
     } else if dev {
         // Dev-only relaxation, scoped to the dev origin and never shipped: Bun's
         // HMR client uses inline scripts and an eval-based module loader, and
@@ -201,6 +207,22 @@ mod tests {
         assert!(policy.contains("connect-src 'self'"));
         assert!(policy.contains("object-src 'none'"));
         assert!(policy.contains("base-uri 'none'"));
+    }
+
+    #[test]
+    fn the_android_release_string_is_pinned_where_every_target_runs() {
+        // The branch above is compile-time, so the same policy is asserted
+        // through the const the branch returns, on host CI as well.
+        let policy = ANDROID_RELEASE_CSP;
+        assert!(policy.contains("script-src 'self'"));
+        assert!(
+            !policy.contains("script-src 'self' 'unsafe-inline'"),
+            "the shim survives without it (verified on an emulator 2026-11-19)"
+        );
+        assert!(policy.contains("connect-src 'self'"));
+        assert!(policy.contains("object-src 'none'"));
+        assert!(policy.contains("base-uri 'none'"));
+        assert!(policy.contains("form-action 'none'"));
     }
 
     #[test]
