@@ -531,11 +531,13 @@ impl App {
             height: self.window.height,
             label: self.window.label.clone().or_else(|| Some(spec.entry.clone())),
         };
+        #[cfg(not(target_os = "ios"))]
         let window = WindowBuilder::new()
             .with_title(spec.title_for(&first))
             .with_inner_size(windows::size_for(&first, spec.default_size))
             .build(&event_loop)
             .map_err(|e| Error::Runtime(e.to_string()))?;
+        #[cfg(not(target_os = "ios"))]
         let webview = build_webview(
             factory(
                 spec.url_for(&spec.entry_for(&first)),
@@ -544,14 +546,26 @@ impl App {
             &window,
         )?;
 
+        // tao builds a window against `UIApplication`, which does not exist
+        // until `event_loop.run` calls `UIApplicationMain`; iOS asks for the
+        // first window through the event a `window.open` command uses and
+        // gets it once the loop is running.
+        #[cfg(target_os = "ios")]
+        let _ = handle
+            .open_window(first)
+            .map_err(|e| Error::Runtime(e.to_string()))?;
+
         #[cfg(feature = "menu")]
         let menu_commands = {
             let built = build_menu(&self.menus, &handle, &config.name);
-            if let Some(built) = &built {
-                if let Err(error) = built.attach(&window) {
-                    eprintln!("kiln: menu could not be attached: {error}");
-                }
+            #[cfg(not(target_os = "ios"))]
+            let attached = built.as_ref().map(|built| built.attach(&window));
+            #[cfg(not(target_os = "ios"))]
+            if let Some(Err(error)) = attached {
+                eprintln!("kiln: menu could not be attached: {error}");
             }
+            #[cfg(target_os = "ios")]
+            let _ = &built;
             menu_command_map(&self.menus)
         };
 
@@ -562,16 +576,22 @@ impl App {
 
         let mut state = event_loop::LoopState {
             open: {
-                let mut open = windows::Windows::new();
-                windows::insert(
-                    &mut open,
-                    window.id(),
-                    windows::WindowEntry {
-                        label: spec.label_for(&first),
-                        window,
-                        webview,
-                    },
-                );
+                #[cfg(not(target_os = "ios"))]
+                let open = {
+                    let mut open = windows::Windows::new();
+                    windows::insert(
+                        &mut open,
+                        window.id(),
+                        windows::WindowEntry {
+                            label: spec.label_for(&first),
+                            window,
+                            webview,
+                        },
+                    );
+                    open
+                };
+                #[cfg(target_os = "ios")]
+                let open = windows::Windows::new();
                 open
             },
             modifiers: ModifiersState::empty(),
