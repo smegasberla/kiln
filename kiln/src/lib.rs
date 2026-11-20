@@ -87,8 +87,10 @@ use serde_json::Value;
 use tao::{
     event_loop::{EventLoopBuilder, EventLoopProxy},
     keyboard::{KeyCode, ModifiersState},
-    window::{Window, WindowBuilder},
+    window::Window,
 };
+#[cfg(not(target_os = "ios"))]
+use tao::window::WindowBuilder;
 use wry::{
     http::Request,
     WebView, WebViewBuilder,
