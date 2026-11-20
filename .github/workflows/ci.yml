@@ -237,6 +237,7 @@ jobs:
             grep -A 40 -B 5 "FATAL EXCEPTION" /tmp/logcat.txt || true
             grep -q "FATAL EXCEPTION" /tmp/logcat.txt && exit 1 || exit 0
             exit 0
+            grep -A 10 -B 3 "UnsatisfiedLinkError" /tmp/logcat.txt || true
             grep -q "UnsatisfiedLinkError" /tmp/logcat.txt && exit 1 || exit 0
             exit 0
 
