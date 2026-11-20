@@ -22,7 +22,7 @@ jobs:
     name: Linux (build, test, verify)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install webview and build deps
         run: |
@@ -97,7 +97,7 @@ jobs:
     name: Windows (build, test)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: oven-sh/setup-bun@v2
         with:
@@ -130,7 +130,7 @@ jobs:
     # A VM runner, not a cross-compile: the -sys crates run pkg-config against
     # the host, so the only way to know the BSD path links is to be on BSD.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build and test in FreeBSD
         uses: vmactions/freebsd-vm@v1.6.0
         with:
@@ -150,7 +150,7 @@ jobs:
     # so this job only proves the crate graph resolves and Kiln's own code
     # compiles. It is labelled that way rather than passing silently.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Cross-check NetBSD
         run: |
           rustup target add x86_64-unknown-netbsd
@@ -161,7 +161,7 @@ jobs:
     name: Android (build, run on emulator)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -248,7 +248,7 @@ jobs:
     name: iOS (cross-check)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
@@ -265,7 +265,7 @@ jobs:
     name: iOS (build, run on simulator)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios-sim
@@ -299,7 +299,7 @@ jobs:
     name: macOS (build, test)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: oven-sh/setup-bun@v2
         with:
