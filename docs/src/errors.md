@@ -1,12 +1,23 @@
 # Errors the page can branch on
 
-A failed call answers an envelope, never a thrown transport error:
+A failure in a Voussoir app is data, not a string. Every rejection from `invoke`
+carries a `kind` you can switch on, a `method` naming the command, and a
+`message` written for a human.
 
-```json
-{"error": {"message": "invalid payload: missing field `name`", "kind": "payload", "method": "greet"}}
-```
+## Theory: why error codes are not enough, and error strings are worse
 
-The shim turns that into a rejected promise, so ordinary `try`/`catch` works:
+Two common mistakes, and what this design does instead:
+
+- **Matching on message text.** `if (message.includes("not found"))` breaks the
+  first time someone rewords a message, and rewordings are not breaking changes.
+- **A single `Error`.** `if (err)` tells you something failed but not whether to
+  retry, hide a button, or show a dialog.
+
+The middle path is a small, stable enum of classes. Voussoir calls it `kind`, and
+the list is small enough to read once and exhaustive enough to switch on without a
+default branch.
+
+## The seven kinds
 
 ```ts
 try {
@@ -18,11 +29,10 @@ try {
     message: string;
   };
   if (kind === "unknown") hideSaveButton();
+  else if (kind === "busy") retryLater();
   else showToast(`${method}: ${message}`);
 }
 ```
-
-## The seven kinds
 
 | `kind` | Raised by | What the page should do |
 | --- | --- | --- |
@@ -34,9 +44,30 @@ try {
 | `timeout` | the shim stopped waiting (raised in the page, not in Rust) | the command may still be running; do not assume it failed |
 | `runtime` | the webview or event loop failed | fatal for the window; offer a restart |
 
-`unknown` covers both a missing command and a denied one on purpose. A page must
-not be able to probe which commands exist but were withheld, so the two are
-indistinguishable from inside the webview.
+**`unknown` covers both a missing command and a denied one on purpose.** A page
+must not be able to probe which commands exist but were withheld, so the two are
+indistinguishable from inside the webview. If your page needs to know whether a
+feature exists, ask about the feature, not about the command.
+
+## Theory: three kinds are not yours
+
+Of the seven, only three are produced by code you write:
+
+| Produced by | Kinds |
+| --- | --- |
+| your handler | `handler`, and `payload` if you return `Error::Payload` |
+| the registry | `unknown`, `payload`, `busy` |
+| the shim (page side) | `timeout` |
+| the shell | `runtime`, `panic` |
+
+`panic` deserves a note: the shell catches unwinds at the handler boundary, so a
+panicking command becomes an error envelope and **the window survives**. That is a
+guarantee, not a hope; `scripts/verify.ts` asserts it. Write the page as if a
+command can panic, because in development it will.
+
+`timeout` is the one kind that can arrive for a command that never reached Rust at
+all, which is why it is worth treating differently: the work may still be running
+when the page gives up.
 
 ## Writing an error
 
@@ -45,28 +76,73 @@ fn save(payload: &Value) -> Result<Value, voussoir::Error> {
     let path = payload
         .get("path")
         .and_then(Value::as_str)
-        .ok_or_else(|| voussoir::Error::Payload("save needs a \"path\" string".to_owned()))?;
-    std::fs::write(path, b"")
-        .map_err(|error| voussoir::Error::Handler(format!("could not write {path}: {error}")))?;
-    Ok(Value::Null)
+        .ok_or_else(|| voussoir::Error::Payload("save needs a `path`".to_owned()))?;
+
+    std::fs::write(path, "…")
+        .map_err(|e| voussoir::Error::Handler(format!("could not write {path}: {e}")))?;
+
+    Ok(voussoir::serde_json::json!({ "ok": true }))
 }
 ```
 
-Use `Payload` for a malformed request and `Handler` for everything a user might
-see. A `Handler` message is rendered verbatim in a toast by most apps, so write it
-as a sentence, not a debug string.
+The rule for choosing between them:
 
-## Panics
+- **`Payload`** — the *caller* is wrong. A missing field, a wrong type, a value
+  out of range. The page has a bug, and the message is for the developer.
+- **`Handler`** — the *world* is wrong. The disk is full, the file vanished, the
+  network refused. The message is for the user, so write it as a sentence.
 
-A panic inside a handler is caught before it crosses the webview's FFI boundary,
-where unwinding would abort the process. The page gets `kind: "panic"` and the app
-keeps running with its windows and unsaved work intact. The panic is also recorded
-in the diagnostics buffer and in `__voussoir_reports`, which is why a crash in the
-field is diagnosable rather than a blank window.
+A `String` error from a `Result<_, String>` becomes `handler`. That is a good
+default, and it means a quick command does not need to import `Error` at all.
 
-## Errors that never reach the page
+## Theory: separate "user" from "developer" messages
 
-A request dropped by the allowlist check and a bridge message that is not JSON are
-recorded in `voussoir dev --verbose` instead. They are programming errors in the shell
-or the page, not something a user action can cause, and answering them would leak
-which commands exist.
+The `message` field is shown to a real person, so a bare `EACCES` is a failure of
+the app, not of the framework. Two habits:
+
+- **Handler messages are for users.** "The file could not be saved: permission
+  denied" beats "os error 13".
+- **Detail goes in the log.** If you need the raw error, record it with
+  `app.report_log`, or print it in development. Do not paste both into one string.
+
+## Retrying: the only kind worth retrying
+
+```ts
+async function invokeWithRetry<T>(method: string, payload: unknown, tries = 3): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await window.voussoir.invoke<T>(method, payload);
+    } catch (error) {
+      const { kind } = error as { kind: string };
+      if (kind !== "busy" || attempt >= tries) throw error;
+      await new Promise((r) => setTimeout(r, 50 * attempt));
+    }
+  }
+}
+```
+
+Retrying anything else is usually wrong:
+
+- `unknown` will be `unknown` again.
+- `payload` is a bug in the caller.
+- `handler` may be transient, but you cannot tell from the kind alone, so the
+  command should say so in its message.
+- `timeout` must not be retried blindly: the first attempt may still be running.
+
+## Deadlines
+
+The default deadline is `command_timeout_ms` from `voussoir.json` (30 seconds
+unless you change it). `0` disables it. A page can override it per call:
+
+```ts
+await window.voussoir.invoke("export", payload, { timeout: 300_000 });
+```
+
+**Why a deadline at all?** Because a promise that never settles is
+indistinguishable from a frozen UI, and the user will force-quit. A `timeout` is
+a better failure than a hang, even when the work is legitimate and long.
+
+## Next
+
+- [Commands & payloads](ipc-contract.md) — the envelope these kinds arrive in.
+- [Troubleshooting](troubleshooting.md) — what each kind usually means in practice.
