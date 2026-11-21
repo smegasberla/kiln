@@ -11,6 +11,24 @@ declare global {
       /** Which platform this page is running on. Use it to hide affordances that
        *  cannot work there, rather than offering buttons that error. */
       platform: "linux" | "windows" | "macos" | "bsd" | "android" | "ios";
+      /** The shim protocol this shell implements, not its package version.
+       *  Feature-detect with `kiln.protocol >= N` and degrade in one place
+       *  instead of probing for methods. 2 adds `windows`, `tray` and `menu`. */
+      protocol: number;
+      /** The open window labels, in the order they opened. Ask it instead of
+       *  remembering every label the page ever requested. */
+      windows(): Promise<string[]>;
+      /** Runtime tray state. Rejects on a platform whose "tray" is a posted
+       *  notification (Android) or absent (iOS), with the shell's reason. */
+      tray: {
+        tooltip(text: string): Promise<null>;
+        checked(id: string, checked: boolean): Promise<null>;
+        popup(): Promise<null>;
+      };
+      /** Runtime menu state: tick an item declared with `.check()`. */
+      menu: {
+        checked(id: string, checked: boolean): Promise<null>;
+      };
     };
   }
 }

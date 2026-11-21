@@ -33,9 +33,21 @@ pub(crate) struct LoopState {
     /// Which windows have already fired a lifecycle hook, so a duplicate event
     /// from the platform cannot run one twice.
     pub(crate) fired: std::sync::Arc<crate::Fired>,
+    /// The labels of the open windows, shared with `AppHandle::windows` so a
+    /// handler on any thread can see them. The loop is what keeps it true.
+    pub(crate) open_labels: windows::OpenWindows,
     pub(crate) show_devtools: bool,
     #[cfg(feature = "menu")]
     pub(crate) menu_commands: std::collections::HashMap<String, String>,
+    /// The live menu bar, if the app declared one. Kept here because the native
+    /// object is not `Send` and a runtime update has to be applied on this
+    /// thread.
+    #[cfg(feature = "menu")]
+    pub(crate) menu: Option<crate::menu::MenuHandle>,
+    /// The live tray icon, same reasoning. Dropping it removes the icon, so the
+    /// loop outliving it is what keeps the tray visible for the whole run.
+    #[cfg(feature = "tray")]
+    pub(crate) tray: Option<crate::tray::TrayHandle>,
 }
 
 /// Handle one event against the shared loop state.
@@ -53,6 +65,7 @@ pub(crate) fn dispatch(
             ..
         } => {
             if let Some(entry) = state.open.remove(&window_id) {
+                state.open_labels.remove(&entry.label);
                 announce_close(state, &entry.label);
             }
             if state.open.is_empty() {
@@ -97,8 +110,18 @@ pub(crate) fn dispatch(
         }
         Event::UserEvent(UserEvent::OpenWindow(options)) => {
             match windows::create_window(event_loop, &state.spec, &options, &*state.factory) {
-                Ok((id, entry)) => windows::insert(&mut state.open, id, entry),
-                Err(error) => eprintln!("kiln: could not open window: {error}"),
+                Ok((id, entry)) => {
+                    state.open_labels.insert(&entry.label);
+                    windows::insert(&mut state.open, id, entry);
+                }
+                Err(error) => {
+                    // The label was reserved before the loop ran; a window that
+                    // never existed must not stay addressable.
+                    if let Some(label) = &options.label {
+                        state.open_labels.remove(label);
+                    }
+                    eprintln!("kiln: could not open window: {error}");
+                }
             }
         }
         Event::UserEvent(UserEvent::CloseWindow(label)) => {
@@ -109,6 +132,7 @@ pub(crate) fn dispatch(
                 .map(|(id, _)| *id)
             {
                 if let Some(entry) = state.open.remove(&id) {
+                    state.open_labels.remove(&entry.label);
                     announce_close(state, &entry.label);
                 }
                 if state.open.is_empty() {
@@ -138,6 +162,14 @@ pub(crate) fn dispatch(
                     eprintln!("kiln: eval failed: {error}");
                 }
             }
+        }
+        #[cfg(feature = "tray")]
+        Event::UserEvent(UserEvent::TrayUpdate(change)) => {
+            crate::live::apply_tray(state.tray.as_ref(), &change);
+        }
+        #[cfg(feature = "menu")]
+        Event::UserEvent(UserEvent::MenuUpdate(change)) => {
+            crate::live::apply_menu(state.menu.as_ref(), &change);
         }
         Event::UserEvent(UserEvent::Signal(signal)) => {
             if signal == "devtools" {

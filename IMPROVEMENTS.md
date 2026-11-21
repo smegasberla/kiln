@@ -137,7 +137,7 @@ is opt-in; the data-dir null case degrades to an error the page can handle.
 
 ## T2 — Framework depth (design decision first)
 
-### 6. Per-window allowlists (carried from PRODUCTION-READINESS.md finding 3)
+### 6. Per-window allowlists (carried from PRODUCTION-READINESS.md finding 3) — **DONE**
 
 **Evidence.** `kiln/src/config.rs` `commands` array narrows the compiled-in
 handler set globally; `ipc.rs` applies one flat list. Built-ins
@@ -155,7 +155,13 @@ of scope — the minimal-shell promise forbids capability files.
 **Acceptance.** A documented, tested path runs a second window with a strict
 subset of the main window's commands.
 
-### 7. Multi-window: labels are underused
+**Landed.** `WindowOptions.allowlist` (also accepted as `commands` from the page)
+intersects the global list before the window is created. `ipc.rs` tests cover a
+narrowed window rejecting an unlisted command while the global surface keeps it;
+`scripts/verify.ts` does the same over the real transport in the probe app, and
+README **Multi-window** documents the pattern.
+
+### 7. Multi-window: labels are underused — **DONE**
 
 **Evidence.** `__kiln_open_window` returns `Value::Null` — the page never learns
 the label of the window it just created and cannot address it afterward.
@@ -167,7 +173,13 @@ consider a `kiln.windows()` built-in listing open labels.
 **Acceptance.** A page can open a window and immediately `emit_to` it; a test
 asserts the returned label round-trips.
 
-### 8. Tray/menu APIs are stringly-typed and fire-and-forget
+**Landed.** `open_window` returns the resolved label (breaking for callers that
+ignored it, one line to fix), `__kiln_open_window` answers `{"label": ...}`, an
+unnamed window gets a distinct label, `__kiln_windows` lists the open ones and
+`kiln.windows()` wraps it. `windows.rs` tests cover uniqueness and reuse of freed
+labels; verify.ts asserts the label round-trips over the real transport.
+
+### 8. Tray/menu APIs are stringly-typed and fire-and-forget — **DONE**
 
 **Evidence.** Menu items map to command names via `menu_command_map`; tray clicks
 arrive as `{"id": id}` events (`kiln/src/platform.rs:55-67`). No runtime update,
@@ -179,7 +191,15 @@ set checked, popup. Covers most real tray/menu apps.
 **Acceptance.** A tray tooltip and a checked menu item can be updated at runtime
 without re-registering commands.
 
-### 9. Hot-reload state-loss: help rather than only document
+**Landed.** `TrayItem::check()`/`checked(bool)` and `MenuItem::check()`/`checked(bool)`
+declare a check item; `AppHandle::set_tray_tooltip|set_tray_checked|popup_tray`
+and `set_menu_checked` (plus the `__kiln_tray_*`/`__kiln_menu_checked` built-ins
+and the `kiln.tray`/`kiln.menu` shim helpers) update them after start. `live.rs`
+validates off the UI thread so a plain item, an undeclared tray or a platform
+without a live tray gets a named error instead of a silent no-op; the native call
+runs in the event loop, where the non-`Send` objects live.
+
+### 9. Hot-reload state-loss: help rather than only document — **DONE**
 
 **Evidence.** `kiln/src/hot.rs` honestly documents "statics do not survive reload;
 persistent state travels in the payload" — nothing enforces or helps with it.
@@ -191,7 +211,13 @@ file-notify mechanism later).
 
 **Acceptance.** A value written before a reload is readable after it, in a test.
 
-### 10. Version the injected shim
+**Landed.** `kiln::state` is a shell-owned `serde_json` map the reload never
+touches, with `get|set|remove|contains|keys|clear` and `reload_generation()`; the
+hot loader bumps the generation on each swap, so reloaded code can key on it. A
+test writes before a reload and reads after it; the README documents both the
+pattern and the 250 ms polling latency.
+
+### 10. Version the injected shim — **DONE**
 
 **Evidence.** `window.kiln = {invoke, listen, platform}` is injected by
 `build_shim` (`kiln/src/lib.rs:855-876`); `__kiln_version` reports the shell
@@ -202,6 +228,10 @@ object so frontend libraries feature-detect instead of branching on `platform`.
 
 **Acceptance.** A page can read the shim protocol version; bumping it is a
 documented change.
+
+**Landed.** `window.kiln.protocol` is injected from `SHIM_PROTOCOL` (currently
+2), the shim ships a matching `protocol` type in the scaffold's `kiln.d.ts`, and a
+test asserts the placeholder is replaced and the version is at least 2.
 
 ---
 

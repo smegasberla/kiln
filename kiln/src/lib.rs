@@ -59,10 +59,12 @@ pub mod windows;
 
 #[cfg(feature = "dialogs")]
 pub mod dialogs;
+pub mod live;
 #[cfg(feature = "menu")]
 pub mod menu;
 #[cfg(feature = "rt")]
 pub mod rt;
+pub mod state;
 #[cfg(feature = "storage")]
 pub mod storage;
 #[cfg(feature = "tray")]
@@ -111,6 +113,17 @@ pub const SCHEME: &str = "kiln";
 /// The JS shim injected into every page: defines `window.kiln`.
 const SHIM: &str = include_str!("shim.js");
 
+/// The shim's own protocol version, exposed to the page as `kiln.protocol`.
+///
+/// The shell version answers "which build am I running"; this answers "which
+/// shim surface can I rely on". Frontend code feature-detects with one number
+/// instead of probing for methods, and the package's `kiln.d.ts` declares the
+/// same value, so a mismatch is a visible bug rather than a runtime `undefined`.
+///
+/// Bumping it is a documented change: it happens when the shim gains a member
+/// or changes one's meaning, never for an internal fix.
+pub const SHIM_PROTOCOL: u32 = 2;
+
 /// The invoke endpoint.
 ///
 /// Android's WebView and Windows' WebView2 have no custom-scheme interception, so
@@ -150,6 +163,12 @@ pub(crate) enum UserEvent {
     Tray(String),
     /// An out-of-band signal, e.g. "open devtools".
     Signal(String),
+    /// A tray change for the UI thread to apply.
+    #[cfg(feature = "tray")]
+    TrayUpdate(live::Change),
+    /// A menu change for the UI thread to apply.
+    #[cfg(feature = "menu")]
+    MenuUpdate(live::Change),
     /// Run a script in every window (used to resolve bridge promises).
     Eval(String),
 }
@@ -160,13 +179,31 @@ pub(crate) enum UserEvent {
 pub struct AppHandle {
     proxy: Option<EventLoopProxy<UserEvent>>,
     commands: Option<Arc<Registry>>,
+    /// Labels of the open windows, kept in step with the event loop's map.
+    open: windows::OpenWindows,
+    /// The label an unnamed window falls back to, so `open_window` can resolve
+    /// a name before the UI thread builds anything.
+    default_entry: String,
+    /// What the app declared for its tray and menu, so a runtime update can be
+    /// validated here instead of failing on the UI thread later.
+    #[cfg_attr(not(any(feature = "tray", feature = "menu")), allow(dead_code))]
+    declared: Arc<live::Declared>,
 }
 
 impl AppHandle {
-    fn new(proxy: EventLoopProxy<UserEvent>, commands: Arc<Registry>) -> Self {
+    fn new(
+        proxy: EventLoopProxy<UserEvent>,
+        commands: Arc<Registry>,
+        open: windows::OpenWindows,
+        default_entry: String,
+        declared: Arc<live::Declared>,
+    ) -> Self {
         Self {
             proxy: Some(proxy),
             commands: Some(commands),
+            open,
+            default_entry,
+            declared,
         }
     }
 
@@ -176,7 +213,24 @@ impl AppHandle {
         Self {
             proxy: None,
             commands: None,
+            open: windows::OpenWindows::new(),
+            default_entry: "index.html".to_owned(),
+            declared: Arc::new(live::Declared::empty()),
         }
+    }
+
+    /// The shared label registry, for the event loop to keep in step.
+    pub(crate) fn window_registry(&self) -> windows::OpenWindows {
+        self.open.clone()
+    }
+
+    /// Labels of the windows that are open right now, in the order they opened.
+    ///
+    /// The list is maintained by the shell, so a handler on any thread can read
+    /// it without touching a tao handle. A window counts from the moment it is
+    /// requested, which is what lets a page open one and immediately address it.
+    pub fn windows(&self) -> Vec<String> {
+        self.open.labels()
     }
 
     /// Send an event to every window, invoking `kiln.listen(event, fn)`.
@@ -202,15 +256,39 @@ impl AppHandle {
         self.emit(event, payload);
     }
 
-    /// Open a window. Creation happens on the UI thread, so this returns
-    /// immediately; the new page is announced through `on_ready`.
-    pub fn open_window(&self, options: WindowOptions) -> Result<(), Error> {
+    /// Open a window and return the label it is addressable by.
+    ///
+    /// Creation happens on the UI thread, so this returns immediately; the new
+    /// page is announced through `on_ready`. The label is resolved here rather
+    /// than there for two reasons: a caller (the page included) needs an answer
+    /// synchronously to be able to `emit_to` the window it just asked for, and a
+    /// second unnamed window must not get the same label as the first, which the
+    /// reservation below guarantees even if two commands race.
+    ///
+    /// `WindowOptions::allowlist` is applied before the window exists, so its
+    /// page can never make a call it will not be allowed to keep making.
+    pub fn open_window(&self, options: WindowOptions) -> Result<String, Error> {
         let Some(proxy) = &self.proxy else {
             return Err(Error::Runtime("no event loop attached".to_owned()));
         };
+        let mut options = options;
+        let label = options
+            .label
+            .clone()
+            .unwrap_or_else(|| self.open.unique_label(&self.default_entry));
+        options.label = Some(label.clone());
+
+        if let (Some(commands), Some(allow)) = (&self.commands, options.allowlist.as_ref()) {
+            commands.allow_window(&label, allow.clone());
+        }
+
         proxy
             .send_event(UserEvent::OpenWindow(options))
-            .map_err(|_| Error::Runtime("the app is shutting down".to_owned()))
+            .map_err(|_| Error::Runtime("the app is shutting down".to_owned()))?;
+        // Reserved before the loop runs, so a window that fails to build is the
+        // only way this label goes back to being free.
+        self.open.insert(&label);
+        Ok(label)
     }
 
     /// Close a window by label. A no-op if it is already gone.
@@ -218,6 +296,62 @@ impl AppHandle {
         if let Some(proxy) = &self.proxy {
             let _ = proxy.send_event(UserEvent::CloseWindow(label.to_owned()));
         }
+    }
+
+    /// Retitle the tray icon at runtime.
+    ///
+    /// Validated before it is queued: an app that declared no tray, or a platform
+    /// whose "tray" is a posted notification, gets an error now rather than a log
+    /// line later. Returns as soon as the change is queued; the UI thread applies
+    /// it on the next loop iteration.
+    #[cfg(feature = "tray")]
+    pub fn set_tray_tooltip(&self, text: &str) -> Result<(), Error> {
+        self.update_tray(live::Wanted::TrayTooltip(text.to_owned()))
+    }
+
+    /// Check or uncheck a tray item declared with `.check()` or `.checked(..)`.
+    #[cfg(feature = "tray")]
+    pub fn set_tray_checked(&self, id: &str, checked: bool) -> Result<(), Error> {
+        self.update_tray(live::Wanted::TrayChecked {
+            id: id.to_owned(),
+            checked,
+        })
+    }
+
+    /// Raise the tray's own menu, for a page that has its own button.
+    #[cfg(feature = "tray")]
+    pub fn popup_tray(&self) -> Result<(), Error> {
+        self.update_tray(live::Wanted::TrayPopup)
+    }
+
+    #[cfg(feature = "tray")]
+    fn update_tray(&self, wanted: live::Wanted) -> Result<(), Error> {
+        let change = self.declared.request(wanted)?;
+        let Some(proxy) = &self.proxy else {
+            return Err(Error::Runtime("no event loop attached".to_owned()));
+        };
+        proxy
+            .send_event(UserEvent::TrayUpdate(change))
+            .map_err(|_| Error::Runtime("the app is shutting down".to_owned()))
+    }
+
+    /// Check or uncheck a menu item declared with `.check()` or `.checked(..)`.
+    ///
+    /// The menu bar is built once, so this is the only way an item's tick can
+    /// follow the app's state; passing a plain item's id is an error naming the
+    /// reason rather than a tick that never appears.
+    #[cfg(feature = "menu")]
+    pub fn set_menu_checked(&self, id: &str, checked: bool) -> Result<(), Error> {
+        let change = self.declared.request(live::Wanted::MenuChecked {
+            id: id.to_owned(),
+            checked,
+        })?;
+        let Some(proxy) = &self.proxy else {
+            return Err(Error::Runtime("no event loop attached".to_owned()));
+        };
+        proxy
+            .send_event(UserEvent::MenuUpdate(change))
+            .map_err(|_| Error::Runtime("the app is shutting down".to_owned()))
     }
 
     /// Run another registered command as if the page had called it.
@@ -620,7 +754,35 @@ impl App {
         }
 
         let registry = Arc::new(registry);
-        let handle = AppHandle::new(proxy, Arc::clone(&registry));
+        // One registry of open labels, shared by the handle (so any handler can
+        // read it) and the event loop (which is what opens and closes windows).
+        let open = windows::OpenWindows::new();
+        // The declarations are all a tray or menu update needs to be validated,
+        // so the handle carries them; the native objects stay in the loop below.
+        // With neither feature compiled in there is nothing to declare, and
+        // `Declared::new` does not exist, so the empty form is used instead.
+        let declared = {
+            #[cfg(any(feature = "tray", feature = "menu"))]
+            {
+                Arc::new(live::Declared::new(
+                    #[cfg(feature = "tray")]
+                    self.tray.as_ref(),
+                    #[cfg(feature = "menu")]
+                    &self.menus,
+                ))
+            }
+            #[cfg(not(any(feature = "tray", feature = "menu")))]
+            {
+                Arc::new(live::Declared::empty())
+            }
+        };
+        let handle = AppHandle::new(
+            proxy,
+            Arc::clone(&registry),
+            open.clone(),
+            entry.clone(),
+            declared,
+        );
 
         // Published before anything can call back, and on every platform: an
         // outer bootstrap (the Android one) has to answer with the same registry
@@ -658,7 +820,14 @@ impl App {
                 .label
                 .clone()
                 .or_else(|| Some(spec.entry.clone())),
+            // The app's own window uses the app's own surface; a narrower lane
+            // is something a command asks for when it opens a window itself.
+            allowlist: None,
         };
+        // The first window is built here rather than through `open_window`, so
+        // its label is registered by hand; `insert` is idempotent, so the iOS
+        // path (which does go through `open_window`) is unaffected.
+        handle.window_registry().insert(&spec.label_for(&first));
         #[cfg(not(target_os = "ios"))]
         let window = WindowBuilder::new()
             .with_title(spec.title_for(&first))
@@ -683,8 +852,12 @@ impl App {
             .open_window(first)
             .map_err(|e| Error::Runtime(e.to_string()))?;
 
+        // Both natives stay alive for the whole run: the menu is the bar itself,
+        // and dropping the tray handle removes the icon from the status area. They
+        // also have to be reachable from the loop, because a runtime update is
+        // applied there rather than from the caller's thread.
         #[cfg(feature = "menu")]
-        let menu_commands = {
+        let (menu_handle, menu_commands) = {
             let built = build_menu(&self.menus, &handle, &config.name);
             #[cfg(not(target_os = "ios"))]
             let attached = built.as_ref().map(|built| built.attach(&window));
@@ -694,16 +867,15 @@ impl App {
             }
             #[cfg(target_os = "ios")]
             let _ = &built;
-            menu_command_map(&self.menus)
+            (built, menu_command_map(&self.menus))
         };
 
-        // Underscored because nothing reads it: the tray has to stay alive for the
-        // whole run, and dropping it removes the icon.
         #[cfg(feature = "tray")]
-        let _tray_handle = build_tray(&self.tray, &handle);
+        let tray_handle = build_tray(&self.tray, &handle);
 
         let mut state = event_loop::LoopState {
             fired: std::sync::Arc::new(Fired::default()),
+            open_labels: handle.window_registry(),
             open: {
                 #[cfg(not(target_os = "ios"))]
                 let open = {
@@ -731,6 +903,10 @@ impl App {
             show_devtools,
             #[cfg(feature = "menu")]
             menu_commands,
+            #[cfg(feature = "menu")]
+            menu: menu_handle,
+            #[cfg(feature = "tray")]
+            tray: tray_handle,
         };
 
         event_loop.run(move |event, event_loop, control_flow| {
@@ -971,6 +1147,7 @@ fn build_shim(dev_origin: Option<&str>) -> String {
         .replace("__ALLOWED_ORIGINS__", &allowed)
         .replace("__BRIDGE__", if bridge { "true" } else { "false" })
         .replace("__PLATFORM__", platform_name())
+        .replace("__SHIM_PROTOCOL__", &SHIM_PROTOCOL.to_string())
 }
 
 /// The parts of the shell that do not depend on a desktop window loop.
@@ -1101,9 +1278,19 @@ fn register_builtins(registry: &mut Registry, config: &Config) {
         }
     });
 
+    // Returns the label so the page can address the window it just opened. A
+    // page that opens two unnamed windows gets `index.html` and `index.html-2`
+    // rather than a silent duplicate and an unaddressable pair.
     registry.add("__kiln_open_window", |app, payload| {
-        app.open_window(WindowOptions::from_json(&payload))?;
-        Ok(Value::Null)
+        let label = app.open_window(WindowOptions::from_json(&payload))?;
+        Ok(serde_json::json!({ "label": label }))
+    });
+
+    // The open labels, in the order the windows opened. Without this a page has
+    // to remember every label it ever asked for, and a window closed from the
+    // OS side leaves it emitting into nothing.
+    registry.add("__kiln_windows", |app, _payload| {
+        Ok(serde_json::json!({ "windows": app.windows() }))
     });
 
     registry.add("__kiln_close_window", |app, payload| {
@@ -1115,6 +1302,53 @@ fn register_builtins(registry: &mut Registry, config: &Config) {
 
     registry.add("__kiln_devtools", |app, _payload| {
         app.open_devtools();
+        Ok(Value::Null)
+    });
+
+    // Runtime tray and menu updates, so an app does not have to re-register
+    // anything to change a tick or a tooltip. Each one validates before queueing,
+    // so a page gets a real error envelope naming the reason.
+    #[cfg(feature = "tray")]
+    registry.add("__kiln_tray_tooltip", |app, payload| {
+        let text = payload
+            .get("text")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::Payload("tray_tooltip needs a \"text\" string".to_owned()))?;
+        app.set_tray_tooltip(text)?;
+        Ok(Value::Null)
+    });
+
+    #[cfg(feature = "tray")]
+    registry.add("__kiln_tray_checked", |app, payload| {
+        let id = payload
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::Payload("tray_checked needs an \"id\" string".to_owned()))?;
+        let checked = payload
+            .get("checked")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| Error::Payload("tray_checked needs a \"checked\" boolean".to_owned()))?;
+        app.set_tray_checked(id, checked)?;
+        Ok(Value::Null)
+    });
+
+    #[cfg(feature = "tray")]
+    registry.add("__kiln_tray_popup", |app, _payload| {
+        app.popup_tray()?;
+        Ok(Value::Null)
+    });
+
+    #[cfg(feature = "menu")]
+    registry.add("__kiln_menu_checked", |app, payload| {
+        let id = payload
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::Payload("menu_checked needs an \"id\" string".to_owned()))?;
+        let checked = payload
+            .get("checked")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| Error::Payload("menu_checked needs a \"checked\" boolean".to_owned()))?;
+        app.set_menu_checked(id, checked)?;
         Ok(Value::Null)
     });
 
@@ -1185,6 +1419,35 @@ mod tests {
             assert_eq!(invoke_base(true), "http://kiln.localhost/__kiln/");
             assert!(build_shim(Some("http://127.0.0.1:5177")).contains(invoke_base(true)));
         }
+    }
+
+    #[test]
+    fn the_shim_announces_its_protocol_version() {
+        let shim = build_shim(None);
+        assert!(
+            !shim.contains("__SHIM_PROTOCOL__"),
+            "the placeholder must be substituted"
+        );
+        assert!(
+            shim.contains(&format!("protocol: {}", SHIM_PROTOCOL)),
+            "the page must be able to read the shim protocol"
+        );
+        // A version is a number the page can compare, never a string.
+        const { assert!(SHIM_PROTOCOL >= 2, "version 2 added windows()") };
+    }
+
+    #[test]
+    fn the_shim_exposes_windows_and_chrome_helpers() {
+        let shim = build_shim(None);
+        // A page opens a window, then needs the list of what is open and the
+        // ability to tick a tray or menu item without re-declaring anything.
+        for member in ["windows", "tray", "menu"] {
+            assert!(shim.contains(member), "the shim must expose {member}");
+        }
+        assert!(shim.contains("__kiln_windows"));
+        assert!(shim.contains("__kiln_tray_checked"));
+        assert!(shim.contains("__kiln_tray_tooltip"));
+        assert!(shim.contains("__kiln_menu_checked"));
     }
 
     #[test]
@@ -1274,6 +1537,7 @@ mod tests {
             "__kiln_version",
             "__kiln_reports",
             "__kiln_open_window",
+            "__kiln_windows",
             "__kiln_close_window",
             "__kiln_devtools",
         ] {
@@ -1281,6 +1545,21 @@ mod tests {
         }
         // `full` carries `storage`, so the store is reachable from the page
         // whenever the shell advertises that feature set.
+        // The runtime tray/menu surface is part of `full`, so a page can rely on
+        // these names when the shell advertises the feature.
+        #[cfg(feature = "tray")]
+        for name in [
+            "__kiln_tray_tooltip",
+            "__kiln_tray_checked",
+            "__kiln_tray_popup",
+        ] {
+            assert!(registry.has(name), "{name} should exist under tray");
+        }
+        #[cfg(feature = "menu")]
+        assert!(
+            registry.has("__kiln_menu_checked"),
+            "__kiln_menu_checked should exist under menu"
+        );
         #[cfg(feature = "storage")]
         for name in [
             "storage.get",

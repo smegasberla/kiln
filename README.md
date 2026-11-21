@@ -186,9 +186,26 @@ in, `{"ok":…}`/`{"error":…}` out, panics caught inside), `kiln_free`, and
 is an error envelope and a living window, exactly like the static path; a
 failed rebuild keeps the last good library and prints the compiler error.
 
-Two rules: statics inside the commands crate do not survive a reload — keep
-persistent state in the shell, passed in the payload — and hot reload is
-desktop-only, since mobile platforms restrict loading dynamic code. Each swap
+Two rules: statics inside the commands crate do not survive a reload, and hot
+reload is desktop-only, since mobile platforms restrict loading dynamic code.
+
+The first rule has a fix rather than only a warning. `kiln::state` is a
+shell-owned store that outlives every library swap:
+
+```rust
+#[cfg(feature = "hot-reload")]
+fn bump() -> u64 {
+    let n = kiln::state::get("count").and_then(|v| v.as_u64()).unwrap_or(0) + 1;
+    kiln::state::set("count", kiln::serde_json::json!(n));
+    n
+}
+```
+
+It is a plain in-process `serde_json` map, so it also works as scratch state in a
+release build, and `kiln::state::reload_generation()` tells reloaded code which
+generation of the library is live. The watcher polls every 250 ms, so a save
+becomes visible up to a quarter second later; each swap prints
+`reloaded gen N … X ms`. Each swap
 prints `reloaded gen N … X ms` (build included; the harness measures
 edit-to-visible separately). The release guarantee is checked, not asserted:
 `cargo tree -p kiln --depth 1` shows no `libloading` edge and the shell size
@@ -301,15 +318,38 @@ in `kiln.json` (see Configuration) and that window can call only the listed
 commands. The label is resolved by the shell from the calling webview, so a page
 cannot claim a different window's permissions by sending a label of its own.
 
+A window opened at runtime carries its own lane, declared where it is opened:
+
+```rust
+let label = app.open_window(WindowOptions {
+    title: Some("Preview".into()),
+    allowlist: Some(vec!["greet".into()]),   // this window only
+    ..Default::default()
+})?;
+app.emit_to(Some(&label), "document", json!({ "path": "notes.md" }));
+```
+
+`open_window` returns the label and the built-in `__kiln_open_window` answers
+`{"label": "..."}`, so a page can address the window it just created instead of
+guessing a name. An unnamed window gets a distinct label (`index.html`,
+`index.html-2`, …), and `kiln.windows()` lists the open ones in the order they
+opened. A runtime lane only ever narrows: the global `commands` list is applied
+first, so a window cannot be handed a command the app withheld.
+
 ## Built-in commands
 
 | Command | Kind | Purpose |
 | --- | --- | --- |
 | `__kiln_version` | sync | app name + shell version |
 | `__kiln_reports` | sync | recent crash/error records |
-| `__kiln_open_window` | sync | open a window from JSON options |
+| `__kiln_open_window` | sync | open a window from JSON options; answers `{label}` |
+| `__kiln_windows` | sync | open window labels, in opening order |
 | `__kiln_close_window` | sync | close by `label` |
 | `__kiln_devtools` | sync | open devtools (release needs `devtools`) |
+| `__kiln_tray_tooltip` | sync | retitle the tray (`tray`) |
+| `__kiln_tray_checked` | sync | tick a tray check item (`tray`) |
+| `__kiln_tray_popup` | sync | raise the tray menu from the page (`tray`) |
+| `__kiln_menu_checked` | sync | tick a menu item (`menu`) |
 | `dialog.open` / `.open_many` / `.save` / `.folder` | async | native dialogs (`dialogs`) |
 | `update.check` | async | compare against `update.url` (`updater`) |
 

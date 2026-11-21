@@ -362,6 +362,7 @@ pub fn build(app_name: &'static str) -> App {
                 width: Some(560.0),
                 height: Some(640.0),
                 entry: None,
+            allowlist: None,
             })?;
             Ok(Value::Null)
         })

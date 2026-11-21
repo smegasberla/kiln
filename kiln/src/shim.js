@@ -117,8 +117,38 @@
     if (set) for (const fn of set) fn(payload);
   };
 
+  // The open window labels, in the order they opened. A page that opens a window
+  // gets its label back, but it still needs to know what closed.
+  async function windows() {
+    const reply = await invoke("__kiln_windows");
+    return (reply && reply.windows) || [];
+  }
+
+  // Tray and menu state, so a page changes a tick without re-declaring anything.
+  // Each resolves to null; a platform without the affordance rejects with the
+  // shell's reason rather than pretending it worked.
+  const tray = {
+    tooltip: (text) => invoke("__kiln_tray_tooltip", { text }),
+    checked: (id, checked) => invoke("__kiln_tray_checked", { id, checked }),
+    popup: () => invoke("__kiln_tray_popup"),
+  };
+  const menu = {
+    checked: (id, checked) => invoke("__kiln_menu_checked", { id, checked }),
+  };
+
   // The page is shared across platforms, so it needs to know which one it is on.
   // Injected at build time rather than sniffed: a WebView user-agent lies more
   // often than it helps.
-  window.kiln = { invoke, listen, platform: "__PLATFORM__" };
+  // `protocol` is the shim's own version, not the shell's. Frontend code
+  // feature-detects with it instead of probing for methods: a page that needs
+  // `windows()` asks `kiln.protocol >= 2` and degrades once, in one place.
+  window.kiln = {
+    invoke,
+    listen,
+    windows,
+    tray,
+    menu,
+    platform: "__PLATFORM__",
+    protocol: __SHIM_PROTOCOL__,
+  };
 })();

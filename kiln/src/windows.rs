@@ -29,18 +29,121 @@ pub struct WindowOptions {
     pub height: Option<f64>,
     /// Page to load, relative to the served root.
     pub entry: Option<String>,
+    /// Commands this window may call, intersected with the global allowlist.
+    ///
+    /// This is the runtime form of the `windows` map in `kiln.json`: a window that
+    /// renders untrusted content (a markdown preview, an embedded third-party
+    /// page) can be given a strict subset without declaring its label up front.
+    /// `None` means "the global surface", and a list can only ever remove
+    /// commands, never add one the app withheld.
+    pub allowlist: Option<Vec<String>>,
 }
 
 impl WindowOptions {
     /// Build options from a JSON payload, ignoring unknown fields.
+    ///
+    /// `allowlist` is accepted under its own name; `commands` is accepted too
+    /// because that is what the config file calls the same idea, and a page
+    /// forwarding its `kiln.json` entry should not have to rename a field.
     pub fn from_json(payload: &Value) -> Self {
+        let allowlist = payload
+            .get("allowlist")
+            .or_else(|| payload.get("commands"))
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            });
         Self {
-            label: payload.get("label").and_then(Value::as_str).map(str::to_owned),
-            title: payload.get("title").and_then(Value::as_str).map(str::to_owned),
+            label: payload
+                .get("label")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            title: payload
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
             width: payload.get("width").and_then(Value::as_f64),
             height: payload.get("height").and_then(Value::as_f64),
-            entry: payload.get("entry").and_then(Value::as_str).map(str::to_owned),
+            entry: payload
+                .get("entry")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            allowlist,
         }
+    }
+}
+
+/// The labels of every open window, shared with command handlers.
+///
+/// The event loop owns the windows themselves and tao handles are not `Send`, so
+/// a handler cannot look at them. It can look at this: a plain list of labels,
+/// kept in step with the loop's map, which is enough to answer `__kiln_windows`
+/// and to tell a page the label of the window it just opened. Ordering is
+/// insertion order, so "the first window" means the one opened first rather than
+/// whichever hash bucket came up.
+#[derive(Debug, Clone, Default)]
+pub struct OpenWindows {
+    labels: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl OpenWindows {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a window as open. A repeated label is not inserted twice, because
+    /// two windows sharing a label could not be addressed separately anyway.
+    pub fn insert(&self, label: &str) {
+        let mut labels = self.labels.lock().unwrap_or_else(|e| e.into_inner());
+        if !labels.iter().any(|existing| existing == label) {
+            labels.push(label.to_owned());
+        }
+    }
+
+    /// Forget a window that closed. Unknown labels are ignored.
+    pub fn remove(&self, label: &str) {
+        let mut labels = self.labels.lock().unwrap_or_else(|e| e.into_inner());
+        labels.retain(|existing| existing != label);
+    }
+
+    /// The open labels, in the order the windows were opened.
+    pub fn labels(&self) -> Vec<String> {
+        self.labels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Whether `label` names an open window.
+    pub fn contains(&self, label: &str) -> bool {
+        self.labels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|existing| existing == label)
+    }
+
+    /// A label that no open window is using, derived from `base`.
+    ///
+    /// A page that opens two windows without naming them must be able to address
+    /// each one, which means the shell has to hand out distinct labels instead of
+    /// defaulting both to the entry page. `base` comes back unchanged when it is
+    /// free, so the common first window keeps its readable name.
+    pub fn unique_label(&self, base: &str) -> String {
+        let labels = self.labels.lock().unwrap_or_else(|e| e.into_inner());
+        if !labels.iter().any(|existing| existing == base) {
+            return base.to_owned();
+        }
+        for n in 2.. {
+            let candidate = format!("{base}-{n}");
+            if !labels.contains(&candidate) {
+                return candidate;
+            }
+        }
+        unreachable!("the loop above always finds a free label")
     }
 }
 
@@ -121,7 +224,10 @@ impl Spec {
     /// "open a window pointed at the dev server" and "open a window pointed at a
     /// local file" both work.
     pub fn url_for(&self, entry: &str) -> String {
-        if entry.starts_with("kiln://") || entry.starts_with("http://") || entry.starts_with("https:") {
+        if entry.starts_with("kiln://")
+            || entry.starts_with("http://")
+            || entry.starts_with("https:")
+        {
             return entry.to_owned();
         }
         match &self.dev_origin {
@@ -197,7 +303,10 @@ mod tests {
     #[test]
     fn urls_are_built_against_the_app_origin() {
         assert_eq!(spec().url_for("index.html"), "kiln://localhost/index.html");
-        assert_eq!(spec().url_for("/app/x.html"), "kiln://localhost//app/x.html");
+        assert_eq!(
+            spec().url_for("/app/x.html"),
+            "kiln://localhost//app/x.html"
+        );
         // Pass-through for absolute URLs.
         assert_eq!(
             spec().url_for("http://127.0.0.1:5177/"),
@@ -211,7 +320,10 @@ mod tests {
             dev_origin: Some("http://127.0.0.1:5177".to_owned()),
             ..spec()
         };
-        assert_eq!(dev.url_for("index.html"), "http://127.0.0.1:5177/index.html");
+        assert_eq!(
+            dev.url_for("index.html"),
+            "http://127.0.0.1:5177/index.html"
+        );
     }
 
     #[test]
@@ -243,6 +355,84 @@ mod tests {
         );
         assert_eq!(size.width, 320.0);
         assert_eq!(size.height, 600.0);
+    }
+
+    #[test]
+    fn open_windows_track_labels_in_open_order() {
+        let open = OpenWindows::new();
+        assert!(open.labels().is_empty());
+
+        open.insert("main");
+        open.insert("settings");
+        assert_eq!(open.labels(), vec!["main", "settings"]);
+        assert!(open.contains("settings"));
+        assert!(!open.contains("preview"));
+
+        // A closed window is gone; closing it twice is harmless.
+        open.remove("main");
+        open.remove("main");
+        assert_eq!(open.labels(), vec!["settings"]);
+    }
+
+    #[test]
+    fn duplicate_labels_are_not_tracked_twice() {
+        let open = OpenWindows::new();
+        open.insert("main");
+        open.insert("main");
+        assert_eq!(open.labels(), vec!["main"]);
+    }
+
+    #[test]
+    fn unnamed_windows_get_distinct_labels() {
+        let open = OpenWindows::new();
+        // The first request keeps its readable base name.
+        let first = open.unique_label("index.html");
+        assert_eq!(first, "index.html");
+        open.insert(&first);
+
+        // The second cannot reuse it, or the page could not address either.
+        let second = open.unique_label("index.html");
+        assert_eq!(second, "index.html-2");
+        open.insert(&second);
+
+        assert_eq!(open.unique_label("index.html"), "index.html-3");
+        // A different base is unaffected.
+        assert_eq!(open.unique_label("settings"), "settings");
+
+        // Freed labels are reused rather than skipped forever.
+        open.remove("index.html-2");
+        assert_eq!(open.unique_label("index.html"), "index.html-2");
+    }
+
+    #[test]
+    fn a_window_can_be_built_with_its_own_allowlist() {
+        let options = WindowOptions::from_json(&json!({
+            "label": "preview",
+            "allowlist": ["greet", "stats"],
+        }));
+        assert_eq!(options.label.as_deref(), Some("preview"));
+        assert_eq!(
+            options.allowlist,
+            Some(vec!["greet".to_owned(), "stats".to_owned()])
+        );
+
+        // The config file's spelling of the same idea is accepted too.
+        let via_commands = WindowOptions::from_json(&json!({ "commands": ["greet"] }));
+        assert_eq!(via_commands.allowlist, Some(vec!["greet".to_owned()]));
+
+        // Absent means "the global surface", not "nothing allowed".
+        assert!(WindowOptions::from_json(&json!({ "label": "main" }))
+            .allowlist
+            .is_none());
+        // Malformed entries are ignored rather than producing an empty lane,
+        // which would silently lock a window out of everything.
+        assert!(WindowOptions::from_json(&json!({ "allowlist": "greet" }))
+            .allowlist
+            .is_none());
+        assert_eq!(
+            WindowOptions::from_json(&json!({ "allowlist": [1, "greet"] })).allowlist,
+            Some(vec!["greet".to_owned()])
+        );
     }
 
     #[test]

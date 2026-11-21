@@ -40,9 +40,8 @@ fn main() -> Result<(), kiln::Error> {
             .into_bytes()
             .into_boxed_slice(),
     );
-    let assets: AssetTable = Box::leak(
-        vec![("index.html", INDEX), ("probe.js", probe_js)].into_boxed_slice(),
-    );
+    let assets: AssetTable =
+        Box::leak(vec![("index.html", INDEX), ("probe.js", probe_js)].into_boxed_slice());
 
     App::new()
         .assets(assets)
@@ -53,6 +52,18 @@ fn main() -> Result<(), kiln::Error> {
             Ok(Value::Null)
         })
         .command("alive", |_app, _payload| Ok(json!("still alive")))
+        // Shell-side state: written before a reload and read after one would be
+        // the full proof, but a single run can still prove the store is shared
+        // between a handler and the page rather than per-request.
+        .command("remember", |_app, payload| {
+            kiln::state::set("probe.remember", payload);
+            Ok(kiln::state::get("probe.remember").unwrap_or(Value::Null))
+        })
+        // A page cannot reach this one from a narrowed window, which is what the
+        // harness asserts: the label decides the lane, not the payload.
+        .command("narrowed_out", |_app, _payload| {
+            Ok(json!("should be unreachable"))
+        })
         .command_typed("typed_echo", |_app, args: EchoArgs| Ok(json!(args.text)))
         .command("report", |_app, payload| {
             println!("PROBE {payload}");

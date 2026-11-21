@@ -45,6 +45,7 @@ fn main() -> Result<(), Error> {
                 width: Some(420.0),
                 height: Some(320.0),
                 entry: None,
+            allowlist: None,
             })?;
             Ok(Value::Null)
         })

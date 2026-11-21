@@ -78,6 +78,71 @@
     out.storage = "THREW " + error;
   }
 
+  // Windows: open one with a narrower allowlist, confirm the label round-trips
+  // and that the lane is enforced. The restricted command must be unreachable
+  // from the new window while the page itself still works.
+  try {
+    const opened = await (
+      await fetch(`${ORIGIN}/__kiln/__kiln_open_window`, {
+        method: "POST",
+        body: JSON.stringify({
+          label: "probe-narrow",
+          title: "probe narrow",
+          width: 320,
+          height: 240,
+          // Multi-window bookkeeping stays reachable so this window can be
+          // listed and closed; the app's own surface is narrowed to one command.
+          allowlist: ["__kiln_windows", "__kiln_close_window", "alive"],
+        }),
+      })
+    ).json();
+    out.openLabel = opened.ok && opened.ok.label;
+
+    const listed = await (
+      await fetch(`${ORIGIN}/__kiln/__kiln_windows`, { method: "POST", body: "null" })
+    ).json();
+    out.windows = listed.ok && listed.ok.windows;
+    out.windowsIncludes = Array.isArray(out.windows) && out.windows.indexOf("probe-narrow") !== -1;
+
+    // An unnamed second window must get a distinct label, or the page could not
+    // address either of them.
+    const second = await (
+      await fetch(`${ORIGIN}/__kiln/__kiln_open_window`, {
+        method: "POST",
+        body: JSON.stringify({ width: 200, height: 150 }),
+      })
+    ).json();
+    out.unnamedLabel = second.ok && second.ok.label;
+
+    await fetch(`${ORIGIN}/__kiln/__kiln_close_window`, {
+      method: "POST",
+      body: JSON.stringify({ label: "probe-narrow" }),
+    });
+  } catch (error) {
+    out.openLabel = "THREW " + error;
+  }
+
+  // State that lives in the shell rather than in the page or the command crate.
+  try {
+    const res = await fetch(`${ORIGIN}/__kiln/remember`, {
+      method: "POST",
+      body: JSON.stringify({ round: 2 }),
+    });
+    out.state = (await res.json()).ok;
+  } catch (error) {
+    out.state = "THREW " + error;
+  }
+
+  // The shim version, which is what a frontend feature-detects on.
+  try {
+    const shim = await (
+      await fetch(`${ORIGIN}/__kiln/__kiln_version`, { method: "POST", body: "null" })
+    ).json();
+    out.kilnVersion = shim.ok && shim.ok.kiln;
+  } catch (error) {
+    out.kilnVersion = "THREW " + error;
+  }
+
   out.nav = await new Promise((resolve) => {
     const before = location.href;
     try {

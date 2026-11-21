@@ -27,6 +27,12 @@ pub struct MenuItem {
     /// Optional command run when the item is clicked, so a menu item can be
     /// wired straight to a registered command.
     pub command: Option<String>,
+    /// Whether the item is a check item, and its initial state.
+    ///
+    /// `None` is a plain item. Toggling a plain item is reported as an error
+    /// rather than silently doing nothing, because a menu that ignores a check
+    /// looks broken instead of unresponsive.
+    pub checked: Option<bool>,
 }
 
 impl MenuItem {
@@ -36,6 +42,7 @@ impl MenuItem {
             label: label.to_owned(),
             accelerator: None,
             command: None,
+            checked: None,
         }
     }
 
@@ -46,6 +53,18 @@ impl MenuItem {
 
     pub fn command(mut self, command: &str) -> Self {
         self.command = Some(command.to_owned());
+        self
+    }
+
+    /// Declare this item as a check item, initially checked.
+    pub fn check(mut self) -> Self {
+        self.checked = Some(true);
+        self
+    }
+
+    /// Declare this item as a check item with an explicit initial state.
+    pub fn checked(mut self, checked: bool) -> Self {
+        self.checked = Some(checked);
         self
     }
 }
@@ -77,27 +96,27 @@ impl MenuGroup {
 /// `PopupMenu` out of this and has no reason to know what a `MenuGroup` is.
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn to_json(groups: &[MenuGroup]) -> serde_json::Value {
-    serde_json::json!(
-        groups
-            .iter()
-            .map(|group| {
-                serde_json::json!({
-                    "title": group.title,
-                    "items": group
-                        .items
-                        .iter()
-                        .map(|item| serde_json::json!({ "id": item.id, "label": item.label }))
-                        .collect::<Vec<_>>(),
-                })
+    serde_json::json!(groups
+        .iter()
+        .map(|group| {
+            serde_json::json!({
+                "title": group.title,
+                "items": group
+                    .items
+                    .iter()
+                    .map(|item| serde_json::json!({ "id": item.id, "label": item.label }))
+                    .collect::<Vec<_>>(),
             })
-            .collect::<Vec<_>>()
-    )
+        })
+        .collect::<Vec<_>>())
 }
 
 /// A built menu, kept alive for as long as the app runs.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub struct MenuHandle {
     pub(crate) menu: muda::Menu,
+    /// Check items by id, so a runtime toggle does not walk the whole bar.
+    checks: std::collections::HashMap<String, muda::CheckMenuItem>,
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -144,6 +163,23 @@ impl MenuHandle {
         let _ = window;
         Ok(())
     }
+
+    /// Check or uncheck one app-defined item.
+    ///
+    /// Runs on whichever thread muda's menu lives on, which is the UI thread;
+    /// `AppHandle::set_menu_checked` queues it there rather than calling this
+    /// from a handler.
+    pub fn set_checked(&self, id: &str, checked: bool) -> Result<(), String> {
+        match self.checks.get(id) {
+            Some(item) => {
+                item.set_checked(checked);
+                Ok(())
+            }
+            None => Err(format!(
+                "menu item {id:?} is not a check item; declare it with .check() or .checked(..)"
+            )),
+        }
+    }
 }
 
 /// A built menu on mobile, which is the groups themselves.
@@ -155,7 +191,9 @@ impl MenuHandle {
 /// one menu and get the platform's own presentation where one exists.
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub struct MenuHandle {
-    groups: Vec<MenuGroup>,
+    /// Behind a lock because a runtime toggle has to edit the groups the activity
+    /// renders, which happens after the menu was handed over.
+    groups: std::sync::Mutex<Vec<MenuGroup>>,
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -166,8 +204,41 @@ impl MenuHandle {
     }
 
     /// The declared groups, for the activity to render.
-    pub fn groups(&self) -> &[MenuGroup] {
-        &self.groups
+    pub fn groups(&self) -> Vec<MenuGroup> {
+        self.groups
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// Check or uncheck one item and re-hand the groups to the activity, because
+    /// a `PopupMenu` is rebuilt from them on every display.
+    pub fn set_checked(&self, id: &str, checked: bool) -> Result<(), String> {
+        let mut groups = self
+            .groups
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut found = false;
+        for group in groups.iter_mut() {
+            for item in group.items.iter_mut() {
+                if item.id == id {
+                    if item.checked.is_none() {
+                        return Err(format!(
+                            "menu item {id:?} is not a check item; declare it with .check() or .checked(..)"
+                        ));
+                    }
+                    item.checked = Some(checked);
+                    found = true;
+                }
+            }
+        }
+        if !found {
+            return Err(format!("no menu item is named {id:?}"));
+        }
+        let json = to_json(&groups).to_string();
+        drop(groups);
+        crate::platform::install_menu(&json);
+        Ok(())
     }
 }
 
@@ -178,7 +249,7 @@ impl MenuHandle {
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn build(_app_name: &str, groups: &[MenuGroup]) -> Result<MenuHandle, String> {
     Ok(MenuHandle {
-        groups: groups.to_vec(),
+        groups: std::sync::Mutex::new(groups.to_vec()),
     })
 }
 
@@ -225,15 +296,23 @@ pub fn build(app_name: &str, groups: &[MenuGroup]) -> Result<MenuHandle, String>
     }
     menu.append(&edit).map_err(|e| e.to_string())?;
 
+    let mut checks = std::collections::HashMap::new();
     for group in groups {
         let submenu = Submenu::new(&group.title, true);
         for item in &group.items {
-            let accel = item
-                .accelerator
-                .as_deref()
-                .and_then(parse_accelerator);
-            let menu_item = MudaItem::with_id(&item.id, &item.label, true, accel);
-            submenu.append(&menu_item).map_err(|e| e.to_string())?;
+            let accel = item.accelerator.as_deref().and_then(parse_accelerator);
+            match item.checked {
+                Some(checked) => {
+                    let menu_item =
+                        muda::CheckMenuItem::with_id(&item.id, &item.label, true, checked, accel);
+                    submenu.append(&menu_item).map_err(|e| e.to_string())?;
+                    checks.insert(item.id.clone(), menu_item);
+                }
+                None => {
+                    let menu_item = MudaItem::with_id(&item.id, &item.label, true, accel);
+                    submenu.append(&menu_item).map_err(|e| e.to_string())?;
+                }
+            }
         }
         menu.append(&submenu).map_err(|e| e.to_string())?;
     }
@@ -248,7 +327,7 @@ pub fn build(app_name: &str, groups: &[MenuGroup]) -> Result<MenuHandle, String>
             .map_err(|e| e.to_string())?;
     }
 
-    Ok(MenuHandle { menu })
+    Ok(MenuHandle { menu, checks })
 }
 
 /// Parse an accelerator string, tolerating the two spellings muda accepts.
@@ -293,7 +372,11 @@ mod tests {
 
     fn group() -> MenuGroup {
         MenuGroup::new("File")
-            .item(MenuItem::new("save", "Save").accelerator("CmdOrCtrl+S").command("save"))
+            .item(
+                MenuItem::new("save", "Save")
+                    .accelerator("CmdOrCtrl+S")
+                    .command("save"),
+            )
             .item(MenuItem::new("open", "Open...").accelerator("CmdOrCtrl+O"))
     }
 
@@ -306,6 +389,47 @@ mod tests {
         assert_eq!(g.items[0].command.as_deref(), Some("save"));
         assert_eq!(g.items[1].accelerator.as_deref(), Some("CmdOrCtrl+O"));
         assert!(g.items[1].command.is_none());
+    }
+
+    #[test]
+    fn check_items_are_declared_explicitly() {
+        let g = MenuGroup::new("View")
+            .item(MenuItem::new("wrap", "Wrap Lines").check())
+            .item(MenuItem::new("grid", "Show Grid").checked(false))
+            .item(MenuItem::new("save", "Save"));
+        assert_eq!(g.items[0].checked, Some(true));
+        assert_eq!(g.items[1].checked, Some(false));
+        assert_eq!(
+            g.items[2].checked, None,
+            "an item without .check() stays plain, so ticking it can be reported"
+        );
+    }
+
+    /// The mobile handle keeps the groups and can toggle one, which is what
+    /// stands in for a native menu on Android and iOS.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[test]
+    fn a_mobile_menu_toggle_updates_the_groups() {
+        let built = build(
+            "Notes",
+            &[MenuGroup::new("View")
+                .item(MenuItem::new("wrap", "Wrap Lines").check())
+                .item(MenuItem::new("save", "Save"))],
+        )
+        .expect("a menu without accelerators always builds");
+
+        built
+            .set_checked("wrap", false)
+            .expect("declared check item");
+        let groups = built.groups();
+        assert_eq!(groups[0].items[0].checked, Some(false));
+
+        // A plain item cannot be ticked, and an unknown id is named in the error
+        // rather than silently ignored.
+        let error = built.set_checked("save", true).unwrap_err();
+        assert!(error.contains("not a check item"), "{error}");
+        let error = built.set_checked("nope", true).unwrap_err();
+        assert!(error.contains("no menu item"), "{error}");
     }
 
     #[test]

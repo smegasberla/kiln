@@ -27,9 +27,11 @@
 //!    run. The scaffolded commands crate implements that inner layer and
 //!    tests it; the e2e harness proves the host survives a real one.
 //!
-//! State rule (documented, not solved): statics inside the commands crate are
-//! rebuilt on every reload and do not survive it. Persistent state belongs to
-//! the shell and travels in the payload.
+//! State rule: statics inside the commands crate are rebuilt on every reload and
+//! do not survive it, because the library that owned them is unloaded. State that
+//! must survive belongs to the shell, in [`crate::state`], which the reload does
+//! not touch; the generation counter it reports is bumped by this module on every
+//! successful swap.
 
 use std::ffi::{c_char, CStr, CString};
 use std::panic::{self, AssertUnwindSafe};
@@ -115,7 +117,9 @@ impl HotLib {
             let mut last = this.generation();
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(250));
-                let Ok(latest) = read_latest(&dir) else { continue };
+                let Ok(latest) = read_latest(&dir) else {
+                    continue;
+                };
                 if latest.generation <= last {
                     continue;
                 }
@@ -128,11 +132,13 @@ impl HotLib {
                                 "kiln: hot commands gen {} active (rebuild-to-reload {} ms)",
                                 latest.generation, ms
                             ),
-                            None => eprintln!(
-                                "kiln: hot commands gen {} active",
-                                latest.generation
-                            ),
+                            None => {
+                                eprintln!("kiln: hot commands gen {} active", latest.generation)
+                            }
                         }
+                        // The shell-side state store outlives the library swap,
+                        // so the generation it reports is the one that is live.
+                        crate::state::note_reload();
                         last = latest.generation;
                     }
                     Err(error) => eprintln!(
@@ -281,7 +287,9 @@ mod tests {
     use serde_json::json;
 
     extern "C" fn ok_dispatch(_method: *const c_char, _payload: *const c_char) -> *mut c_char {
-        CString::new(r#"{"ok":"from the dylib"}"#).unwrap().into_raw()
+        CString::new(r#"{"ok":"from the dylib"}"#)
+            .unwrap()
+            .into_raw()
     }
 
     extern "C" fn null_dispatch(_method: *const c_char, _payload: *const c_char) -> *mut c_char {
@@ -316,7 +324,10 @@ mod tests {
     #[test]
     fn a_loaded_library_answers_through_the_envelope() {
         let hot = hot_with(ok_dispatch);
-        assert_eq!(hot.call("anything", &Value::Null), r#"{"ok":"from the dylib"}"#);
+        assert_eq!(
+            hot.call("anything", &Value::Null),
+            r#"{"ok":"from the dylib"}"#
+        );
     }
 
     #[test]
@@ -365,11 +376,10 @@ mod tests {
     #[test]
     fn a_malformed_envelope_that_is_still_an_envelope_passes_through() {
         // A dylib may legitimately answer {"error": ...} without "ok".
-        extern "C" fn err_dispatch(
-            _method: *const c_char,
-            _payload: *const c_char,
-        ) -> *mut c_char {
-            CString::new(r#"{"error":"from the dylib"}"#).unwrap().into_raw()
+        extern "C" fn err_dispatch(_method: *const c_char, _payload: *const c_char) -> *mut c_char {
+            CString::new(r#"{"error":"from the dylib"}"#)
+                .unwrap()
+                .into_raw()
         }
         let hot = hot_with(err_dispatch);
         assert_eq!(hot.call("x", &Value::Null), r#"{"error":"from the dylib"}"#);
@@ -415,11 +425,19 @@ mod tests {
         reg.set_hot(Arc::new(hot_with(ok_dispatch)));
 
         assert_eq!(
-            reg.dispatch(&crate::AppHandle::detached_for_tests(), "static", Value::Null),
+            reg.dispatch(
+                &crate::AppHandle::detached_for_tests(),
+                "static",
+                Value::Null
+            ),
             r#"{"ok":"static wins"}"#
         );
         assert_eq!(
-            reg.dispatch(&crate::AppHandle::detached_for_tests(), "greet", Value::Null),
+            reg.dispatch(
+                &crate::AppHandle::detached_for_tests(),
+                "greet",
+                Value::Null
+            ),
             r#"{"ok":"from the dylib"}"#
         );
     }
@@ -440,7 +458,11 @@ mod tests {
     #[test]
     fn no_hot_library_means_unknown_command_exactly_as_before() {
         let reg = Registry::new();
-        let body = reg.dispatch(&crate::AppHandle::detached_for_tests(), "greet", Value::Null);
+        let body = reg.dispatch(
+            &crate::AppHandle::detached_for_tests(),
+            "greet",
+            Value::Null,
+        );
         let parsed: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(parsed["error"]["message"], "unknown command: greet");
         assert_eq!(parsed["error"]["kind"], "unknown");

@@ -33,13 +33,18 @@ fn main() -> Result<(), Error> {
         // `&AppHandle`, and a handle type cannot cross the cdylib boundary
         // soundly, so they register statically in dev and release alike.
         .command_typed("open_settings", |app: &AppHandle, args: SettingsArgs| {
-            app.open_window(WindowOptions {
+            let label = app.open_window(WindowOptions {
                 label: Some("settings".to_owned()),
                 title: Some(args.title.unwrap_or_else(|| "Settings".to_owned())),
                 width: Some(420.0),
                 height: Some(320.0),
                 entry: None,
+                // A settings window needs no command surface of its own; it
+                // reports back through events. Narrowing is how a window that
+                // renders untrusted content is kept away from the rest.
+                allowlist: None,
             })?;
+            app.emit_to(Some(&label), "settings:opened", kiln::serde_json::json!(null));
             Ok(())
         })
         // Keep devtools available in the build your users run (F12).

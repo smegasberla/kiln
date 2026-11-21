@@ -9,6 +9,34 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Added
 
+- Per-window command allowlists at runtime: `WindowOptions.allowlist` (also
+  accepted as `commands` from the page) narrows one window's surface, intersected
+  with the global `commands` list, so a window that renders untrusted content can
+  be given a strict subset without declaring its label in `kiln.json` up front.
+
+- Multi-window bookkeeping: `AppHandle::open_window` returns the window's label,
+  `__kiln_open_window` answers `{"label": "..."}`, unnamed windows get a distinct
+  label (`index.html`, `index.html-2`, …) instead of colliding, `__kiln_windows`
+  lists the open labels in opening order, and `kiln.windows()` wraps it. The shim
+  protocol stays at 2; `windows()` is the only method protocol 2 promises.
+
+- Runtime tray and menu state: `TrayItem::check()`/`checked(bool)` and
+  `MenuItem::check()`/`checked(bool)` declare a check item, and
+  `AppHandle::set_tray_tooltip`, `set_tray_checked`, `popup_tray` and
+  `set_menu_checked` (plus the `__kiln_tray_*`/`__kiln_menu_checked` built-ins and
+  the `kiln.tray`/`kiln.menu` shim helpers) update it after the app started. Each
+  validates before queueing, so a plain item, an undeclared tray, or a platform
+  whose tray is a posted notification gets an error naming the reason rather than
+  a silent no-op. The native call runs on the UI thread, which is where the
+  objects live.
+
+- `kiln::state`: a shell-owned `serde_json` store that survives a hot reload, with
+  `get`/`set`/`remove`/`contains`/`keys`/`clear` and `reload_generation()`. The
+  hot loader bumps the generation on each successful swap, so reloaded code can
+  see which library is live and keep its state instead of losing it with the
+  dylib. The README's hot-reload section now shows the pattern; the 250 ms
+  polling latency is documented next to it.
+
 - `command_typed` / `App::command_typed`: a command whose argument and reply are
   concrete types. The payload is deserialized before the body runs, so a wrong
   shape is rejected as `kind: "payload"` naming the command instead of becoming a

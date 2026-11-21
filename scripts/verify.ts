@@ -518,6 +518,38 @@ async function main() {
       parsed?.storage?.round === 1 && parsed?.storageKeys === true,
       parsed ? `${JSON.stringify(parsed.storage)} keys ok: ${parsed.storageKeys}` : "no reply",
     );
+    // T2: a page opens a window and is told its label, so it can address it
+    // without having guessed the name up front.
+    record(
+      "open_window returns the label",
+      parsed?.openLabel === "probe-narrow",
+      parsed?.openLabel ?? "no reply",
+    );
+    // The label the shell hands out is the one the page can act on, and an
+    // unnamed second window gets a distinct one instead of colliding.
+    record(
+      "windows() lists open labels",
+      parsed?.windowsIncludes === true,
+      parsed ? JSON.stringify(parsed.windows) : "no reply",
+    );
+    record(
+      "unnamed windows get distinct labels",
+      typeof parsed?.unnamedLabel === "string" && parsed.unnamedLabel !== "probe-narrow",
+      parsed?.unnamedLabel ?? "no reply",
+    );
+    // T2: shell-side state is shared between handlers and survives the library
+    // being swapped, which is what `kiln dev` cannot do with a static.
+    record(
+      "shell state round-trips",
+      parsed?.state?.round === 2,
+      parsed ? JSON.stringify(parsed.state) : "no reply",
+    );
+    // T2: the shell reports a version the page can feature-detect on.
+    record(
+      "shell reports a version",
+      typeof parsed?.kilnVersion === "string" && parsed.kilnVersion.length > 0,
+      parsed?.kilnVersion ?? "no reply",
+    );
   }
 
   // 8. Packaging produces a real artifact on Linux. The AppImage is the only

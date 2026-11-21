@@ -52,9 +52,15 @@ pub struct Registry {
     handlers: HashMap<String, Handler>,
     allow: Option<Vec<String>>,
     /// Per-window allowlists keyed by window label, from `kiln.json`'s
-    /// `windows` map. A listed window's surface is the intersection of its
-    /// list with the global allowlist, so a config entry can only narrow.
-    window_allow: HashMap<String, Vec<String>>,
+    /// `windows` map or from `WindowOptions::allowlist`. A listed window's
+    /// surface is the intersection of its list with the global allowlist, so a
+    /// config entry can only narrow.
+    ///
+    /// Shared behind a lock because a window opened *at runtime* registers its
+    /// own narrowing after the registry was already moved into the `Arc` the
+    /// handlers hold. Without that, a window created from a command would only
+    /// be narrowable by pre-declaring its label in a config file.
+    window_allow: std::sync::Arc<std::sync::RwLock<HashMap<String, Vec<String>>>>,
     /// The hot-reloaded commands library. Present only in `kiln dev` builds;
     /// a release build never compiles it.
     #[cfg(feature = "hot-reload")]
@@ -72,7 +78,7 @@ impl Registry {
         Self {
             handlers: HashMap::new(),
             allow: None,
-            window_allow: HashMap::new(),
+            window_allow: std::sync::Arc::new(std::sync::RwLock::new(HashMap::new())),
             #[cfg(feature = "hot-reload")]
             hot: None,
         }
@@ -91,8 +97,44 @@ impl Registry {
     }
 
     /// Attach per-window allowlists keyed by window label.
+    ///
+    /// Additive: a label declared in `kiln.json` keeps its entry, and a runtime
+    /// window adds or replaces only its own.
     pub fn set_window_allowlist(&mut self, allow: HashMap<String, Vec<String>>) {
-        self.window_allow = allow;
+        let mut current = self
+            .window_allow
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for (label, list) in allow {
+            current.insert(label, list);
+        }
+    }
+
+    /// Narrow one window's surface at runtime.
+    ///
+    /// Called when a window with `WindowOptions::allowlist` is created, so the
+    /// restriction exists before the page inside it can call anything. It is the
+    /// same intersection as a config entry: a runtime list can only ever remove
+    /// commands, never add one the app withheld.
+    pub fn allow_window(&self, label: &str, commands: Vec<String>) {
+        let mut allow = self
+            .window_allow
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        allow.insert(label.to_owned(), commands);
+    }
+
+    /// The window labels with a narrowing entry, for diagnostics and tests.
+    pub fn narrowed_windows(&self) -> Vec<String> {
+        let mut labels: Vec<String> = self
+            .window_allow
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .keys()
+            .cloned()
+            .collect();
+        labels.sort_unstable();
+        labels
     }
 
     /// Whether `method` is registered and allowed, globally or for `label`.
@@ -104,8 +146,16 @@ impl Registry {
         if !self.permitted(method) {
             return false;
         }
-        match label.and_then(|l| self.window_allow.get(l)) {
-            Some(list) => list.iter().any(|a| a == method),
+        let label = match label {
+            Some(label) => label,
+            None => return true,
+        };
+        let allow = self
+            .window_allow
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match allow.get(label) {
+            Some(list) => list.iter().any(|allowed| allowed == method),
             None => true,
         }
     }
@@ -586,6 +636,50 @@ mod tests {
         )]));
         assert!(dispatch_for(&reg, Some("preview"), "a").contains(r#""ok""#));
         assert!(dispatch_for(&reg, Some("preview"), "b").contains(r#""kind":"unknown""#));
+    }
+
+    #[test]
+    fn a_runtime_narrowing_applies_to_the_window_it_names() {
+        let reg = registry_with(&["greet", "save"]);
+        // Registered after construction, which is what a window opened from a
+        // command does: the registry is already shared by its handlers.
+        reg.allow_window("preview", vec!["greet".to_owned()]);
+
+        assert!(dispatch_for(&reg, Some("preview"), "greet").contains(r#""ok""#));
+        assert!(
+            dispatch_for(&reg, Some("preview"), "save").contains(r#""kind":"unknown""#),
+            "a runtime lane must withhold what it does not name"
+        );
+        // Every other window, and app-level requests, keep the global surface.
+        assert!(dispatch_for(&reg, None, "save").contains(r#""ok""#));
+        assert!(dispatch_for(&reg, Some("main"), "save").contains(r#""ok""#));
+    }
+
+    #[test]
+    fn a_runtime_narrowing_cannot_widen_the_global_allowlist() {
+        let mut reg = registry_with(&["a", "b"]);
+        reg.set_allowlist(Some(vec!["a".to_owned()]));
+        reg.allow_window("preview", vec!["a".to_owned(), "b".to_owned()]);
+
+        assert!(dispatch_for(&reg, Some("preview"), "a").contains(r#""ok""#));
+        assert!(dispatch_for(&reg, Some("preview"), "b").contains(r#""kind":"unknown""#));
+    }
+
+    #[test]
+    fn config_and_runtime_narrowings_accumulate_rather_than_replace() {
+        let mut reg = registry_with(&["a", "b"]);
+        reg.set_window_allowlist(HashMap::from([(
+            "from-config".to_owned(),
+            vec!["a".to_owned()],
+        )]));
+        reg.allow_window("from-runtime", vec!["b".to_owned()]);
+
+        assert_eq!(
+            reg.narrowed_windows(),
+            vec!["from-config".to_owned(), "from-runtime".to_owned()]
+        );
+        assert!(dispatch_for(&reg, Some("from-config"), "a").contains(r#""ok""#));
+        assert!(dispatch_for(&reg, Some("from-runtime"), "b").contains(r#""ok""#));
     }
 
     #[test]
