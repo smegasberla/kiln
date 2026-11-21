@@ -105,8 +105,13 @@ if (window.voussoir.platform === "android") {
 ```
 
 Use this for **affordances**, not for behaviour. A command behaves the same
-everywhere; a tray icon does not exist on iOS and a menu bar does not exist on
-Android. Branch where the UI differs, never around `invoke`.
+everywhere; a tray icon does not exist on iOS, and Android has no menu *bar*. It
+does have a menu: the same groups are raised as a `PopupMenu` on demand, through
+`window.voussoir.invoke("__voussoir_show_menu")`, because Android expects app
+chrome (an overflow button or a drawer) rather than OS chrome.
+
+So the branch is about where the affordance lives, not whether it exists. Branch
+where the UI differs, never around `invoke`.
 
 ### Feature detection
 
@@ -117,7 +122,14 @@ if (window.voussoir.protocol >= 2) {
 ```
 
 `protocol` is the shim's version, not the crate's, so it changes only when the
-page-visible API does. Compare numbers, do not probe for methods.
+page-visible API does. Each guard names the version that introduced the member it
+protects: `windows()` arrived in 2, `pageOrigin` in 3. The current version is 3.
+
+**Why detect a version rather than check for the member?** Both work, and they
+answer different questions. `if (voussoir.tray)` asks "is this one thing here" and
+is right for a single optional member. The version asks "what shape is this
+object" and is right when you use several members together, because one guard then
+covers all of them.
 
 ## Theory: the page cannot navigate, and that is a feature
 
@@ -154,7 +166,6 @@ function render() {
 ```html
 <!-- 2. Real navigation inside the app: these URLs are same-origin. -->
 <a href="/settings.html">Settings</a>
-<!-- And in voussoir.json, per-wrapper allowlists keep "/settings.html" internal. -->
 ```
 
 Pattern 2 works because the assets are embedded: `/settings.html` is served from
@@ -210,6 +221,25 @@ the editor. It is a convenience file: if it drifts, the runtime is unaffected.
 
 Every row is a deliberate trade: the page has less reach, and Rust has the
 authority. If you find yourself fighting this list, the feature belongs in Rust.
+
+## Theory: what a frontend without navigation costs you
+
+Most web advice assumes a router, a URL bar and a back button. All three are
+absent, and the absence is not a limitation to work around but a property to
+design with:
+
+| Web habit | What replaces it | Why |
+| --- | --- | --- |
+| Routes and URLs | in-memory view state, or a second window | a URL nobody can type is not a route |
+| Back button | your own Back control | the shell owns chrome, not history |
+| Deep links | `on_ready` plus a command that reads an argument | launch arguments are the only input |
+| Reload to recover | `__voussoir_reports`, or a restart button | there is no reload button the user can press |
+
+The last row surprises people: the shell binds no reload shortcut, and there is no
+address bar to retype. That is why a page that gets into a bad state should offer
+its own reset, and why `verify.ts` asserts that a panicking command leaves the
+window alive. `bun scripts/verify.ts` also asserts the panic boundary directly, so
+"the window survives" is measured rather than assumed.
 
 ## Next
 
