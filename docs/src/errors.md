@@ -13,7 +13,7 @@ try {
   await window.voussoir.invoke("save", { path });
 } catch (error) {
   const { kind, method, message } = error as {
-    kind: "unknown" | "payload" | "handler" | "panic" | "busy" | "runtime";
+    kind: "unknown" | "payload" | "handler" | "panic" | "busy" | "timeout" | "runtime";
     method: string;
     message: string;
   };
@@ -22,7 +22,7 @@ try {
 }
 ```
 
-## The five kinds
+## The seven kinds
 
 | `kind` | Raised by | What the page should do |
 | --- | --- | --- |
@@ -31,6 +31,7 @@ try {
 | `handler` | the handler returned `Err` | show the message; it is meant for a user |
 | `panic` | the handler panicked | show the message, keep the window; report it |
 | `busy` | every worker-thread slot was taken | retry shortly; nothing was started |
+| `timeout` | the shim stopped waiting (raised in the page, not in Rust) | the command may still be running; do not assume it failed |
 | `runtime` | the webview or event loop failed | fatal for the window; offer a restart |
 
 `unknown` covers both a missing command and a denied one on purpose. A page must

@@ -40,7 +40,8 @@ unsigned one. `voussoir package` prints the exact command for the platform inste
 - Windows: `signtool sign`
 - Linux: AppImage needs no signature; a distribution package would
 
-CI builds and uploads artifacts on every run, and signs or notarizes only when the
+The release workflow builds and uploads artifacts for a tag, and signs or
+notarizes only when the
 corresponding secrets exist, so a fork without credentials still produces a
 downloadable result.
 

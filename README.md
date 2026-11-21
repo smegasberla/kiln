@@ -261,7 +261,7 @@ pay for a scheduler, and a released shell never loads code dynamically.
 | macOS x86_64 / arm64 | `cargo check` clean | yes (CI) | WKWebView |
 | FreeBSD | CI (VM) | CI (VM) | GTK 3 + WebKit2GTK, same code path as Linux |
 | NetBSD | `cargo check` | graph only | **unverified at runtime** |
-| Android arm64 / x86_64 | yes | yes (emulator, CI) | wry's IPC handler, same commands and policy |
+| Android arm64 / x86_64 | yes | x86_64 only (emulator, CI) | wry's IPC handler, same commands and policy |
 | iOS aarch64 (simulator) | yes | yes (simulator, CI) | desktop origin and policy, no platform branch |
 
 BSD works because wry and tao already treat it as a webkitgtk/GTK platform. Two
@@ -306,7 +306,7 @@ draws a default so a build never fails on missing artwork.
 Signing is **not** attempted. It needs credentials the tool cannot invent, and a
 package that looks signed but is not is worse than an honestly unsigned one.
 `voussoir package` prints the exact command for the platform instead. CI builds
-and uploads artifacts on every run, and signs or notarizes only when the
+and uploads artifacts for a tag, and signs or notarizes only when the
 corresponding secrets exist.
 
 ## Compatibility

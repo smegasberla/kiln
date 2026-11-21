@@ -53,7 +53,7 @@ twice is harmless.
 The shim also carries `platform` (`"linux"`, `"windows"`, `"macos"`, `"bsd"`,
 `"android"`, `"ios"`) and `protocol`, the shim's own version number. Feature-detect
 on `protocol`, not on `platform`: a page that needs `windows()` asks
-`voussoir.protocol >= 2` and degrades in one place instead of in every platform branch.
+`voussoir.protocol >= 3` and degrades in one place instead of in every platform branch.
 
 ## The Rust side
 

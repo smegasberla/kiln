@@ -11,7 +11,7 @@ no window was opened.
 | macOS x86_64 / arm64 | `cargo check` clean | yes (CI) | WKWebView |
 | FreeBSD | CI (VM) | CI (VM) | GTK 3 + WebKit2GTK, same code path as Linux |
 | NetBSD | `cargo check` | graph only | unverified at runtime |
-| Android arm64 / x86_64 | yes | yes (emulator, CI) | `postMessage` transport, same commands and policy |
+| Android arm64 / x86_64 | yes | x86_64 only (emulator, CI) | `postMessage` transport, same commands and policy |
 | iOS aarch64 (simulator) | yes | yes (simulator, CI) | custom-scheme transport, desktop origin and policy |
 
 ## BSD
