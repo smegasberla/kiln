@@ -96,9 +96,18 @@ input.addEventListener("blur", () => {
 });
 ```
 
-Values are read once per process and cached in memory, so `storage.get` is cheap
-after the first call. If you edit `storage.json` by hand while the app runs, the
-app will overwrite your edit: reload it, do not expect it to be picked up.
+**Every read parses the file, and every write replaces it.** Nothing is cached
+between calls: `store()` caches only the *handle* (the resolved path), not the
+contents, so `get` re-reads and re-parses `storage.json` each time.
+
+That is a deliberate trade. A cache would mean deciding when to invalidate it, and
+the failure mode of a stale cache (a setting that refuses to change until restart)
+is worse than the cost of parsing a settings file. It also means hand-editing
+`storage.json` while the app runs *does* show up on the next `get`, and that two
+processes are not protected from each other by a lock.
+
+The cost lands on the pattern from the previous section: do not call `get` in a
+render loop. Read once when the page loads and keep the value in a variable.
 
 ## Theory: the 4 MB cap
 
