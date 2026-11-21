@@ -25,10 +25,12 @@ that split made concrete.
 myapp/
   voussoir.json                configuration, embedded into the binary
   index.html                   entry page; Bun bundles it and what it imports
+  tsconfig.json                TypeScript settings for your editor
   src/                         frontend: TypeScript, JSX, CSS
     main.ts                    the code your page runs
     style.css                  styles
     voussoir.d.ts              editor types for window.voussoir
+  .gitignore                   ignores dist/, target/, node_modules/
   native/
     Cargo.toml                 shell crate; selects voussoir features
     src/main.rs                the App builder: config, assets, hooks, run
@@ -48,14 +50,33 @@ This is the part that saves confusion: three of these files are machine-owned.
 | --- | --- | --- |
 | `voussoir.json` | you, once at init | yes |
 | `index.html`, `src/*` | you | yes |
+| `tsconfig.json`, `.gitignore` | `init` | yes, they are yours |
 | `native/src/main.rs` | you, after init | yes |
 | `native/commands/src/lib.rs` | you, after init | yes |
 | `native/src/assets.rs` | `voussoir dev` / `build` | **no**, overwritten |
 | `native/Cargo.toml` | `init`, then you for features | carefully |
 | `dist/` | `voussoir build` | no, regenerated |
+| `android/`, `ios/` | `init` | yes, but regenerate if stuck |
 
 `assets.rs` is the one people edit by accident, because it looks like a normal
 Rust list. It is regenerated on every build; your edit vanishes silently.
+
+## Theory: why the frontend is embedded
+
+`dist/` is not shipped. `voussoir build` turns every frontend file into a byte
+array in `assets.rs`, and the shell answers requests for your origin from that
+table. Three consequences:
+
+- **There is no missing-file bug in a shipped app.** A file the build did not
+  include is a compile-time omission, not a 404 on a user's machine.
+- **The page cannot be edited by the user.** Nothing is read from disk at runtime,
+  so "fixing" the app means replacing the binary.
+- **Startup cannot fail on a bad path.** The working directory is irrelevant; the
+  app does not need to know where it is installed.
+
+The trade is that the frontend cannot be updated without rebuilding the shell. For
+an app whose UI changes every release that is free; for a plugin-shaped app it is
+the reason [plugins](plugins.md) are Rust rather than JavaScript.
 
 ## `voussoir.json` in full
 
@@ -132,6 +153,17 @@ voussoir = { path = "...", features = ["full", "storage"] }
 Turn them down if you do not use them: each one links a platform crate. Turn
 `tray` on separately; it is not part of `full` because it implies a background
 process model (see [Native integration](native-integration.md)).
+
+## Theory: why `include_str!` and not a config file read
+
+`voussoir.json` is compiled in. A shipped app therefore cannot be reconfigured by
+editing a file next to the binary, which closes a class of attack: if the config
+were read at startup, whoever could write to the install directory could widen the
+allowlist or point `update.url` at their server, and the app would load it.
+
+The cost is that changing the config needs a rebuild. That is the right cost for a
+setting that decides what the app may do; a setting the user changes at runtime
+belongs in [storage](storage.md), not here.
 
 ## Adding a page
 

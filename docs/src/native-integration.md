@@ -119,15 +119,26 @@ The tray is a config, not a set of commands:
 use voussoir::tray::{TrayConfig, TrayItem};
 
 App::new().tray(
-    TrayConfig::new("Notes")
-        .icon(rgba, 32, 32)               // raw RGBA; omit for the default mark
+    TrayConfig::new("Notes")                          // the tooltip text
+        .icon(rgba, 32, 32)                           // raw RGBA; omit for the default mark
         .item(TrayItem::new("show", "Show").command("window.show"))
         .item(TrayItem::new("quit", "Quit").command("app.quit"))
-        .keep_running(),                  // closing the last window does not exit
+        .keep_running(),                              // closing the last window does not exit
 )
 ```
 
-`.tray(...)` takes one `TrayConfig`; the items are chained onto it.
+`.tray(...)` takes one `TrayConfig`; the items are chained onto it. The argument to
+`TrayConfig::new` is the **tooltip** (the text shown on hover), not the app name; on
+macOS a tray icon with no tooltip is unlabelled and users cannot tell what it is.
+
+Each `TrayItem` has the same three pieces a menu item has, and the same reason:
+
+- **`id`** is how a runtime update addresses it (`tray.checked("sync", true)`).
+- **`label`** is what the menu shows.
+- **`command`** is what runs, through the registry like everything else.
+
+`TrayItem::check()` and `.checked(bool)` make an item a toggle with a tick mark,
+exactly as on a menu.
 
 `keep_running()` is the one that changes behaviour rather than appearance: with
 it, the app survives having no windows, which is what a tray app wants. Without
@@ -138,22 +149,45 @@ At runtime, three things are adjustable:
 ```ts
 await window.voussoir.tray.tooltip("3 unread");
 await window.voussoir.tray.checked("sync", true);
+await window.voussoir.tray.popup();
 ```
 
-**Why not retitle items?** On Android the tray is a posted notification and
-cannot be edited in place. The runtime API refuses there with a reason rather
-than pretending it worked, so a page that branches on `platform` stays honest.
+All three resolve to `null`: they are setters, not queries. There is no
+`tray.state()` because a page that has to read back what it just wrote has lost
+track of its own state, and the shell would then be a cache.
+
+**Why not retitle items?** On Android the tray is a posted notification and cannot
+be edited in place. The runtime API refuses there with a reason rather than
+pretending it worked, so a page that branches on `platform` stays honest.
+
+## Theory: why the tray changes the process model
+
+A tray icon implies something a menu does not: the app should keep running when its
+windows are gone. That is why `tray` is not part of `full`, and why `keep_running()`
+is a separate call rather than automatic.
+
+Without `keep_running()`, closing the last window exits even though an icon remains
+in the tray, and the icon vanishes a moment after the user clicks it. With it, the
+process lives until something closes it explicitly, which means your quit path has
+to exist: a tray menu item wired to a command that exits, or the OS will keep
+showing an app the user cannot get rid of.
+
+That asymmetry is worth designing for deliberately. An app that hides to the tray by
+default is how users learn to distrust the close button.
 
 ## Devtools in release
 
 Build with the `devtools` feature and call `.devtools(true)` on the `App`; `F12`
 and `Cmd-Alt-I` then open devtools even in a release build.
-That is unusual, and deliberate: an app whose UI is a webview is hard to debug
-from a crash report alone, and the alternative in the wild is apps that ship with
-devtools on by accident.
 
-If you ship without it, the `devtools` feature is off and the binding does
-nothing.
+That is unusual, and deliberate: an app whose UI is a webview is hard to debug from
+a crash report alone, and the shelf of shipping apps with devtools reachable is the
+evidence. The alternative in the wild is apps that ship with devtools on by
+accident, because nobody turned it off; here it is off unless two things are both
+true (the feature is compiled in, and `.devtools(true)` was called).
+
+Note that the two conditions are separate on purpose: a library that enables the
+feature does not silently give the app a debug key.
 
 ## Checking what a platform actually supports
 
