@@ -70,18 +70,24 @@ Dialogs are asynchronous commands, because the user may take as long as they
 like:
 
 ```ts
-const picked = await window.voussoir.invoke<string | null>("dialog.open", {
+const picked = await window.voussoir.invoke<{ path: string } | null>("dialog.open", {
   filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
 });
 if (picked === null) return; // the user cancelled
+const text = await window.voussoir.invoke<string>("read_text", { path: picked.path });
 ```
+
+The reply is an **object**, not a bare string, and that is worth noticing: every
+command in the app answers with a JSON value, and a dialog is no exception. A bare
+path would be the one command that breaks the shape, and the day you want to add
+`{ path, encoding }` you would have to change every caller.
 
 | Command | Payload | Resolves to |
 | --- | --- | --- |
-| `dialog.open` | `{ filters?, title? }` | one path, or `null` |
-| `dialog.open_many` | `{ filters?, title? }` | a list of paths (possibly empty) |
-| `dialog.save` | `{ filters?, title?, name? }` | a path, or `null` |
-| `dialog.folder` | `{ title? }` | a path, or `null` |
+| `dialog.open` | `{ filters?, title?, directory? }` | `{ path }`, or `null` |
+| `dialog.open_many` | `{ filters?, title?, directory? }` | `{ paths }` (possibly empty), or `null` |
+| `dialog.save` | `{ filters?, title?, file_name?, directory? }` | `{ path }`, or `null` |
+| `dialog.folder` | `{ title?, directory? }` | `{ path }`, or `null` |
 
 Two habits worth having:
 
