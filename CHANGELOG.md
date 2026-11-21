@@ -21,10 +21,13 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Added
 
-- `brand/voussoir.svg`: the wordmark's mark. Nine wedge stones on a radial joint,
-  with the keystone at the crown rendered in the ember gradient, which is the
-  design the name describes rather than a generic window or box. It is one
-  self-contained file with no text, so it reads at 16px and needs no font.
+- `brand/voussoir.svg`: the mark. An archway lit from the crown, cut out of a
+  near-black tile, which is the figure the name describes rather than a generic
+  window or box. Two paths and no strokes, so it is a kilobyte, needs no font and
+  stays crisp from 16px upward. Every coordinate is a multiple of 8 and the tile
+  margin is symmetric, so edges land on whole pixels at the sizes an icon is
+  rasterised at and cannot fringe. The CLI's generated fallback icon draws the
+  same figure.
 
 ## [0.2.0] - 2026-11-21
 
