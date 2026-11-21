@@ -73,6 +73,17 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
   containment, remote-script and navigation guarantees are asserted on WebView2
   and WKWebView too, not only on WebKitGTK. The harness gained a Windows `.exe`
   suffix and explicit per-platform skip reporting for Linux-only checks.
+
+### Fixed
+
+- WebView2 could not reach a command at all. It cannot intercept a custom
+  scheme, so wry rewrites `kiln://localhost` to `http://kiln.localhost`, the
+  same way it does on Android; Kiln only taught Android about the rewritten
+  origin, so on Windows the shim allowlisted an origin the page never reports,
+  `invoke` posted to an endpoint nothing intercepts, and the first navigation
+  was refused. The page origin now follows the target, and the dev CSP, the
+  probe fixture and the harness pages use it too.
+
 - The Linux job pins `appimagetool` to the 1.9.1 release by SHA-256 instead of
   the moving `continuous` tag, and runs `cargo test --workspace` verbatim now
   that `kiln-android`'s dependencies are target-gated to Android.
