@@ -348,7 +348,8 @@ scripts/verify.ts      end-to-end checks, and the source of the numbers above
 The book in `docs/src` is the narrative version: installing, your first app,
 "Commands & payloads", "Security model", "Multi-window", "Packaging".
 `voussoir docs --check` validates its structure and every cross-chapter link in
-CI, and `voussoir docs` renders the same files into `website/dist`.
+CI, and `voussoir docs` renders the same files into `website/dist`. The published
+copy is at **https://voussoir-app.pages.dev**.
 
 ## Contributing
 
