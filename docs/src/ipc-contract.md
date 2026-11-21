@@ -1,9 +1,21 @@
 # Commands & payloads
 
 Every call between the page and Rust goes through one envelope, in both
-directions, over one endpoint. The point of a single shape is that a page can
-report failures, and the shell can report failures, without either side inventing
-a second convention.
+directions, over one endpoint. This chapter is the contract itself; everything
+else in the book builds on it.
+
+If you read only one chapter, read this one.
+
+## Theory: why one shape for everything
+
+The obvious design is a different channel per feature: a callback for file
+dialogs, a global for the tray, a browser API for storage. Every one of those
+would need its own error convention, its own security story and its own
+diagnostics, and each would be a fresh place for a page to reach something it
+should not.
+
+Voussoir instead has **one request shape and one response shape**, and every
+feature is expressed as a command:
 
 ```
 POST voussoir://localhost/__voussoir/<method>
@@ -12,140 +24,204 @@ response: {"ok": <json>}
         | {"error": {"message": "<text>", "kind": "<class>", "method": "<name>"}}
 ```
 
-`kind` is one of:
-
-| `kind` | Meaning |
-| --- | --- |
-| `unknown` | no handler, or one withheld by an allowlist. Deliberately the same answer for both |
-| `payload` | the request did not match the handler's argument type |
-| `handler` | the handler returned `Err` |
-| `panic` | the handler panicked; the app kept running and the page was told |
-| `busy` | too many worker-thread commands in flight; retry shortly |
-| `timeout` | the shim gave up waiting; the command may still be running |
-| `runtime` | the webview or event loop failed |
-
-`busy` and `runtime` come from the shell. `timeout` is produced by the shim
-itself, so it is the one kind that can arrive from a command that never reached
-Rust at all.
-
-`method` names the command that failed, even when the call came from a nested
-helper. Branch on `kind`; never match `message` text, which is for humans.
-
-## The page side
-
-The shim installs `window.voussoir` before any of your scripts run:
+From the page, that is always the same call:
 
 ```ts
-const greeting = await window.voussoir.invoke<string>("greet", { name: "you" });
-
-const off = window.voussoir.listen<{ value: number }>("count", (event) => {
-  render(event.value);
-});
-
-// Later, or when the component unmounts:
-off();
+const result = await window.voussoir.invoke("any.method", payload);
 ```
 
-`invoke` rejects with an error carrying the `kind`, so a `catch` can tell a missing
-command from a bad payload. `listen` returns an unsubscribe function; calling it
-twice is harmless.
+Three properties follow, and each one is why a later chapter has a rule:
 
-The shim also carries `platform` (`"linux"`, `"windows"`, `"macos"`, `"bsd"`,
-`"android"`, `"ios"`) and `protocol`, the shim's own version number. Feature-detect
-on `protocol`, not on `platform`: a page that needs `windows()` asks
-`voussoir.protocol >= 3` and degrades in one place instead of in every platform branch.
+1. **A command exists only if Rust registered it.** No manifest, no capability
+   file, no runtime discovery. Registration *is* existence.
+2. **One envelope means one error shape.** A bad payload, a returned `Err`, a
+   panic and a policy denial all arrive as `{error}`, told apart by `kind`.
+3. **The registry is a chokepoint.** Because every call passes through it, a
+   single allowlist can gate the whole surface, per window, without the page
+   cooperating.
 
-## The Rust side
+Remove any of those and the security model in this book stops working.
 
-A command that needs no app handle lives in the commands crate, in one table. The
-`Command` struct and `Kind` enum are generated into *your* crate by `voussoir
-init`, not exported by the framework, because this code has to compile as a
-`cdylib` that the dev shell loads at runtime:
+## The `kind` field
+
+`kind` is a stable, machine-readable class. Branch on it; never match `message`
+text, which is written for a human and may change.
+
+| `kind` | Meaning | What the page should do |
+| --- | --- | --- |
+| `unknown` | no handler, or one withheld by an allowlist | treat the command as absent; do not retry |
+| `payload` | the request did not match the handler's argument type | a bug in the page; log it |
+| `handler` | the handler returned `Err` | show the message; it is meant for a user |
+| `panic` | the handler panicked; the app kept running | show the message, report it |
+| `busy` | too many worker-thread commands in flight | retry shortly; nothing was started |
+| `timeout` | the shim gave up waiting | the command may still be running |
+| `runtime` | the webview or event loop failed | fatal for that window; offer a restart |
+
+`busy` and `runtime` come from the shell. `timeout` is produced by the shim
+itself, so it is the one kind that can arrive for a command that never reached
+Rust at all.
+
+**Why is a denial reported as `unknown`?** Because a page that can distinguish
+"not allowed" from "does not exist" has learned part of the app's surface. A
+preview window with a small allowlist should not be able to enumerate what it is
+missing, so both answers are identical from inside the webview.
+
+## Theory: three execution models
+
+A webview paints on a UI thread. A command that blocks that thread freezes the
+window, so *where* a command runs is a decision you make per command, not a
+detail:
+
+| Model | Registered with | Runs on | Use for |
+| --- | --- | --- | --- |
+| Sync | `.command` | UI thread | work under a frame: formatting, lookups |
+| Worker | `.async_command` | a thread pool | blocking I/O: files, sockets, subprocesses |
+| Async | `.async_fn` | the shared async runtime | `await`-friendly libraries |
 
 ```rust
-// In native/commands/src/lib.rs, alongside the generated Command and Kind.
-pub static COMMANDS: &[Command] = &[
-    Command { name: "greet", kind: Kind::Sync, run: greet },
-];
+App::new()
+    // Cheap, UI thread.
+    .command("greet", |_app, payload| Ok(payload))
+    // Blocking I/O on a worker thread: the window keeps painting.
+    .async_command("read_file", |_app, payload| {
+        let path = payload["path"].as_str().unwrap_or_default();
+        Ok(json!(std::fs::read_to_string(path)?))
+    })
+    // A real async fn on the shared runtime.
+    .async_fn("lookup", |_app, payload| async move {
+        let row = db.get(payload).await?;
+        Ok(json!(row))
+    })
+```
+
+The trade behind the table:
+
+- **Sync is fastest** (a function call) and the only one that can stutter a
+  window. Keep it under ~10 ms.
+- **Worker spawns a thread per call.** Fine for a handful of concurrent calls;
+  wasteful for a thousand. When the pool is full you get `kind: "busy"`.
+- **Async submits a task** to one shared runtime, so it costs a task rather than
+  a stack. This is the one that scales, at the price of a runtime in the binary
+  (the `rt` feature).
+
+Picking wrong is not a correctness bug. It is a responsiveness bug (sync) or a
+capacity bug (worker), and both are visible in `--verbose`:
+[Diagnostics](diagnostics.md).
+
+## Registering commands two ways
+
+There are two places a command can live, and knowing which you need saves time.
+
+### The command table, in the commands crate
+
+This is where most commands belong, because it is what hot-reloads:
+
+```rust
+// native/commands/src/lib.rs
+use voussoir::serde_json::{json, Value};
+use crate::{Command, Kind};   // generated by `voussoir init`, in this same file
 
 fn greet(payload: &Value) -> Result<Value, String> {
     let name = payload.get("name").and_then(Value::as_str).unwrap_or("world");
     Ok(json!(format!("Hello, {name}!")))
 }
+
+pub static COMMANDS: &[Command] = &[
+    Command { name: "greet", kind: Kind::Sync, run: greet },
+];
 ```
 
-The payload arrives as `serde_json::Value` and the reply is `Result<Value,
-String>`. `Kind` is `Sync` or `Async`, which is how the release shell decides
-whether to run the command on the UI thread or a worker.
+`Command` and `Kind` are **generated into your crate**, not exported by the
+framework, because this file is compiled twice: as a `cdylib` the dev shell loads
+at runtime, and as a static library in release. A `cdylib` cannot share Rust
+types with the shell, so the table is a plain data structure and the payloads are
+JSON.
 
-A command that needs the app itself is registered on `App` in `main.rs`, because a
-handle cannot cross the `cdylib` boundary soundly:
+- **`name`** is what the page calls. It is global; two commands with one name
+  silently replace each other, last one winning. Prefix (`sqlite.query`,
+  `dialog.open`).
+- **`kind`** is `Sync` or `Async`, and only affects release builds: under
+  `voussoir dev` every command runs on a worker anyway, so a slow command cannot
+  freeze the window mid-reload.
+- **`run`** is `fn(&Value) -> Result<Value, String>`. Returning `Err(message)`
+  becomes `kind: "handler"` with that message, so write it for a user.
+
+### On the `App`, in `main.rs`
+
+Use this when the handler needs the app itself, or a typed argument:
 
 ```rust
+// native/src/main.rs
 App::new()
     .command("open_settings", |app, _payload| {
-        app.open_window(WindowOptions {
-            label: Some("settings".to_owned()),
-            title: Some("Settings".to_owned()),
-            ..Default::default()
-        })?;
-        Ok(Value::Null)
+        let label = app.open_window(Default::default())?;
+        Ok(json!({ "label": label }))
     })
     .run()
 ```
 
-Both kinds are reachable from the page with the same `invoke`, gated by the same
-allowlist, and answered with the same envelope.
+`App::command` handlers receive `&AppHandle`, which is how a command emits an
+event or opens a window. They do not hot-reload: changing one needs a restart.
 
-## Sync, worker, async
+**The rule of thumb:** stateless logic goes in the table; anything that needs the
+app goes on `App`. A command that must be both is written as two: the table entry
+takes `Value`, and a thin `App` wrapper calls into it.
 
-There are three execution models, and picking the right one is the only
-performance decision the contract asks you to make.
-
-```rust
-// Runs on the UI thread. Cheap work only: it blocks painting.
-.command("greet", |_app, payload| Ok(payload))
-
-// Runs on its own worker thread. For blocking I/O the webview must not wait on.
-.async_command("read_file", |_app, _payload| {
-    std::fs::read_to_string("/etc/hostname")
-        .map(|text| json!(text))
-        .map_err(voussoir::Error::Handler)
-})
-
-// A real async fn on the shared runtime. Requires the `rt` feature.
-.async_fn("fetch", |_app, _payload: FetchArgs| async move {
-    // `rt` provides the scheduler only: no HTTP client, no TLS. Take the
-    // network stack you already depend on and await it here.
-    let body = fetch_with_your_client("https://example.com").await?;
-    Ok(json!(body))
-})
-```
-
-`async_command` takes a `Value` and spawns a thread per call; `async_fn` takes a
-typed argument and submits a task to one shared multi-threaded runtime. Because a
-thread per call reserves a stack, `async_command` is bounded: past the limit (the
-machine's parallelism, at least four) a call is refused with `kind: "busy"`
-instead of spawning. That is what stops a page looping on one slow allowlisted
-command from reserving memory until the process dies, and it is why a page should
-treat `busy` as "retry shortly" rather than as a bug. For a
-handful of concurrent commands the difference is noise, and
-`bun scripts/bench.ts --dispatch` measures it rather than guessing. Use `async_fn`
-when the handler awaits; use `async_command` when it merely blocks.
-
-## Pushing the other way
+## The `App` builder, in order
 
 ```rust
-app.emit_to(Some("main"), "document:changed", json!({ "dirty": true }));
-app.emit_to(None, "theme", json!({ "dark": true }));   // every window
+fn main() -> Result<(), voussoir::Error> {
+    voussoir::App::new()
+        .config(include_str!("../../voussoir.json"))   // 1. configuration
+        .assets(voussoir::AssetTable)                  // 2. embedded frontend
+        .on_ready(|app, label| { /* 3. per-window setup */ })
+        .command("greet", |_app, payload| Ok(payload)) // 4. commands
+        .run()                                         // 5. run the loop
+}
 ```
 
-Emitting goes through the event loop proxy and `evaluate_script`, so it is
-thread-safe and never touches the webview off the UI thread. That also means it is
-queued, not synchronous: a handler that emits and immediately returns does not
-guarantee the page has run its listener.
+Each step is a value transformation, not a mutation, which is why the chain
+reads top to bottom and why a plugin can slot into the middle
+([Plugins](plugins.md)).
+
+`run()` blocks on the event loop until the last window closes. Everything before
+it is configuration; nothing before it needs a window to exist.
+
+## Emitting events: Rust to page
+
+The page calls Rust with `invoke`; Rust calls the page with an event:
+
+```rust
+app.emit("theme", json!({ "dark": true }));                     // every window
+app.emit_to(Some("settings"), "saved", json!({ "path": "..." })); // one window
+app.emit_to(None, "shutdown", json!({ "in": 5 }));               // every window
+```
+
+```ts
+window.voussoir.listen<{ dark: boolean }>("theme", (payload) => {
+  document.documentElement.dataset.theme = payload.dark ? "dark" : "light";
+});
+```
+
+`emit` and `emit_to(Some(label), ...)` reach one window;
+`emit_to(None, ...)` broadcasts. All three go through the event loop proxy, so
+they are safe from any thread and are **queued**, not synchronous: the handler
+runs on the page's next turn, not inside your Rust function.
+
+That has one consequence worth internalising: emitting is not a way to get a
+value back. If you need an answer, that is a command the page calls.
+
+## Why not just expose functions
+
+A reasonable question: why not let the page call Rust functions directly, as some
+frameworks do? Because a generated binding per function makes the command surface
+implicit: it grows whenever you add a public function, and the allowlist has
+nothing stable to name. With one registry, the surface is exactly the set of
+names you registered, which is what makes
+[Per-window allowlists](allowlists.md) enforceable.
 
 ## Next
 
-- [Typed commands](typed-commands.md) removes the `Value` marshalling.
-- [Errors](errors.md) covers what each failure looks like to the page.
+- [Typed commands](typed-commands.md) — moving deserialization in front of the handler.
+- [Errors the page can branch on](errors.md) — every kind, from the page's side.
+- [Security model](security.md) — what the chokepoint buys you.
