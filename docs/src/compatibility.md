@@ -29,12 +29,15 @@ It exists so a frontend can feature-detect instead of probing for methods:
 if (window.voussoir.protocol >= 2) {
   const open = await window.voussoir.windows();
 }
+if (window.voussoir.protocol >= 3) {
+  const base = window.voussoir.pageOrigin;
+}
 ```
 
-The current version is 2, which added `windows()`. `tray` and `menu` arrived in the
-same release but are additive on the object, so a page that feature-detects on
-`protocol >= 2` and then calls `voussoir.tray` should still guard for its absence on an
-older shell.
+The current version is **3**, which added `pageOrigin`. Version 2 added `windows()`,
+`tray` and `menu`. Each guard names the version that introduced the member it
+protects, because a page that asks for `>= 2` and then reads `pageOrigin` is
+checking the wrong number on a version-2 shell.
 
 ## How a change is recorded
 
