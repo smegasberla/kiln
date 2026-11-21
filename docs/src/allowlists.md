@@ -88,10 +88,16 @@ a preview window that can distinguish "not allowed" from "does not exist" has
 learned part of the app's surface.
 
 The cost is real and worth knowing: during development, a typo in an allowlist
-looks exactly like a typo in a command name. Both answer `unknown`. The crate
-fixes the diagnosis for the config case by auditing the allowlist at startup
-(`audit_allowlist`), which reports names that no handler can answer, so a
-misconfigured allowlist says so instead of looking like a missing command.
+looks exactly like a typo in a command name. Both answer `unknown`.
+
+The crate narrows that gap by auditing the allowlist automatically at startup: it
+checks every name in `commands` and in every `windows` entry against the registry,
+and logs the ones no handler can answer. You do not call it; it runs as part of
+`App::run`. A config that names a command you renamed therefore says so on stderr
+instead of looking like a missing command.
+
+It cannot catch the other case, a command that exists and is withheld, because
+that is the mechanism working.
 
 ## Patterns
 
