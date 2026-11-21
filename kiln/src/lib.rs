@@ -57,6 +57,7 @@ mod event_loop;
 mod hot;
 mod ipc;
 mod platform;
+pub mod plugin;
 mod reporting;
 mod security;
 mod shell;
@@ -94,6 +95,7 @@ pub(crate) use shell::{build_menu, menu_command_map};
 #[cfg(feature = "tray")]
 pub(crate) use shell::build_tray;
 pub use ipc::Registry;
+pub use plugin::Plugin;
 /// Android only: the outer crate has to hand the activity in when the OS
 /// creates one, because everything that starts an intent lives on it, and to
 /// hand back the answer when the picker it started returns.

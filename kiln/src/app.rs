@@ -162,6 +162,28 @@ impl App {
         self
     }
 
+    /// Install a plugin: run its `install` against this app.
+    ///
+    /// A plugin is an ordinary crate that implements [`crate::Plugin`]; there is
+    /// no registry to update and no file to add. What it registers shares the
+    /// allowlist and envelope with the app's own commands, so an allowlist can
+    /// withhold a plugin's command exactly like any other.
+    ///
+    /// Order matters only for name collisions, since registration is last-wins.
+    pub fn plugin<P: crate::Plugin>(self, plugin: P) -> Self {
+        plugin.install(self)
+    }
+
+    /// Whether a command is registered under `name`.
+    ///
+    /// For a plugin deciding whether to claim a name the app may already use.
+    /// It ignores the allowlist: a registered command that a config withholds is
+    /// still registered, and answering otherwise would make the check depend on
+    /// which window asked.
+    pub fn has_command(&self, name: &str) -> bool {
+        self.registry.contains(name)
+    }
+
     /// Load a specific page at startup, relative to the served root.
     pub fn entry(mut self, path: &str) -> Self {
         self.entry = path.trim_start_matches('/').to_owned();

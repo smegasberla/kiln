@@ -212,6 +212,17 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
   the moving `continuous` tag, and runs `cargo test --workspace` verbatim now
   that `kiln-android`'s dependencies are target-gated to Android.
 
+### Added
+
+- Plugins: a crate implements `Plugin` and an app installs it with
+  `App::plugin(...)`. There is no manifest, no codegen and no new dependency,
+  because Cargo already resolves versions and the linker already fails when a
+  crate is missing. `install` takes the app and returns it, so plugins compose
+  with the builder and each other. `App::has_command` and `Registry::contains`
+  let a plugin defer to a handler the app already registered instead of silently
+  replacing it, which is the one real hazard of last-wins registration in a flat
+  namespace.
+
 ### Changed
 
 - `ipc.rs` is a directory of eight modules rather than one 1662-line file. The

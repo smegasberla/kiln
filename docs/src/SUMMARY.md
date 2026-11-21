@@ -14,6 +14,7 @@ from it.
 - [Commands & payloads](ipc-contract.md)
   - [Typed commands](typed-commands.md)
   - [Errors the page can branch on](errors.md)
+- [Plugins](plugins.md)
 - [Security model](security.md)
   - [The two origins](origins.md)
   - [Per-window allowlists](allowlists.md)

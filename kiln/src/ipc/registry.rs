@@ -137,6 +137,16 @@ impl Registry {
         labels
     }
 
+    /// Whether any handler is registered under `method`, regardless of the
+    /// allowlist.
+    ///
+    /// Registration is global and last-wins, so this is what a plugin checks
+    /// before claiming a name: deferring to an app's own handler is the
+    /// difference between a plugin and a hijack.
+    pub fn contains(&self, method: &str) -> bool {
+        self.handlers.contains_key(method)
+    }
+
     /// Whether `method` is registered and allowed, globally or for `label`.
     ///
     /// A window with a config entry can only call what is in *both* the global
