@@ -8,10 +8,23 @@
 /// The origin pages are served from in production.
 pub const APP_ORIGIN: &str = "kiln://localhost";
 
-/// On Android there is no custom-scheme interception, so wry rewrites
-/// `kiln://localhost/x` to `http://kiln.localhost/x` and intercepts that instead.
-/// The page therefore *is* the app's own origin, it just spells it differently.
-pub const ANDROID_APP_ORIGIN: &str = "http://kiln.localhost";
+/// On Android and on Windows, wry cannot intercept a custom scheme, so it
+/// rewrites `kiln://localhost/x` to `http://kiln.localhost/x` and intercepts
+/// that instead. The page therefore *is* the app's own origin, it just spells it
+/// differently.
+pub const REWRITTEN_APP_ORIGIN: &str = "http://kiln.localhost";
+
+/// The origin the page is actually served from on this target.
+///
+/// Anything that needs to name the app's own origin from the page side (the
+/// invoke endpoint, a test fixture) must use this, not [`APP_ORIGIN`]: on
+/// Windows and Android the two differ, and the page can only reach the handler
+/// through the rewritten one.
+#[cfg(any(target_os = "android", target_os = "windows"))]
+pub const PAGE_ORIGIN: &str = REWRITTEN_APP_ORIGIN;
+/// See above; the custom scheme survives on every other target.
+#[cfg(not(any(target_os = "android", target_os = "windows")))]
+pub const PAGE_ORIGIN: &str = APP_ORIGIN;
 
 /// Whether `url` may be loaded in the app's webview.
 ///
@@ -31,7 +44,7 @@ pub fn navigation_allowed(url: &str, dev_origin: Option<&str>) -> bool {
             return true;
         }
     }
-    [APP_ORIGIN, ANDROID_APP_ORIGIN]
+    [APP_ORIGIN, REWRITTEN_APP_ORIGIN]
         .iter()
         .any(|origin| url == *origin || url.starts_with(&format!("{origin}/")))
 }
@@ -83,7 +96,7 @@ fn csp(dev: bool) -> &'static str {
          style-src 'self' 'unsafe-inline'; \
          img-src 'self' data: blob:; \
          font-src 'self' data:; \
-         connect-src 'self' kiln: ws: http://127.0.0.1:* http://localhost:*; \
+         connect-src 'self' kiln: http://kiln.localhost ws: http://127.0.0.1:* http://localhost:*; \
          object-src 'none'; \
          base-uri 'none'; \
          form-action 'none'"
@@ -158,9 +171,10 @@ mod tests {
     }
 
     #[test]
-    fn the_android_rewritten_origin_is_still_the_app() {
-        // wry serves the page from this origin on Android; refusing it would
-        // block the app's own first navigation.
+    fn the_rewritten_origin_is_still_the_app() {
+        // wry serves the page from this origin on Android and on Windows;
+        // refusing it would block the app's own first navigation and its
+        // same-origin invoke requests.
         assert!(navigation_allowed("http://kiln.localhost/index.html", None));
         assert!(navigation_allowed("http://kiln.localhost/", None));
         // It must not become a hole: other http hosts stay refused.

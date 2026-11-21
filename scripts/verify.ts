@@ -16,6 +16,14 @@ const repo = resolve(import.meta.dir, "..");
 const cli = join(repo, "cli", "src", "index.ts");
 // Windows suffixes cargo binaries with .exe; every spawned path below needs it.
 const EXE = process.platform === "win32" ? ".exe" : "";
+// WebView2 cannot intercept a custom scheme, so wry rewrites `kiln://localhost`
+// to `http://kiln.localhost` and intercepts that. The pages below call the same
+// endpoint the shell's shim does, so they need the same spelling or the request
+// never reaches the handler.
+const INVOKE =
+  process.platform === "win32"
+    ? "http://kiln.localhost/__kiln/"
+    : "kiln://localhost/__kiln/";
 const results: { name: string; ok: boolean; detail: string }[] = [];
 
 function record(name: string, ok: boolean, detail: string) {
@@ -60,7 +68,7 @@ async function shWithTimeout(cmd: string[], cwd: string, env: Record<string, str
 const PAGE = `<!doctype html><html><body><script>
 (async () => {
   try {
-    const res = await fetch('kiln://localhost/__kiln/greet', {
+    const res = await fetch('${INVOKE}greet', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'scaffold' }),
@@ -127,7 +135,7 @@ const NARROW_PAGE = `<!doctype html><html><body><script>
 (async () => {
   let body;
   try {
-    const res = await fetch('kiln://localhost/__kiln/greet', {
+    const res = await fetch('${INVOKE}greet', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'scaffold' }),
@@ -157,7 +165,7 @@ async function probeSecondWindow(
   const opener = `<!doctype html><html><body><script>
 (async () => {
   try {
-    await fetch('kiln://localhost/__kiln/__kiln_open_window', {
+    await fetch('${INVOKE}__kiln_open_window', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ label: 'untrusted', entry: 'untrusted.html' }),
@@ -167,7 +175,7 @@ async function probeSecondWindow(
     return;
   }
   try {
-    const res = await fetch('kiln://localhost/__kiln/greet', {
+    const res = await fetch('${INVOKE}greet', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'scaffold' }),

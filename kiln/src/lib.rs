@@ -78,7 +78,9 @@ pub use platform::{data_dir, lifecycle, menu_clicked, runtime, tray_clicked};
 pub use platform::{complete_dialog, fail_dialog, init_activity};
 /// Re-exported so an app crate needs exactly one dependency: `kiln`.
 pub use serde_json;
-pub use security::{content_security_policy, navigation_allowed, APP_ORIGIN};
+pub use security::{
+    content_security_policy, navigation_allowed, APP_ORIGIN, PAGE_ORIGIN, REWRITTEN_APP_ORIGIN,
+};
 pub use windows::WindowOptions;
 
 use std::sync::Arc;
@@ -105,15 +107,27 @@ const SHIM: &str = include_str!("shim.js");
 
 /// The invoke endpoint.
 ///
-/// Android has no custom-protocol registration, so wry rewrites `kiln://localhost`
-/// to `http://kiln.localhost` and intercepts it. The shim must use the rewritten
-/// form there or its `fetch` never reaches the handler.
-#[cfg(target_os = "android")]
-const INVOKE_BASE: &str = "/__kiln/";
+/// Android's WebView and Windows' WebView2 have no custom-scheme interception, so
+/// wry rewrites `kiln://localhost` to `http://kiln.localhost` and intercepts that
+/// instead. The shim must use the rewritten form there or its `fetch` never
+/// reaches the handler.
+#[cfg(any(target_os = "android", target_os = "windows"))]
+fn invoke_base(dev: bool) -> &'static str {
+    // A released page is served from the rewritten origin, so a relative path is
+    // same-origin. In dev the page comes from the dev server, where only the
+    // absolute rewritten URL still reaches the interceptor (CORS allows it).
+    if cfg!(target_os = "windows") && dev {
+        "http://kiln.localhost/__kiln/"
+    } else {
+        "/__kiln/"
+    }
+}
 /// Reached through the custom protocol in both modes, so the page's own origin
 /// never matters on desktop.
-#[cfg(not(target_os = "android"))]
-const INVOKE_BASE: &str = "kiln://localhost/__kiln/";
+#[cfg(not(any(target_os = "android", target_os = "windows")))]
+fn invoke_base(_dev: bool) -> &'static str {
+    "kiln://localhost/__kiln/"
+}
 
 /// Everything that can arrive on the UI thread from another thread.
 pub(crate) enum UserEvent {
@@ -819,11 +833,13 @@ fn build_shim(dev_origin: Option<&str>) -> String {
     if let Some(dev) = dev_origin {
         origins.push(dev.to_owned());
     }
-    // Android serves the page from http://kiln.localhost, which wry intercepts.
-    #[cfg(target_os = "android")]
-    origins.push("http://kiln.localhost".to_owned());
+    // Android's WebView and Windows' WebView2 rewrite the page origin to
+    // http://kiln.localhost, which wry intercepts. On Windows the rewrite is a
+    // navigation to that URL, so it is the origin the page actually reports.
+    #[cfg(any(target_os = "android", target_os = "windows"))]
+    origins.push(REWRITTEN_APP_ORIGIN.to_owned());
     let allowed = serde_json::to_string(&origins).unwrap_or_else(|_| "[]".to_owned());
-    SHIM.replace("__INVOKE_BASE__", INVOKE_BASE)
+    SHIM.replace("__INVOKE_BASE__", invoke_base(dev_origin.is_some()))
         .replace("__ALLOWED_ORIGINS__", &allowed)
         .replace("__BRIDGE__", if bridge { "true" } else { "false" })
         .replace("__PLATFORM__", platform_name())
@@ -1013,6 +1029,27 @@ mod tests {
         let shim = build_shim(Some("http://127.0.0.1:5177"));
         assert!(shim.contains("http://127.0.0.1:5177"));
         assert!(shim.contains(APP_ORIGIN));
+    }
+
+    #[test]
+    fn shim_names_the_origin_the_page_is_actually_served_from() {
+        // On Windows and Android wry serves the page from the rewritten http
+        // origin; a shim built for the custom scheme there would allowlist an
+        // origin the page never reports and post to an endpoint that is not
+        // intercepted, which is exactly how the WebView2 harness failed.
+        let shim = build_shim(None);
+        assert!(shim.contains(PAGE_ORIGIN), "page origin must be allowlisted");
+        assert!(shim.contains(&format!("\"{}\"", invoke_base(false))));
+        let rewritten = cfg!(any(target_os = "android", target_os = "windows"));
+        assert_eq!(shim.contains("http://kiln.localhost"), rewritten);
+
+        // In dev the page comes from the dev server, so a relative base would be
+        // resolved against that server; on Windows the absolute rewritten URL is
+        // the only spelling that still reaches the interceptor.
+        if cfg!(target_os = "windows") {
+            assert_eq!(invoke_base(true), "http://kiln.localhost/__kiln/");
+            assert!(build_shim(Some("http://127.0.0.1:5177")).contains(invoke_base(true)));
+        }
     }
 
     #[test]

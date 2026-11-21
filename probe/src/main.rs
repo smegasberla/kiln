@@ -22,10 +22,13 @@ fn main() -> Result<(), kiln::Error> {
     let hostile = std::env::var("KILN_HOSTILE").unwrap_or_else(|_| "http://127.0.0.1:1".to_owned());
     let _ = HOSTILE.set(hostile.clone());
 
-    // Built at startup so the embedded page can name the hostile origin.
+    // Built at startup so the embedded page can name the hostile origin and the
+    // origin its own IPC actually reaches: WebView2 and Android serve the page
+    // from the rewritten http origin, so `kiln://localhost` never resolves there.
     let probe_js: &'static [u8] = Box::leak(
         String::from_utf8_lossy(PROBE)
             .replace("__HOSTILE__", &hostile)
+            .replace("__PROBE_ORIGIN__", kiln::PAGE_ORIGIN)
             .into_bytes()
             .into_boxed_slice(),
     );

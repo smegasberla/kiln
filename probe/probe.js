@@ -1,5 +1,6 @@
 (async () => {
   const HOSTILE = "__HOSTILE__";
+  const ORIGIN = "__PROBE_ORIGIN__";
   const out = { remoteScriptExecuted: typeof window.__evil !== "undefined" };
 
   try {
@@ -17,14 +18,14 @@
   }
 
   try {
-    const res = await fetch("kiln://localhost/__kiln/boom", { method: "POST", body: "null" });
+    const res = await fetch(`${ORIGIN}/__kiln/boom`, { method: "POST", body: "null" });
     out.panic = await res.text();
   } catch (error) {
     out.panic = "THREW " + error;
   }
 
   try {
-    const res = await fetch("kiln://localhost/__kiln/alive", { method: "POST", body: "null" });
+    const res = await fetch(`${ORIGIN}/__kiln/alive`, { method: "POST", body: "null" });
     out.after = (await res.json()).ok;
   } catch (error) {
     out.after = "THREW " + error;
@@ -41,7 +42,7 @@
   });
 
   try {
-    await fetch("kiln://localhost/__kiln/report", { method: "POST", body: JSON.stringify(out) });
+    await fetch(`${ORIGIN}/__kiln/report`, { method: "POST", body: JSON.stringify(out) });
   } catch (error) {
     console.error("probe report failed: " + error);
   }
