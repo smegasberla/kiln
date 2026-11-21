@@ -499,6 +499,25 @@ async function main() {
       parsed?.nav === "stayed",
       parsed?.nav ?? "no reply",
     );
+    // T1: a typed command rejects a wrong shape as `payload` naming the command,
+    // and the same command with the right shape still answers. Both go through
+    // the real IPC transport, so this is the cross-platform proof.
+    record(
+      "typed command rejects a bad payload",
+      parsed?.typed === "payload/typed_echo",
+      parsed?.typed ?? "no reply",
+    );
+    record(
+      "typed command answers a good payload",
+      parsed?.typedOk === "ok",
+      parsed?.typedOk ?? "no reply",
+    );
+    // T1: the store persists through the platform data directory and reads back.
+    record(
+      "storage round-trips in the data dir",
+      parsed?.storage?.round === 1 && parsed?.storageKeys === true,
+      parsed ? `${JSON.stringify(parsed.storage)} keys ok: ${parsed.storageKeys}` : "no reply",
+    );
   }
 
   // 8. Packaging produces a real artifact on Linux. The AppImage is the only

@@ -7,6 +7,13 @@
 use kiln::serde_json::{json, Value};
 use kiln::{App, AssetTable, Error};
 
+/// `greet` arguments.
+#[derive(kiln::serde::Deserialize)]
+#[serde(crate = "kiln::serde")]
+struct GreetArgs {
+    name: Option<String>,
+}
+
 static ASSETS: AssetTable = &[
     ("index.html", include_bytes!("hello/index.html")),
     ("style.css", include_bytes!("hello/style.css")),
@@ -21,22 +28,24 @@ fn main() -> Result<(), Error> {
     App::new()
         .config(include_str!("hello/kiln.json"))
         .assets(ASSETS)
-        .command("greet", |_app, payload: Value| {
-            let name = payload
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("world");
+        // Typed: `{}` or `{"name":"..."}` only. Anything else is rejected with a
+        // `payload` error naming the command, before this body runs.
+        .command_typed("greet", |_app, args: GreetArgs| {
+            let name = args.name.as_deref().unwrap_or("world");
             Ok(json!(format!("Hello, {name}! (from Rust)")))
         })
         .command("report", move |_app, payload: Value| {
-            let greeting = payload.get("greeting").and_then(Value::as_str).unwrap_or("");
+            let greeting = payload
+                .get("greeting")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             if selftest && greeting.contains("from Rust") {
                 println!("SELFTEST OK: {greeting}");
                 std::process::exit(0);
             }
             Ok(json!(null))
         })
-        .on_ready(move |app| {
+        .on_ready(move |app, _window| {
             if bench {
                 println!("READY {}", started.elapsed().as_millis());
                 use std::io::Write;

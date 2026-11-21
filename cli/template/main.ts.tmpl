@@ -44,6 +44,14 @@ if (window.kiln.platform === "android" || window.kiln.platform === "ios") {
   });
 }
 
+// Settings survive a restart because `storage.set` writes a JSON file in the
+// platform data directory. No crate, no path handling: the shell owns both.
+settingsButton.addEventListener("dblclick", async () => {
+  await window.kiln.invoke("storage.set", { key: "settings.opened", value: Date.now() });
+  const saved = await window.kiln.invoke<number | null>("storage.get", { key: "settings.opened" });
+  show(`settings last opened at ${saved ?? "never"}`);
+});
+
 // Menu clicks arrive as events, so a native menu needs no extra wiring here.
 window.kiln.listen<{ id: string }>("menu", (event) => show(`menu: ${event.id}`));
 

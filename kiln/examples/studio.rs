@@ -65,7 +65,7 @@ fn main() -> Result<(), Error> {
             }
             Ok(Value::Null)
         })
-        .on_ready(move |app| {
+        .on_ready(move |app, _window| {
             if selftest {
                 run_selftest(app.clone());
             }
@@ -76,12 +76,20 @@ fn main() -> Result<(), Error> {
         use kiln::menu::{MenuGroup, MenuItem};
         app.menu(
             MenuGroup::new("File")
-                .item(MenuItem::new("new_window", "New Window").accelerator("CmdOrCtrl+N").command("open_settings"))
+                .item(
+                    MenuItem::new("new_window", "New Window")
+                        .accelerator("CmdOrCtrl+N")
+                        .command("open_settings"),
+                )
                 .item(MenuItem::new("quit", "Quit").accelerator("CmdOrCtrl+Q")),
         )
         .menu(
             MenuGroup::new("View")
-                .item(MenuItem::new("devtools", "Toggle Devtools").accelerator("CmdOrCtrl+Shift+I").command("__kiln_devtools"))
+                .item(
+                    MenuItem::new("devtools", "Toggle Devtools")
+                        .accelerator("CmdOrCtrl+Shift+I")
+                        .command("__kiln_devtools"),
+                )
                 .item(MenuItem::new("reports", "Crash Reports").command("__kiln_reports")),
         )
     };
@@ -108,7 +116,8 @@ fn run_selftest(app: AppHandle) {
         // 1. Sync command.
         results.insert(
             "stats".into(),
-            app.invoke_command("stats", Value::Null).unwrap_or(Value::Null),
+            app.invoke_command("stats", Value::Null)
+                .unwrap_or(Value::Null),
         );
 
         // 2. Async command actually ran off-thread and replied.

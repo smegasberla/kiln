@@ -17,7 +17,7 @@ use tao::{
 };
 
 use crate::{
-    is_devtools_shortcut, open_devtools, windows, AppHandle, BuilderFactory, UserEvent,
+    is_devtools_shortcut, open_devtools, windows, AppHandle, BuilderFactory, CloseHook, UserEvent,
 };
 
 /// What the event-loop closure carries: the pieces `App::run` assembles
@@ -28,6 +28,11 @@ pub(crate) struct LoopState {
     pub(crate) spec: Arc<windows::Spec>,
     pub(crate) factory: BuilderFactory,
     pub(crate) handle: AppHandle,
+    /// Runs once per window on the way out, with that window's label.
+    pub(crate) closed: Option<std::sync::Arc<CloseHook>>,
+    /// Which windows have already fired a lifecycle hook, so a duplicate event
+    /// from the platform cannot run one twice.
+    pub(crate) fired: std::sync::Arc<crate::Fired>,
     pub(crate) show_devtools: bool,
     #[cfg(feature = "menu")]
     pub(crate) menu_commands: std::collections::HashMap<String, String>,
@@ -47,7 +52,9 @@ pub(crate) fn dispatch(
             window_id,
             ..
         } => {
-            state.open.remove(&window_id);
+            if let Some(entry) = state.open.remove(&window_id) {
+                announce_close(state, &entry.label);
+            }
             if state.open.is_empty() {
                 *control_flow = ControlFlow::Exit;
             }
@@ -57,11 +64,7 @@ pub(crate) fn dispatch(
             ..
         } => state.modifiers = mods,
         Event::WindowEvent {
-            event:
-                WindowEvent::KeyboardInput {
-                    event: key,
-                    ..
-                },
+            event: WindowEvent::KeyboardInput { event: key, .. },
             window_id,
             ..
         } => {
@@ -105,7 +108,9 @@ pub(crate) fn dispatch(
                 .find(|(_, e)| e.label == label)
                 .map(|(id, _)| *id)
             {
-                state.open.remove(&id);
+                if let Some(entry) = state.open.remove(&id) {
+                    announce_close(state, &entry.label);
+                }
                 if state.open.is_empty() {
                     *control_flow = ControlFlow::Exit;
                 }
@@ -160,5 +165,24 @@ pub(crate) fn dispatch(
             ..
         } => crate::platform::lifecycle("resume"),
         _ => {}
+    }
+}
+
+/// Tell the app a window is going away, if it asked.
+///
+/// A panicking hook must not take the event loop down with it: the window is
+/// already gone and the user has work in the others.
+fn announce_close(state: &LoopState, label: &str) {
+    let Some(closed) = &state.closed else { return };
+    if !state.fired.first_close(label) {
+        return;
+    }
+    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        closed(&state.handle, label)
+    })) {
+        eprintln!(
+            "kiln: on_window_close panicked: {}",
+            crate::ipc::panic_message(payload.as_ref())
+        );
     }
 }

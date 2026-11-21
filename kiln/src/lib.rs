@@ -61,6 +61,10 @@ pub mod windows;
 pub mod dialogs;
 #[cfg(feature = "menu")]
 pub mod menu;
+#[cfg(feature = "rt")]
+pub mod rt;
+#[cfg(feature = "storage")]
+pub mod storage;
 #[cfg(feature = "tray")]
 pub mod tray;
 #[cfg(feature = "updater")]
@@ -70,34 +74,36 @@ pub use assets::{content_type, lookup, AssetTable};
 pub use config::Config;
 pub use error::Error;
 pub use ipc::Registry;
-pub use platform::{data_dir, lifecycle, menu_clicked, runtime, tray_clicked};
 /// Android only: the outer crate has to hand the activity in when the OS
 /// creates one, because everything that starts an intent lives on it, and to
 /// hand back the answer when the picker it started returns.
 #[cfg(target_os = "android")]
 pub use platform::{complete_dialog, fail_dialog, init_activity};
-/// Re-exported so an app crate needs exactly one dependency: `kiln`.
-pub use serde_json;
+pub use platform::{data_dir, lifecycle, menu_clicked, runtime, tray_clicked};
 pub use security::{
     content_security_policy, navigation_allowed, APP_ORIGIN, PAGE_ORIGIN, REWRITTEN_APP_ORIGIN,
 };
+/// Re-exported so an app crate needs exactly one dependency: `kiln`.
+///
+/// `serde` brings the derives a typed command's types need
+/// (`#[derive(serde::Serialize, serde::Deserialize)]`), `serde_json` the
+/// `Value` the raw API speaks.
+pub use serde;
+pub use serde_json;
 pub use windows::WindowOptions;
 
 use std::sync::Arc;
 
+use crate::dispatch::{serve_async, serve_bridge};
 use serde_json::Value;
+#[cfg(not(target_os = "ios"))]
+use tao::window::WindowBuilder;
 use tao::{
     event_loop::{EventLoopBuilder, EventLoopProxy},
     keyboard::{KeyCode, ModifiersState},
     window::Window,
 };
-#[cfg(not(target_os = "ios"))]
-use tao::window::WindowBuilder;
-use wry::{
-    http::Request,
-    WebView, WebViewBuilder,
-};
-use crate::dispatch::{serve_async, serve_bridge};
+use wry::{http::Request, WebView, WebViewBuilder};
 
 /// The scheme pages are served from in production.
 pub const SCHEME: &str = "kiln";
@@ -288,7 +294,46 @@ fn parse_envelope(body: &str) -> Result<Value, Error> {
 }
 
 /// Runs once after a window's page finishes loading.
-type ReadyHook = Box<dyn Fn(&AppHandle) + Send + Sync>;
+/// Which windows have already fired a lifecycle hook.
+///
+/// Both hooks are documented as once per window, and both can be reached twice
+/// in practice: a page can finish loading after a reload, and tao can deliver
+/// `CloseRequested` for a window that is already on its way out. Keeping the
+/// set here makes "exactly once" a property of the code rather than of the
+/// platform's event habits.
+#[derive(Default)]
+pub(crate) struct Fired {
+    ready: std::sync::Mutex<std::collections::HashSet<String>>,
+    closed: std::sync::Mutex<std::collections::HashSet<String>>,
+}
+
+impl Fired {
+    /// `true` the first time a label is seen for `ready`, `false` after.
+    pub(crate) fn first_ready(&self, label: &str) -> bool {
+        self.first(&self.ready, label)
+    }
+
+    /// `true` the first time a label is seen for `window close`, `false` after.
+    pub(crate) fn first_close(&self, label: &str) -> bool {
+        self.first(&self.closed, label)
+    }
+
+    fn first(
+        &self,
+        set: &std::sync::Mutex<std::collections::HashSet<String>>,
+        label: &str,
+    ) -> bool {
+        let mut set = set.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        set.insert(label.to_owned())
+    }
+}
+
+/// Runs once after a window's page finishes loading.
+pub(crate) type ReadyHook = Box<dyn Fn(&AppHandle, &str) + Send + Sync>;
+/// Runs once when a window is closing, before its webview is dropped. The queue
+/// of pending window state is dropped with the window, so this is the last
+/// point an app can persist anything it kept per window.
+pub(crate) type CloseHook = Box<dyn Fn(&AppHandle, &str) + Send + Sync>;
 
 /// Builds a webview for a given target URL. Captures everything a window needs
 /// to share: protocol handler, shim, navigation policy, ready hook.
@@ -303,6 +348,7 @@ pub struct App {
     dev_url: Option<String>,
     entry: String,
     ready: Option<ReadyHook>,
+    closed: Option<CloseHook>,
     window: WindowOptions,
     #[cfg(feature = "menu")]
     menus: Vec<menu::MenuGroup>,
@@ -329,6 +375,7 @@ impl App {
             dev_url: dev_url(),
             entry: String::new(),
             ready: None,
+            closed: None,
             window: WindowOptions::default(),
             #[cfg(feature = "menu")]
             menus: Vec::new(),
@@ -374,6 +421,48 @@ impl App {
         self
     }
 
+    /// Register a command whose argument and reply are real types.
+    ///
+    /// Identical on the wire to [`App::command`]; the difference is that a
+    /// mismatched payload is rejected with `kind: "payload"` before the body
+    /// runs, so a typo in the frontend is a diagnosable error rather than a
+    /// string the handler has to defend against.
+    ///
+    /// ```ignore
+    /// #[derive(serde::Deserialize)]
+    /// struct GreetArgs { name: String }
+    ///
+    /// app.command_typed("greet", |_app, args: GreetArgs| {
+    ///     Ok(format!("Hello, {}!", args.name))
+    /// });
+    /// ```
+    pub fn command_typed<P, R, F>(mut self, name: &str, handler: F) -> Self
+    where
+        P: crate::serde::de::DeserializeOwned + Send + 'static,
+        R: crate::serde::Serialize + 'static,
+        F: Fn(&AppHandle, P) -> Result<R, Error> + Send + Sync + 'static,
+    {
+        self.registry.add_typed(name, handler);
+        self
+    }
+
+    /// Register an `async fn` command. Requires the `rt` feature.
+    ///
+    /// The future runs on the shared runtime rather than a dedicated thread per
+    /// call, so slow work does not block painting and does not grow the thread
+    /// count either. The reply travels through the same envelope.
+    #[cfg(feature = "rt")]
+    pub fn async_fn<P, R, F, Fut>(mut self, name: &str, handler: F) -> Self
+    where
+        P: crate::serde::de::DeserializeOwned + Send + 'static,
+        R: crate::serde::Serialize + Send + Sync + 'static,
+        F: Fn(AppHandle, P) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<R, Error>> + Send + 'static,
+    {
+        self.registry.add_async_fn(name, handler);
+        self
+    }
+
     /// Register a command that runs on a worker thread.
     ///
     /// The page awaits the reply; the window keeps painting meanwhile, so a slow
@@ -398,15 +487,31 @@ impl App {
         self
     }
 
-    /// Run once, right after a window's page finishes loading.
+    /// Run once per window, right after that window's page finishes loading.
     ///
-    /// This is the point where `emit` is safe: the page's listeners exist and
-    /// the shim is installed.
+    /// `window_label` is the label of the window that is ready, so an app that
+    /// opens several can push each one its own initial state. This is the first
+    /// point where `emit_to` is safe for that window: its listeners exist and
+    /// the shim is installed. Fired exactly once per window, including windows
+    /// opened later from a handler.
     pub fn on_ready<F>(mut self, handler: F) -> Self
     where
-        F: Fn(&AppHandle) + Send + Sync + 'static,
+        F: Fn(&AppHandle, &str) + Send + Sync + 'static,
     {
         self.ready = Some(Box::new(handler));
+        self
+    }
+
+    /// Run once per window when it is closing, before the webview is dropped.
+    ///
+    /// `window_label` is the window that is going away. Emissions sent from
+    /// here are dropped with the window on purpose: use it to persist or to
+    /// tell the remaining windows, not to talk to the one that is closing.
+    pub fn on_window_close<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&AppHandle, &str) + Send + Sync + 'static,
+    {
+        self.closed = Some(Box::new(handler));
         self
     }
 
@@ -472,7 +577,9 @@ impl App {
             );
             return self;
         }
-        let dir = std::env::var("KILN_HOT_DIR").ok().map(std::path::PathBuf::from);
+        let dir = std::env::var("KILN_HOT_DIR")
+            .ok()
+            .map(std::path::PathBuf::from);
         match hot::HotLib::open(std::path::Path::new(&lib), dir) {
             Ok(hot) => self.hot = Some(std::sync::Arc::new(hot)),
             Err(error) => eprintln!("kiln: hot commands unavailable: {error}"),
@@ -538,6 +645,7 @@ impl App {
             self.ready.map(Arc::new),
             show_devtools,
         );
+        let closed = self.closed.map(Arc::new);
 
         // First window.
         let first = WindowOptions {
@@ -545,7 +653,11 @@ impl App {
             title: self.window.title.clone(),
             width: self.window.width,
             height: self.window.height,
-            label: self.window.label.clone().or_else(|| Some(spec.entry.clone())),
+            label: self
+                .window
+                .label
+                .clone()
+                .or_else(|| Some(spec.entry.clone())),
         };
         #[cfg(not(target_os = "ios"))]
         let window = WindowBuilder::new()
@@ -591,6 +703,7 @@ impl App {
         let _tray_handle = build_tray(&self.tray, &handle);
 
         let mut state = event_loop::LoopState {
+            fired: std::sync::Arc::new(Fired::default()),
             open: {
                 #[cfg(not(target_os = "ios"))]
                 let open = {
@@ -614,6 +727,7 @@ impl App {
             spec,
             factory,
             handle,
+            closed,
             show_devtools,
             #[cfg(feature = "menu")]
             menu_commands,
@@ -634,8 +748,14 @@ fn build_factory(
     ready: Option<Arc<ReadyHook>>,
     devtools: bool,
 ) -> BuilderFactory {
+    // Shared by every window this factory builds: a window's page can finish
+    // loading more than once (a reload), and the hook is once per window.
+    let fired = Arc::new(Fired::default());
     let shim = build_shim(dev_origin.as_deref());
     Arc::new(move |target: String, label: Option<String>| {
+        // Taken before the protocol handler moves `label` into its own closure:
+        // the ready hook needs the same name and the two cannot share it.
+        let page_label = label.clone().unwrap_or_default();
         let nav_origin = dev_origin.clone();
         let protocol_registry = Arc::clone(&registry);
         let protocol_handle = handle.clone();
@@ -670,7 +790,12 @@ fn build_factory(
                 let registry = Arc::clone(&registry);
                 let handle = handle.clone();
                 move |request: Request<String>| {
-                    serve_bridge(&registry, &handle, bridge_label.as_deref(), request.body().as_str());
+                    serve_bridge(
+                        &registry,
+                        &handle,
+                        bridge_label.as_deref(),
+                        request.body().as_str(),
+                    );
                 }
             })
             .with_url(target);
@@ -679,10 +804,13 @@ fn build_factory(
             Some(ready) => {
                 let ready = Arc::clone(ready);
                 let handle = handle.clone();
+                let fired = Arc::clone(&fired);
                 builder.with_on_page_load_handler(move |event, _url| {
                     if matches!(event, wry::PageLoadEvent::Finished) {
                         platform::page_loaded();
-                        ready(&handle);
+                        if fired.first_ready(&page_label) {
+                            ready(&handle, &page_label);
+                        }
                     }
                 })
             }
@@ -889,8 +1017,8 @@ pub mod transport {
     /// The method name and payload a mobile bridge receives in one string,
     /// mirroring the protocol's path-plus-body shape.
     pub fn parse_message(message: &str) -> Result<(String, Value), String> {
-        let value: Value = serde_json::from_str(message)
-            .map_err(|_| "message is not valid JSON".to_owned())?;
+        let value: Value =
+            serde_json::from_str(message).map_err(|_| "message is not valid JSON".to_owned())?;
         let method = value
             .get("method")
             .and_then(Value::as_str)
@@ -900,7 +1028,6 @@ pub mod transport {
         Ok((method, payload))
     }
 }
-
 
 /// The platform name the page receives as `kiln.platform`.
 ///
@@ -969,8 +1096,7 @@ fn register_builtins(registry: &mut Registry, config: &Config) {
     registry.add("__kiln_data_dir", {
         let name = config.name.clone();
         move |_app, _payload| {
-            let path = platform::data_dir(&name)
-                .and_then(|dir| dir.to_str().map(str::to_owned));
+            let path = platform::data_dir(&name).and_then(|dir| dir.to_str().map(str::to_owned));
             Ok(serde_json::json!({ "path": path }))
         }
     });
@@ -1004,6 +1130,9 @@ fn register_builtins(registry: &mut Registry, config: &Config) {
         }
     });
 
+    #[cfg(feature = "storage")]
+    storage::register(registry, config);
+
     #[cfg(feature = "dialogs")]
     dialogs::register(registry);
 
@@ -1023,7 +1152,10 @@ mod tests {
     fn shim_carries_the_app_origin_and_any_dev_origin() {
         let shim = build_shim(None);
         assert!(shim.contains(APP_ORIGIN), "app origin must be allowed");
-        assert!(!shim.contains("__ALLOWED_ORIGINS__"), "placeholder must be filled");
+        assert!(
+            !shim.contains("__ALLOWED_ORIGINS__"),
+            "placeholder must be filled"
+        );
         assert!(!shim.contains("__INVOKE_BASE__"));
 
         let shim = build_shim(Some("http://127.0.0.1:5177"));
@@ -1038,7 +1170,10 @@ mod tests {
         // origin the page never reports and post to an endpoint that is not
         // intercepted, which is exactly how the WebView2 harness failed.
         let shim = build_shim(None);
-        assert!(shim.contains(PAGE_ORIGIN), "page origin must be allowlisted");
+        assert!(
+            shim.contains(PAGE_ORIGIN),
+            "page origin must be allowlisted"
+        );
         assert!(shim.contains(&format!("\"{}\"", invoke_base(false))));
         let rewritten = cfg!(any(target_os = "android", target_os = "windows"));
         assert_eq!(shim.contains("http://kiln.localhost"), rewritten);
@@ -1054,7 +1189,10 @@ mod tests {
 
     #[test]
     fn envelopes_round_trip_through_invoke_command_parsing() {
-        assert_eq!(parse_envelope(r#"{"ok":{"a":1}}"#).unwrap(), json!({ "a": 1 }));
+        assert_eq!(
+            parse_envelope(r#"{"ok":{"a":1}}"#).unwrap(),
+            json!({ "a": 1 })
+        );
         assert!(parse_envelope(r#"{"error":"nope"}"#).is_err());
         assert!(parse_envelope("not json").is_err());
     }
@@ -1098,8 +1236,12 @@ mod tests {
 
         let (method, payload) =
             transport::parse_message(r#"{"method":"echo","payload":{"a":1}}"#).unwrap();
-        let via_bridge =
-            transport::respond(&registry, &AppHandle::detached_for_tests(), &method, payload);
+        let via_bridge = transport::respond(
+            &registry,
+            &AppHandle::detached_for_tests(),
+            &method,
+            payload,
+        );
 
         assert_eq!(via_protocol, via_bridge);
         assert_eq!(via_protocol, r#"{"ok":{"a":1}}"#);
@@ -1137,6 +1279,71 @@ mod tests {
         ] {
             assert!(registry.has(name), "{name} should exist");
         }
+        // `full` carries `storage`, so the store is reachable from the page
+        // whenever the shell advertises that feature set.
+        #[cfg(feature = "storage")]
+        for name in [
+            "storage.get",
+            "storage.set",
+            "storage.delete",
+            "storage.keys",
+            "storage.path",
+        ] {
+            assert!(registry.has(name), "{name} should exist under storage");
+        }
+    }
+
+    #[test]
+    fn lifecycle_hooks_fire_exactly_once_per_window() {
+        let fired = Fired::default();
+        assert!(fired.first_ready("main"));
+        assert!(
+            !fired.first_ready("main"),
+            "a reload must not fire ready twice"
+        );
+        assert!(fired.first_ready("settings"));
+        assert!(fired.first_close("main"));
+        assert!(
+            !fired.first_close("main"),
+            "a duplicate close must be ignored"
+        );
+        assert!(fired.first_close("settings"));
+        // The two hooks track labels independently: a window can become ready
+        // and close, and neither set may consume the other's entry.
+        let independent = Fired::default();
+        assert!(independent.first_ready("main"));
+        assert!(independent.first_close("main"));
+    }
+
+    #[test]
+    fn the_ready_hook_receives_the_window_label() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let app = App::new().on_ready({
+            let seen = Arc::clone(&seen);
+            move |_app, label| seen.lock().unwrap().push(label.to_owned())
+        });
+        let ready = app.ready.expect("hook stored");
+        let handle = AppHandle::detached_for_tests();
+        ready(&handle, "main");
+        ready(&handle, "settings");
+        assert_eq!(*seen.lock().unwrap(), vec!["main", "settings"]);
+    }
+
+    #[test]
+    fn the_close_hook_is_optional_and_labelled() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let app = App::new().on_window_close({
+            let seen = Arc::clone(&seen);
+            move |_app, label| seen.lock().unwrap().push(label.to_owned())
+        });
+        let closed = app.closed.expect("hook stored");
+        closed(&AppHandle::detached_for_tests(), "preview");
+        assert_eq!(*seen.lock().unwrap(), vec!["preview"]);
+
+        // Registering neither hook is the default and must stay valid.
+        let bare = App::new();
+        assert!(bare.ready.is_none());
+        assert!(bare.closed.is_none());
     }
 
     #[test]
@@ -1157,9 +1364,7 @@ mod tests {
     fn window_commands_are_reachable_from_the_page() {
         let handle = AppHandle::detached_for_tests();
         // Detached: opening a window reports the missing loop instead of lying.
-        assert!(handle
-            .open_window(WindowOptions::default())
-            .is_err());
+        assert!(handle.open_window(WindowOptions::default()).is_err());
         // Closing something that cannot exist is a silent no-op.
         handle.close_window("nope");
     }

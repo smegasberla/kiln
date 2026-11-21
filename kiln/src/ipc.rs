@@ -30,12 +30,21 @@ pub const ENDPOINT_PREFIX: &str = "/__kiln/";
 type SyncHandler = Box<dyn Fn(&AppHandle, Value) -> Result<Value, Error> + Send + Sync>;
 /// Async handlers are shared rather than borrowed so a worker thread can own a
 /// reference to one after `dispatch_deferred` returns.
-type AsyncHandler =
-    std::sync::Arc<dyn Fn(AppHandle, Value) -> Result<Value, Error> + Send + Sync>;
+type AsyncHandler = std::sync::Arc<dyn Fn(AppHandle, Value) -> Result<Value, Error> + Send + Sync>;
+
+/// Deferred handlers own their completion callback, so they can answer after
+/// arbitrary work and from any thread or task.
+#[cfg(feature = "rt")]
+type DeferredHandler = Box<dyn Fn(AppHandle, Value, Box<dyn FnOnce(String) + Send>) + Send + Sync>;
 
 enum Handler {
     Sync(SyncHandler),
     Async(AsyncHandler),
+    /// Owns its completion callback, so it can answer after arbitrary work and
+    /// from any thread or task. The async runtime registers here; nothing about
+    /// the envelope changes.
+    #[cfg(feature = "rt")]
+    Deferred(DeferredHandler),
 }
 
 /// Name -> handler table plus the optional config allowlist.
@@ -120,8 +129,75 @@ impl Registry {
     where
         F: Fn(AppHandle, Value) -> Result<Value, Error> + Send + Sync + 'static,
     {
-        self.handlers
-            .insert(method.to_owned(), Handler::Async(std::sync::Arc::new(handler)));
+        self.handlers.insert(
+            method.to_owned(),
+            Handler::Async(std::sync::Arc::new(handler)),
+        );
+    }
+
+    /// Register a command whose argument and reply are concrete types.
+    ///
+    /// The payload is deserialized before the handler runs, so a wrong shape
+    /// becomes an [`Error::Payload`] the page can branch on instead of a
+    /// handler string-match. The reply is serialized back into the same
+    /// envelope, so the wire format does not change.
+    pub fn add_typed<P, R, F>(&mut self, method: &str, handler: F)
+    where
+        P: crate::serde::de::DeserializeOwned + Send + 'static,
+        R: crate::serde::Serialize + 'static,
+        F: Fn(&AppHandle, P) -> Result<R, Error> + Send + Sync + 'static,
+    {
+        let handler = std::sync::Arc::new(handler);
+        self.add(method, move |handle, payload| {
+            let args: P = decode_args(payload)?;
+            let reply = handler(handle, args)?;
+            serde_json::to_value(reply).map_err(|error| Error::Handler(error.to_string()))
+        });
+    }
+
+    /// Register a real `async fn` command. Requires the `rt` feature.
+    ///
+    /// The payload is deserialized on the calling thread, so a malformed
+    /// argument is answered immediately; the future itself runs on the shared
+    /// runtime, where a thousand in-flight requests cost a thousand cheap tasks
+    /// rather than a thousand stacks. The reply goes through the same envelope
+    /// as every other handler.
+    ///
+    /// A panic inside the future is caught and reported as `kind: "panic"`
+    /// instead of killing the worker task, which would otherwise leave the page
+    /// awaiting a reply forever.
+    #[cfg(feature = "rt")]
+    pub fn add_async_fn<P, R, F, Fut>(&mut self, method: &str, handler: F)
+    where
+        P: crate::serde::de::DeserializeOwned + Send + 'static,
+        R: crate::serde::Serialize + 'static,
+        F: Fn(AppHandle, P) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<R, Error>> + Send + 'static,
+    {
+        let handler = std::sync::Arc::new(handler);
+        let method = method.to_owned();
+        self.handlers.insert(
+            method.clone(),
+            Handler::Deferred(Box::new(move |handle, payload, done| {
+                let args = match decode_args::<P>(payload) {
+                    Ok(args) => args,
+                    Err(error) => return done(ok_or_error(&method, Err(error))),
+                };
+                let handler = std::sync::Arc::clone(&handler);
+                let method = method.clone();
+                crate::rt::spawn(async move {
+                    let result = match crate::rt::isolate(handler(handle, args)).await {
+                        Ok(result) => result,
+                        Err(message) => Err(Error::Panic(message)),
+                    };
+                    let result = result.and_then(|reply| {
+                        serde_json::to_value(reply)
+                            .map_err(|error| Error::Handler(error.to_string()))
+                    });
+                    done(ok_or_error(&method, result));
+                });
+            })),
+        );
     }
 
     /// Names that can actually be called, sorted, for diagnostics.
@@ -158,7 +234,8 @@ impl Registry {
         self.dispatch_deferred(handle, method, payload, move |body| {
             let _ = tx.send(body);
         });
-        rx.recv().unwrap_or_else(|_| error_envelope(&Error::Handler("no response".to_owned())))
+        rx.recv()
+            .unwrap_or_else(|_| error_envelope(&Error::Handler("no response".to_owned())))
     }
 
     /// Run one request, passing the response body to `done`.
@@ -206,18 +283,29 @@ impl Registry {
         // `commands` and per-window lists in kiln.json can only ever narrow
         // what is reachable.
         if !self.permitted_for(method, label) {
-            return done(error_envelope(&Error::UnknownMethod(method.to_owned())));
+            return done(error_envelope_for(
+                method,
+                &Error::UnknownMethod(method.to_owned()),
+            ));
         }
         match self.handlers.get(method) {
             Some(Handler::Sync(handler)) => {
-                done(ok_or_error(run_isolated(handler, handle, payload)))
+                done(ok_or_error(method, run_isolated(handler, handle, payload)))
             }
             Some(Handler::Async(handler)) => {
                 let handler = std::sync::Arc::clone(handler);
                 let handle = handle.clone();
+                let method = method.to_owned();
                 std::thread::spawn(move || {
-                    done(ok_or_error(run_isolated_async(&handler, handle, payload)));
+                    done(ok_or_error(
+                        &method,
+                        run_isolated_async(&handler, handle, payload),
+                    ));
                 });
+            }
+            #[cfg(feature = "rt")]
+            Some(Handler::Deferred(handler)) => {
+                handler(handle.clone(), payload, Box::new(done));
             }
             None => self.dispatch_unclaimed(method, payload, done),
         }
@@ -242,12 +330,17 @@ impl Registry {
                     let body =
                         panic::catch_unwind(AssertUnwindSafe(|| hot.call(&method, &payload)))
                             .unwrap_or_else(|_| {
-                                error_envelope(&Error::Handler("hot command call failed".to_owned()))
+                                error_envelope(&Error::Handler(
+                                    "hot command call failed".to_owned(),
+                                ))
                             });
                     done(body);
                 });
             }
-            None => done(error_envelope(&Error::UnknownMethod(method.to_owned()))),
+            None => done(error_envelope_for(
+                method,
+                &Error::UnknownMethod(method.to_owned()),
+            )),
         }
     }
 
@@ -256,7 +349,10 @@ impl Registry {
     where
         F: FnOnce(String) + Send + 'static,
     {
-        done(error_envelope(&Error::UnknownMethod(method.to_owned())))
+        done(error_envelope_for(
+            method,
+            &Error::UnknownMethod(method.to_owned()),
+        ))
     }
 }
 
@@ -270,11 +366,7 @@ impl Registry {
 /// `AssertUnwindSafe` is sound here because the handler is the only thing being
 /// unwound: registry state is read-only, and a handler that panicked mid-way
 /// leaves its own data as it was, which is what the page is told about.
-fn run_isolated(
-    handler: &SyncHandler,
-    handle: &AppHandle,
-    payload: Value,
-) -> Result<Value, Error> {
+fn run_isolated(handler: &SyncHandler, handle: &AppHandle, payload: Value) -> Result<Value, Error> {
     match panic::catch_unwind(AssertUnwindSafe(|| handler(handle, payload))) {
         Ok(result) => result,
         Err(payload) => Err(report_panic(payload.as_ref())),
@@ -292,10 +384,34 @@ fn run_isolated_async(
     }
 }
 
-fn ok_or_error(result: Result<Value, Error>) -> String {
+/// Deserialize a handler's arguments, treating an absent body as `{}`.
+///
+/// A page that calls `invoke("open_settings")` sends no body at all, and a
+/// struct type cannot be built from `null`. The natural reading is "no fields
+/// given", so a null payload falls back to an empty object before failing.
+/// `()` and `Value` are unaffected: they accept `null` directly and are tried
+/// first, so their meaning never shifts.
+fn decode_args<P>(payload: Value) -> Result<P, Error>
+where
+    P: crate::serde::de::DeserializeOwned,
+{
+    let absent = payload.is_null();
+    match serde_json::from_value(payload) {
+        Ok(args) => Ok(args),
+        // A body-less call is "no fields given", which is an empty object for a
+        // struct type. Only a null body is retried, so a present-but-wrong field
+        // is still a rejection rather than a silent default. `()` and `Value`
+        // accept null directly and never reach here.
+        Err(error) if absent => serde_json::from_value(Value::Object(serde_json::Map::new()))
+            .map_err(|_| Error::Payload(error.to_string())),
+        Err(error) => Err(Error::Payload(error.to_string())),
+    }
+}
+
+fn ok_or_error(method: &str, result: Result<Value, Error>) -> String {
     match result {
         Ok(value) => format!(r#"{{"ok":{value}}}"#),
-        Err(error) => error_envelope(&error),
+        Err(error) => error_envelope_for(method, &error),
     }
 }
 
@@ -304,10 +420,21 @@ fn ok_or_error(result: Result<Value, Error>) -> String {
 /// `unknown` deliberately covers both an unregistered command and an allowlist
 /// denial, so the page cannot tell which commands exist but were withheld.
 pub(crate) fn error_envelope(error: &Error) -> String {
+    error_envelope_for("", error)
+}
+
+/// The failure envelope for a known method, so the page can tell *which*
+/// command failed without parsing the message text.
+///
+/// `method` is the name the page asked for. An empty one means the answer came
+/// from a path that has no request behind it (a hot-library boundary failure),
+/// and the field is still present so the shape never varies.
+pub(crate) fn error_envelope_for(method: &str, error: &Error) -> String {
     let message = serde_json::to_string(&error.to_string())
         .unwrap_or_else(|_| "\"command failed\"".to_owned());
     let kind = serde_json::Value::from(error.kind());
-    format!(r#"{{"error":{{"message":{message},"kind":{kind}}}}}"#)
+    let method = serde_json::Value::from(method);
+    format!(r#"{{"error":{{"message":{message},"kind":{kind},"method":{method}}}}}"#)
 }
 
 fn report_panic(payload: &(dyn std::any::Any + Send)) -> Error {
@@ -365,7 +492,9 @@ mod tests {
         let mut reg = Registry::new();
         for name in names {
             let owned = (*name).to_owned();
-            reg.add(name, move |_h, payload| Ok(json!({ "echo": payload, "name": owned })));
+            reg.add(name, move |_h, payload| {
+                Ok(json!({ "echo": payload, "name": owned }))
+            });
         }
         reg
     }
@@ -396,8 +525,25 @@ mod tests {
         let mut reg = registry_with(&["a", "b"]);
         reg.set_allowlist(Some(vec!["a".to_owned()]));
         assert_eq!(reg.callable(), vec!["a"]);
-        assert!(reg.dispatch(&empty_handle(), "b", Value::Null).contains("error"));
-        assert!(reg.dispatch(&empty_handle(), "a", Value::Null).contains(r#""ok""#));
+        assert!(reg
+            .dispatch(&empty_handle(), "b", Value::Null)
+            .contains("error"));
+        assert!(reg
+            .dispatch(&empty_handle(), "a", Value::Null)
+            .contains(r#""ok""#));
+    }
+
+    fn dispatch_for_payload(
+        reg: &Registry,
+        label: Option<&str>,
+        method: &str,
+        payload: Value,
+    ) -> String {
+        let (tx, rx) = mpsc::channel();
+        reg.dispatch_for_window(&empty_handle(), label, method, payload, move |body| {
+            let _ = tx.send(body);
+        });
+        rx.recv().unwrap()
     }
 
     fn dispatch_for(reg: &Registry, label: Option<&str>, method: &str) -> String {
@@ -425,7 +571,9 @@ mod tests {
         assert!(dispatch_for(&reg, Some("main"), "b").contains(r#""ok""#));
 
         // App-level dispatch (menus, the Android fallback) is untouched.
-        assert!(reg.dispatch(&empty_handle(), "b", Value::Null).contains(r#""ok""#));
+        assert!(reg
+            .dispatch(&empty_handle(), "b", Value::Null)
+            .contains(r#""ok""#));
     }
 
     #[test]
@@ -449,6 +597,292 @@ mod tests {
     }
 
     #[test]
+    fn a_bodyless_typed_command_reads_as_an_empty_argument_struct() {
+        #[derive(crate::serde::Deserialize, Default)]
+        #[serde(default, crate = "crate::serde")]
+        struct Args {
+            title: Option<String>,
+        }
+
+        let mut reg = Registry::new();
+        reg.add_typed("open_settings", |_h, args: Args| {
+            Ok(json!({ "title": args.title }))
+        });
+
+        // No body at all: the page called `invoke("open_settings")`.
+        assert_eq!(
+            reg.dispatch(&empty_handle(), "open_settings", Value::Null),
+            r#"{"ok":{"title":null}}"#
+        );
+        // An explicit empty object behaves the same.
+        assert_eq!(
+            reg.dispatch(&empty_handle(), "open_settings", json!({})),
+            r#"{"ok":{"title":null}}"#
+        );
+        // A wrong *field type* is still a rejection, not a silent default.
+        let parsed: Value = serde_json::from_str(&reg.dispatch(
+            &empty_handle(),
+            "open_settings",
+            json!({ "title": 5 }),
+        ))
+        .unwrap();
+        assert_eq!(parsed["error"]["kind"], "payload");
+    }
+
+    #[test]
+    fn a_bodyless_call_still_works_for_unit_and_value_arguments() {
+        let mut reg = Registry::new();
+        reg.add_typed("unit", |_h, _args: ()| Ok(json!("unit")));
+        reg.add_typed("raw", |_h, args: Value| Ok(args));
+
+        assert_eq!(
+            reg.dispatch(&empty_handle(), "unit", Value::Null),
+            r#"{"ok":"unit"}"#
+        );
+        // `Value` keeps receiving the real payload rather than being rewritten.
+        assert_eq!(
+            reg.dispatch(&empty_handle(), "raw", json!({ "a": 1 })),
+            r#"{"ok":{"a":1}}"#
+        );
+        assert_eq!(
+            reg.dispatch(&empty_handle(), "raw", Value::Null),
+            r#"{"ok":null}"#
+        );
+    }
+
+    #[test]
+    fn a_typed_command_round_trips_through_the_envelope() {
+        #[derive(crate::serde::Deserialize, crate::serde::Serialize)]
+        struct Args {
+            name: String,
+        }
+
+        let mut reg = Registry::new();
+        reg.add_typed("greet", |_h, args: Args| Ok(json!({ "hello": args.name })));
+
+        let out = reg.dispatch(&empty_handle(), "greet", json!({ "name": "Lin" }));
+        assert_eq!(out, r#"{"ok":{"hello":"Lin"}}"#);
+    }
+
+    #[test]
+    fn a_typed_command_rejects_a_wrong_shape_as_a_payload_error() {
+        #[derive(crate::serde::Deserialize)]
+        struct Args {
+            #[allow(dead_code)]
+            name: String,
+        }
+
+        let mut reg = Registry::new();
+        reg.add_typed("greet", |_h, _args: Args| Ok(json!("hi")));
+
+        let out = reg.dispatch(&empty_handle(), "greet", json!({ "nope": 1 }));
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["error"]["kind"], "payload", "{out}");
+        assert_eq!(parsed["error"]["method"], "greet", "{out}");
+    }
+
+    #[test]
+    fn a_typed_command_still_respects_the_allowlist() {
+        #[derive(crate::serde::Deserialize, crate::serde::Serialize)]
+        struct Args {
+            #[allow(dead_code)]
+            name: String,
+        }
+
+        let mut reg = Registry::new();
+        reg.add_typed("greet", |_h, args: Args| Ok(args));
+        reg.set_allowlist(Some(vec!["other".to_owned()]));
+
+        let out = reg.dispatch(&empty_handle(), "greet", json!({ "name": "Lin" }));
+        assert!(out.contains(r#""kind":"unknown""#), "{out}");
+    }
+
+    #[test]
+    fn a_typed_command_can_still_fail_like_any_other() {
+        #[derive(crate::serde::Deserialize)]
+        struct Args {
+            #[allow(dead_code)]
+            name: String,
+        }
+
+        let mut reg = Registry::new();
+        reg.add_typed("greet", |_h, _args: Args| {
+            Err::<Value, _>(Error::Handler("nope".to_owned()))
+        });
+
+        let parsed: Value =
+            serde_json::from_str(&reg.dispatch(&empty_handle(), "greet", json!({ "name": "L" })))
+                .unwrap();
+        assert_eq!(parsed["error"]["kind"], "handler");
+        assert_eq!(parsed["error"]["message"], "nope");
+    }
+
+    #[test]
+    fn every_failure_kind_carries_its_method_and_a_distinct_kind() {
+        let mut reg = Registry::new();
+        reg.add("handler", |_h, _p| Err(Error::Handler("bad".to_owned())));
+        reg.add("boom", |_h, _p| panic!("exploded"));
+        reg.add_typed("typed", |_h, _p: String| Ok(_p));
+        reg.add("runtime", |_h, _p| {
+            Err::<Value, _>(Error::Runtime("loop".to_owned()))
+        });
+        reg.set_window_allowlist(HashMap::from([("preview".to_owned(), vec![])]));
+
+        let cases: [(&str, &str, Option<&str>); 6] = [
+            ("handler", "handler", None),
+            ("boom", "panic", None),
+            ("typed", "payload", None),
+            ("runtime", "runtime", None),
+            ("missing", "unknown", None),
+            ("handler", "unknown", Some("preview")),
+        ];
+        for (method, expected, label) in cases {
+            let body = match label {
+                Some(label) => dispatch_for_payload(&reg, Some(label), method, json!(1)),
+                None => dispatch_for_payload(&reg, None, method, json!(1)),
+            };
+            let parsed: Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(parsed["error"]["kind"], expected, "{method}: {body}");
+            assert_eq!(parsed["error"]["method"], method, "{method}: {body}");
+            assert!(parsed["error"]["message"].is_string(), "{method}: {body}");
+        }
+    }
+
+    #[cfg(feature = "rt")]
+    #[test]
+    fn an_async_fn_runs_off_the_caller_thread_and_answers() {
+        #[derive(crate::serde::Deserialize)]
+        struct Args {
+            ms: u64,
+        }
+
+        let caller = std::thread::current().id();
+        let mut reg = Registry::new();
+        reg.add_async_fn("wait", move |_h, args: Args| async move {
+            tokio::time::sleep(std::time::Duration::from_millis(args.ms)).await;
+            Ok(json!({ "off_caller_thread": std::thread::current().id() != caller }))
+        });
+
+        let (tx, rx) = mpsc::channel();
+        reg.dispatch_deferred(&empty_handle(), "wait", json!({ "ms": 1 }), move |body| {
+            let _ = tx.send(body);
+        });
+        let body = rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        assert_eq!(body, r#"{"ok":{"off_caller_thread":true}}"#);
+    }
+
+    #[cfg(feature = "rt")]
+    #[test]
+    fn an_async_fn_rejects_a_bad_payload_without_touching_the_runtime() {
+        #[derive(crate::serde::Deserialize)]
+        struct Args {
+            #[allow(dead_code)]
+            ms: u64,
+        }
+
+        let mut reg = Registry::new();
+        reg.add_async_fn("wait", |_h, args: Args| async move { Ok(json!(args.ms)) });
+
+        let (tx, rx) = mpsc::channel();
+        reg.dispatch_deferred(&empty_handle(), "wait", json!("nope"), move |body| {
+            let _ = tx.send(body);
+        });
+        let body = rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["error"]["kind"], "payload", "{body}");
+        assert_eq!(parsed["error"]["method"], "wait");
+    }
+
+    #[cfg(feature = "rt")]
+    #[test]
+    fn a_panicking_async_fn_reports_a_panic_instead_of_hanging_the_page() {
+        #[derive(crate::serde::Deserialize)]
+        struct Args {
+            #[allow(dead_code)]
+            ms: u64,
+        }
+
+        let mut reg = Registry::new();
+        reg.add_async_fn("boom", |_h, _args: Args| async move {
+            panic!("async exploded");
+            #[allow(unreachable_code)]
+            Ok::<Value, Error>(Value::Null)
+        });
+
+        let (tx, rx) = mpsc::channel();
+        reg.dispatch_deferred(&empty_handle(), "boom", json!({ "ms": 1 }), move |body| {
+            let _ = tx.send(body);
+        });
+        let body = rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["error"]["kind"], "panic", "{body}");
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("async exploded"),
+            "{body}"
+        );
+    }
+
+    #[cfg(feature = "rt")]
+    #[test]
+    fn an_async_fn_respects_the_allowlist_like_every_other_command() {
+        #[derive(crate::serde::Deserialize)]
+        struct Args {
+            #[allow(dead_code)]
+            ms: u64,
+        }
+
+        let mut reg = Registry::new();
+        reg.add_async_fn("wait", |_h, args: Args| async move { Ok(json!(args.ms)) });
+        reg.set_allowlist(Some(vec!["other".to_owned()]));
+
+        let (tx, rx) = mpsc::channel();
+        reg.dispatch_deferred(&empty_handle(), "wait", json!({ "ms": 1 }), move |body| {
+            let _ = tx.send(body);
+        });
+        let body = rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        assert!(body.contains(r#""kind":"unknown""#), "{body}");
+    }
+
+    #[cfg(feature = "rt")]
+    #[test]
+    fn many_concurrent_async_fns_all_answer() {
+        #[derive(crate::serde::Deserialize)]
+        struct Args {
+            n: u64,
+        }
+
+        let mut reg = std::sync::Arc::new(Registry::new());
+        std::sync::Arc::get_mut(&mut reg).unwrap().add_async_fn(
+            "double",
+            |_h, args: Args| async move { Ok(json!(args.n * 2)) },
+        );
+
+        let (tx, rx) = mpsc::channel();
+        for n in 0..64u64 {
+            let reg = std::sync::Arc::clone(&reg);
+            let tx = tx.clone();
+            let handle = empty_handle();
+            std::thread::spawn(move || {
+                reg.dispatch_deferred(&handle, "double", json!({ "n": n }), move |body| {
+                    let _ = tx.send(body);
+                });
+            });
+        }
+        drop(tx);
+
+        let mut seen = std::collections::HashSet::new();
+        for body in rx.iter().take(64) {
+            let parsed: Value = serde_json::from_str(&body).unwrap();
+            let value = parsed["ok"].as_u64().unwrap_or_else(|| panic!("{body}"));
+            seen.insert(value / 2);
+        }
+        assert_eq!(seen.len(), 64, "every request must answer exactly once");
+    }
+
+    #[test]
     fn handler_errors_become_error_envelopes() {
         let mut reg = Registry::new();
         reg.add("boom", |_h, _p| Err(Error::Handler("kaboom".into())));
@@ -468,7 +902,9 @@ mod tests {
         });
         let out = reg.dispatch(&empty_handle(), "boom", Value::Null);
         let parsed: Value = serde_json::from_str(&out).unwrap();
-        let message = parsed["error"]["message"].as_str().expect("error envelope expected");
+        let message = parsed["error"]["message"]
+            .as_str()
+            .expect("error envelope expected");
         assert!(message.starts_with("command panicked:"), "{message}");
         assert!(message.contains("index out of bounds"), "{message}");
     }
@@ -479,8 +915,13 @@ mod tests {
         reg.add("boom", |_h, _p| panic!("kaboom"));
         reg.add("fine", |_h, _p| Ok(json!("still here")));
 
-        assert!(reg.dispatch(&empty_handle(), "boom", Value::Null).contains("error"));
-        assert_eq!(reg.dispatch(&empty_handle(), "fine", Value::Null), r#"{"ok":"still here"}"#);
+        assert!(reg
+            .dispatch(&empty_handle(), "boom", Value::Null)
+            .contains("error"));
+        assert_eq!(
+            reg.dispatch(&empty_handle(), "fine", Value::Null),
+            r#"{"ok":"still here"}"#
+        );
     }
 
     #[test]
@@ -533,7 +974,10 @@ mod tests {
     #[test]
     fn endpoint_paths_are_recognised_and_decoded() {
         assert_eq!(method_from_path("/__kiln/greet").as_deref(), Some("greet"));
-        assert_eq!(method_from_path("/__kiln/save%20file").as_deref(), Some("save file"));
+        assert_eq!(
+            method_from_path("/__kiln/save%20file").as_deref(),
+            Some("save file")
+        );
         assert_eq!(method_from_path("/__kiln/"), None);
         assert_eq!(method_from_path("/index.html"), None);
         assert_eq!(method_from_path("/"), None);

@@ -11,13 +11,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-/** Names registered with `.command("x", ..)` or `.async_command("x", ..)`.
+/** Names registered with `.command("x", ..)`, `.async_command("x", ..)`,
+ *  `.command_typed("x", ..)` or `.async_fn("x", ..)`.
  *
  *  Comments are stripped first: a commented-out registration is not a
  *  registration, and treating one as real would hide a genuine gap. */
 export function registeredCommands(source: string): string[] {
   const names = new Set<string>();
-  const pattern = /\.(?:async_)?command\(\s*"([^"]+)"/g;
+  const pattern = /\.(?:async_)?(?:command(?:_typed)?|fn)\(\s*"([^"]+)"/g;
   for (const match of stripComments(source).matchAll(pattern)) names.add(match[1]!);
   return [...names].sort();
 }
@@ -37,7 +38,7 @@ export function registeredCommands(source: string): string[] {
  *  A pass therefore means "no statically visible mismatch", never "parity". */
 export function unreadableRegistrations(source: string): string[] {
   const stripped = stripComments(source);
-  const calls = /\.(?:async_)?command\s*\(\s*([^,)\n]*)/g;
+  const calls = /\.(?:async_)?(?:command(?:_typed)?|fn)\s*\(\s*([^,)\n]*)/g;
   const names: string[] = [];
   for (const match of stripped.matchAll(calls)) {
     const argument = match[1]!.trim();

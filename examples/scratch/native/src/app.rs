@@ -367,7 +367,7 @@ pub fn build(app_name: &'static str) -> App {
         })
         .on_ready({
             let state = Arc::clone(&state);
-            move |app: &AppHandle| {
+            move |app: &AppHandle, _window: &str| {
                 let snapshot = state.lock().unwrap().snapshot();
                 app.emit("ready", snapshot);
             }

@@ -31,6 +31,53 @@
     out.after = "THREW " + error;
   }
 
+  // Typed commands: a wrong shape must come back as `payload`, naming the
+  // command, without the handler body ever running.
+  try {
+    const res = await fetch(`${ORIGIN}/__kiln/typed_echo`, {
+      method: "POST",
+      body: JSON.stringify({ text: 5 }),
+    });
+    const envelope = await res.json();
+    out.typed = envelope.error ? `${envelope.error.kind}/${envelope.error.method}` : "ALLOWED";
+  } catch (error) {
+    out.typed = "THREW " + error;
+  }
+
+  // The same command with the right shape, to prove the typed path works at all
+  // and not merely that it rejects.
+  try {
+    const res = await fetch(`${ORIGIN}/__kiln/typed_echo`, {
+      method: "POST",
+      body: JSON.stringify({ text: "ok" }),
+    });
+    out.typedOk = (await res.json()).ok;
+  } catch (error) {
+    out.typedOk = "THREW " + error;
+  }
+
+  // Storage: persist a value, read it back. This is the only check that proves
+  // the platform data directory is writable on the target under test.
+  try {
+    await fetch(`${ORIGIN}/__kiln/storage.set`, {
+      method: "POST",
+      body: JSON.stringify({ key: "probe", value: { round: 1 } }),
+    });
+    const got = await (
+      await fetch(`${ORIGIN}/__kiln/storage.get`, {
+        method: "POST",
+        body: JSON.stringify({ key: "probe" }),
+      })
+    ).json();
+    out.storage = got.ok;
+    const keys = await (
+      await fetch(`${ORIGIN}/__kiln/storage.keys`, { method: "POST", body: "null" })
+    ).json();
+    out.storageKeys = Array.isArray(keys.ok) && keys.ok.indexOf("probe") !== -1;
+  } catch (error) {
+    out.storage = "THREW " + error;
+  }
+
   out.nav = await new Promise((resolve) => {
     const before = location.href;
     try {

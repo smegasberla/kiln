@@ -7,10 +7,23 @@
 
 #[cfg(not(feature = "hot-reload"))]
 use commands::{commands, Kind};
-use kiln::serde_json::Value;
 use kiln::{App, AppHandle, Error, WindowOptions};
 
 mod assets;
+
+/// Arguments for `open_settings`.
+///
+/// The shell-side commands take real types: a page that sends a string where a
+/// number belongs gets a `payload` rejection naming the command, instead of a
+/// silently ignored field that looks like a UI bug. Types come from the
+/// re-exported `serde`, so this needs no extra dependency.
+#[derive(Debug, Default, kiln::serde::Deserialize)]
+#[serde(crate = "kiln::serde")]
+struct SettingsArgs {
+    /// Window title. Omitted by pages that just want the default.
+    #[serde(default)]
+    title: Option<String>,
+}
 
 fn main() -> Result<(), Error> {
     let mut app = App::new()
@@ -19,15 +32,15 @@ fn main() -> Result<(), Error> {
         // Shell-service commands stay in the shell: they take an
         // `&AppHandle`, and a handle type cannot cross the cdylib boundary
         // soundly, so they register statically in dev and release alike.
-        .command("open_settings", |app: &AppHandle, _payload: Value| {
+        .command_typed("open_settings", |app: &AppHandle, args: SettingsArgs| {
             app.open_window(WindowOptions {
                 label: Some("settings".to_owned()),
-                title: Some("Settings".to_owned()),
+                title: Some(args.title.unwrap_or_else(|| "Settings".to_owned())),
                 width: Some(420.0),
                 height: Some(320.0),
                 entry: None,
             })?;
-            Ok(Value::Null)
+            Ok(())
         })
         // Keep devtools available in the build your users run (F12).
         .devtools(true);

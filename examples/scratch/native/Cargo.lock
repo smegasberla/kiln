@@ -1130,6 +1130,7 @@ dependencies = [
  "muda",
  "ndk-context",
  "rfd",
+ "serde",
  "serde_json",
  "tao",
  "tray-icon",

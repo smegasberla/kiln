@@ -5,8 +5,10 @@ edition = "2021"
 
 [dependencies]
 # `full` turns on the native menu bar, file dialogs, update checks, and devtools
-# in release builds. Remove `features` to get the minimal shell.
-kiln = { {{KILN_PATH_INNER}}, features = ["full"] }
+# in release builds. `storage` adds the JSON-file key/value store the page
+# reaches as `storage.get|set|delete|keys|path`. Drop either to slim the shell;
+# add `rt` when you want `async fn` commands on a shared runtime.
+kiln = { {{KILN_PATH_INNER}}, features = ["full", "storage"] }
 # The command table. Release links it statically; `kiln dev` additionally
 # builds it as a cdylib and hot-swaps it into the running shell.
 commands = { path = "commands", package = "{{CRATE}}-commands" }

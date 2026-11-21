@@ -14,7 +14,11 @@ the user-selected focus.
 
 ## T1 — High value, modest effort
 
-### 1. Typed commands instead of `serde_json::Value` everywhere
+All five landed. Each item's acceptance criterion is asserted by a test, and the
+typed-command rejection and the storage round-trip are also checked over the real
+IPC transport by `scripts/verify.ts` on Linux, Windows and macOS.
+
+### 1. Typed commands instead of `serde_json::Value` everywhere — **DONE**
 
 **Evidence.** Every handler is `Fn(&AppHandle, Value) -> Result<Value, Error>`
 (`kiln/src/ipc.rs`, `kiln/src/lib.rs` builder methods). Every example hand-rolls
@@ -42,7 +46,7 @@ path; a payload of the wrong shape returns a structured error (see §3); at leas
 one example and the CLI template use the typed API; raw `Value` commands still
 compile unchanged.
 
-### 2. Async commands on a real async runtime, not raw threads
+### 2. Async commands on a real async runtime, not raw threads — **DONE**
 
 **Evidence.** `async_command` handlers spawn worker threads and bridge
 sync/async with callbacks inside `ipc.rs`/`lib.rs`. There is no way to write an
@@ -70,7 +74,7 @@ current path (see §14).
 async work does not block painting; the feature is off by default and the minimal
 shell's binary size is unchanged without it.
 
-### 3. Structured error kind on the wire
+### 3. Structured error kind on the wire — **DONE**
 
 **Evidence.** The envelope is `{"ok": ...} | {"error": "..."}` with a plain
 string. Internally the shell already distinguishes `Error::Handler`,
@@ -93,7 +97,7 @@ object. The variants already exist internally — this exposes them.
 allowlist deny, unknown method) emits a distinct `kind`; a test covers each; old
 clients reading the string form are unaffected.
 
-### 4. First-class lifecycle hooks on the builder
+### 4. First-class lifecycle hooks on the builder — **DONE**
 
 **Evidence.** `ReadyHook` exists but is internal plumbing; docs tell users to
 "call from a handler or `on_ready`" without defining what `on_ready` is.
@@ -112,7 +116,7 @@ per window. Reuse the existing lifecycle queue for ordering guarantees.
 internal APIs; a test asserts exactly-once per window; the API is in README and
 rustdoc.
 
-### 5. A documented data-persistence story
+### 5. A documented data-persistence story — **DONE**
 
 **Evidence.** `__kiln_data_dir` returns a path; docs say "null means no
 persistence available" and stop there (`kiln/src/platform.rs:140-152`). No built-in

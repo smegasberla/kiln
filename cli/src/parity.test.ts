@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkParity, diffCommands, effectiveCommands, registeredCommands } from "./parity.ts";
+import {
+  checkParity,
+  diffCommands,
+  effectiveCommands,
+  registeredCommands,
+  unreadableRegistrations,
+} from "./parity.ts";
 
 const source = `
   App::new()
@@ -14,6 +20,26 @@ const source = `
 describe("registeredCommands", () => {
   test("finds sync and async registrations", () => {
     expect(registeredCommands(source)).toEqual(["greet", "open_settings", "slow_task"]);
+  });
+
+  test("finds typed and async_fn registrations too", () => {
+    // The typed surface registers under the same IPC path, so parity has to
+    // see it; a regex that only knew `.command(` would silently miss these and
+    // report a clean diff for a command only one shell has.
+    const typed = `
+      App::new()
+        .command_typed("greet", |_a, p: GreetArgs| Ok(p))
+        .async_fn("fetch_data", |_a, q: Query| async move { Ok(q) })
+        .command("plain", |_a, _p| Ok(null))
+    `;
+    expect(registeredCommands(typed)).toEqual(["fetch_data", "greet", "plain"]);
+    expect(unreadableRegistrations(typed)).toEqual([]);
+  });
+
+  test("a dynamic name is reported, not silently trusted", () => {
+    expect(unreadableRegistrations(`.command(name_of_it, |_a, _p| Ok(null))`)).toEqual([
+      "name_of_it",
+    ]);
   });
 
   test("ignores comments mentioning commands", () => {

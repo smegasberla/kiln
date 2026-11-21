@@ -11,6 +11,14 @@
 use kiln::serde_json::{json, Value};
 use kiln::{App, AssetTable};
 
+/// A typed command's argument type. `text` is required, so a payload without it
+/// is rejected before the body runs, which is the behaviour the probe measures.
+#[derive(kiln::serde::Deserialize)]
+#[serde(crate = "kiln::serde")]
+struct EchoArgs {
+    text: String,
+}
+
 const INDEX: &[u8] = include_bytes!("../index.html");
 const PROBE: &[u8] = include_bytes!("../probe.js");
 
@@ -45,6 +53,7 @@ fn main() -> Result<(), kiln::Error> {
             Ok(Value::Null)
         })
         .command("alive", |_app, _payload| Ok(json!("still alive")))
+        .command_typed("typed_echo", |_app, args: EchoArgs| Ok(json!(args.text)))
         .command("report", |_app, payload| {
             println!("PROBE {payload}");
             Ok(Value::Null)

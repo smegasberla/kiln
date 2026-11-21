@@ -48,6 +48,13 @@ jobs:
       - name: Unit tests
         run: cargo test -p kiln --features full --lib
 
+      # The `rt` feature carries its own tests (async dispatch, panics inside a
+      # future, allowlist gating, 64 concurrent requests). `full` does not enable
+      # it, so without this step those tests only ever ran on a contributor's
+      # machine.
+      - name: Unit tests (async runtime)
+        run: cargo test -p kiln --features full,rt --lib
+
       # The documented contributor command. It used to die inside ndk-sys
       # before running a single test (the android crate's deps were
       # unconditional); now that they are target-gated, run it verbatim so
@@ -56,7 +63,7 @@ jobs:
         run: cargo test --workspace
 
       - name: Clippy
-        run: cargo clippy -p kiln --features full --all-targets -- -D warnings
+        run: cargo clippy -p kiln --features full,rt,storage --all-targets -- -D warnings
 
       - name: Typecheck and test CLI
         working-directory: cli
@@ -108,6 +115,9 @@ jobs:
       - name: Unit tests
         run: cargo test -p kiln --features full --lib
 
+      - name: Unit tests (async runtime)
+        run: cargo test -p kiln --features full,rt --lib
+
       - name: Build the full-feature shell
         run: cargo build -p kiln --features full --examples
 
@@ -140,6 +150,7 @@ jobs:
             pkg install -y webkit2-gtk_41 || pkg install -y webkit2-gtk41 || pkg install -y webkit2-gtk || pkg install -y webkit2-gtk4 || (pkg search -q webkit; exit 1)
           run: |
             cargo test -p kiln --features full --lib
+            cargo test -p kiln --features full,rt --lib
             cargo build -p kiln --features full --examples
             cargo build -p kiln --examples
 
@@ -310,6 +321,9 @@ jobs:
       # the OS SDK.
       - name: Unit tests
         run: cargo test -p kiln --features full --lib
+
+      - name: Unit tests (async runtime)
+        run: cargo test -p kiln --features full,rt --lib
 
       - name: Build the full-feature shell
         run: cargo build -p kiln --features full --examples

@@ -9,6 +9,41 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Added
 
+- `command_typed` / `App::command_typed`: a command whose argument and reply are
+  concrete types. The payload is deserialized before the body runs, so a wrong
+  shape is rejected as `kind: "payload"` naming the command instead of becoming a
+  silently defaulted field. The raw `Value` API is unchanged and still the base
+  layer; `kiln` re-exports `serde` so the derives need no extra dependency.
+
+- The `rt` feature and `App::async_fn`: register a real `async fn` command. Its
+  future runs on one shared multi-threaded runtime rather than a thread per call,
+  so in-flight load costs tasks instead of stacks. A panic inside the future is
+  caught and reported as `kind: "panic"` instead of leaving the page waiting
+  forever. Off by default; the minimal shell pays nothing and its binary size is
+  unchanged.
+
+- The error envelope now carries `method` alongside `message` and `kind`, so a
+  page can tell which command failed without parsing text. Every failure path
+  (unknown, allowlist denial, bad payload, handler `Err`, panic, runtime) is
+  covered by a test asserting both fields and a distinct kind.
+
+- `on_ready` gains the window label and fires exactly once per window, including
+  windows opened later; a page reload no longer fires it again.
+  **Breaking:** the closure now takes `(&AppHandle, &str)`. The label is what
+  makes the hook usable in a multi-window app, and adding it later would have been
+  a second break; `.on_ready(|app, _window| …)` is the one-line migration.
+  `on_window_close(|app, label| …)` is new and fires once as a window goes away.
+  Both are documented builder methods and both are duplicate-event guarded.
+
+- The `storage` feature (part of `full`): `storage.get|set|delete|keys|path`
+  backed by a JSON file in the platform data directory, written with an atomic
+  rename and capped at 4 MiB. A missing data directory or corrupt file is an error
+  envelope the page can handle, never a silently empty store.
+
+- The probe fixture and `scripts/verify.ts` now assert the typed-command rejection
+  and the storage round-trip through the real IPC transport on every OS, so the
+  T1 surface is proven on WebKitGTK, WebView2 and WKWebView rather than assumed.
+
 - Per-window command allowlists: a `windows` map in `kiln.json`, keyed by window
   label, narrows what that window may call to the intersection of its own list
   and the global `commands` list. The label is resolved by the shell from the

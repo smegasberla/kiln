@@ -112,8 +112,17 @@ One endpoint, one envelope, in both directions:
 ```
 POST kiln://localhost/__kiln/<method>
 body:     <payload as JSON, or null>
-response: {"ok": <json>}  |  {"error": "<message>"}
+response: {"ok": <json>}
+        | {"error": {"message": "<text>", "kind": "<class>", "method": "<name>"}}
 ```
+
+`kind` is one of `unknown` (unregistered, or withheld by an allowlist), `payload`
+(the request did not match the handler's argument type), `handler` (the handler
+returned `Err`), `panic` (the handler panicked; the app kept running), or
+`runtime` (the webview or event loop failed). A page branches on the kind instead
+of matching message text, and `method` says which command failed even when the
+call came from a nested helper. Older clients that only read a string error still
+work: the release notes are the only place the shape is promised.
 
 The page gets a tiny shim installed before any of its own scripts run:
 
@@ -238,9 +247,43 @@ and `Referrer-Policy: no-referrer`. A remote `<script>`, a remote `fetch`, and
 `eval` are all blocked in release builds. Dev mode relaxes only what Bun's HMR
 needs (inline + eval scripts, `ws:`, loopback) and never opens the internet.
 
+**Commands can be typed.** `command_typed` takes an argument type and a reply
+type, deserializes before the body runs, and rejects a wrong shape as
+`kind: "payload"` instead of silently defaulting a field. The raw
+`.command(name, |app, Value|)` form stays the base layer and is unchanged.
+
+```rust
+#[derive(kiln::serde::Deserialize)]
+#[serde(crate = "kiln::serde")]
+struct ShiftArgs { #[serde(default)] delta: i64 }
+
+app.command_typed("shift", |app, args: ShiftArgs| {
+    Ok(json!({ "value": args.delta }))
+});
+```
+
+`#[serde(crate = "kiln::serde")]` is what keeps an app down to one dependency: the
+derive macro has to name `serde`, and `kiln` re-exports it.
+
 **Slow work does not freeze the window.** `async_command` runs handlers on a
-worker thread and replies when done. Sync `command` stays available for cheap
-lookups. Native dialogs are async for exactly this reason.
+worker thread and replies when done; with the `rt` feature, `async_fn` takes a
+real `async fn` and runs its future on one shared runtime instead of a thread per
+call, so a thousand in-flight requests cost a thousand tasks rather than a
+thousand stacks. Sync `command` stays available for cheap lookups. Native dialogs
+are async for exactly this reason.
+
+**Settings persist with no crate of your own.** The `storage` feature (part of
+`full`) adds `storage.get|set|delete|keys|path`, a JSON file in the platform data
+directory written with an atomic rename so a crash mid-save cannot truncate it.
+No writable data directory (and every other failure) comes back as an error
+envelope the page can handle rather than a silently empty store.
+
+**Lifecycle hooks are first-class.** `on_ready(|app, window_label| …)` fires
+exactly once per window, including windows opened later, and is the first moment
+`emit_to` is safe for that window. `on_window_close(|app, window_label| …)` fires
+once as a window goes away, which is where per-window state should be persisted.
+Both are guarded against duplicate platform events, so "once" is a property of the
+code and not of the webview's event habits.
 
 **Crashes leave a trace.** A panic hook records every panic with its location to
 an optional log file and an in-memory ring buffer readable through

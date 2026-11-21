@@ -30,7 +30,7 @@ fn main() -> Result<(), Error> {
                 .item(TrayItem::new("new", "New note"))
                 .item(TrayItem::new("show", "Show Scratch")),
         )
-        .on_ready(|app| {
+        .on_ready(|app, _window| {
             // The directory is what a user actually needs from a notebook app, so
             // it is reported once the page can display it.
             if let Some(dir) = kiln::data_dir("Scratch") {
