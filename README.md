@@ -286,7 +286,7 @@ to keep it, and leaving it out removes it.
 | Multi-window, tray, menus, updater | supported | supported, as opt-in features |
 | Crash reporting | plugin / sentry | panic hook + local ring buffer, no upload |
 | Panic in a command | aborts the app by default | contained, reported to the page as an error |
-| Mobile | supported | Android: supported. iOS: supported on the simulator — `kiln ios build\|run\|verify`, provisional until the CI simulator job goes green once; device builds need signing, which stays with the app owner |
+| Mobile | supported | Android: supported. iOS: supported on the simulator — `kiln ios build\|run\|verify`, green in CI since run 44788618663; device builds need signing, which stays with the app owner |
 
 The tradeoff is deliberate: Tauri is a full application platform, Kiln is the
 core shell with nothing speculative bolted on. What was cut, and what would bring
@@ -333,12 +333,12 @@ kiln package --icon icon.png
 | Platform | Build | Tests | Notes |
 | --- | --- | --- | --- |
 | Linux x86_64 | yes | yes | WebKitGTK 4.1 |
-| Windows x86_64 | `cargo check` clean | CI | WebView2, preinstalled on Win10 2020+/11 |
-| macOS x86_64 / arm64 | `cargo check` clean | CI | WKWebView |
+| Windows x86_64 | `cargo check` clean | yes (CI) | WebView2, preinstalled on Win10 2020+/11 |
+| macOS x86_64 / arm64 | `cargo check` clean | yes (CI) | WKWebView |
 | FreeBSD | CI (VM) | CI (VM) | GTK 3 + WebKit2GTK, same code path as Linux |
 | NetBSD | `cargo check` | graph only | unverified at runtime |
 | Android arm64 / x86_64 | yes | yes (emulator, CI) | wry's IPC handler, same commands and security policy |
-| iOS aarch64 (simulator) | yes | provisional (simulator, CI not yet green) | WKWebView via wry's `WKURLSchemeHandler`: the desktop origin and policy, no branch |
+| iOS aarch64 (simulator) | yes | yes (simulator, CI) | WKWebView via wry's `WKURLSchemeHandler`: the desktop origin and policy, no branch |
 
 BSD works because wry and tao already treat it as a webkitgtk/GTK platform: two
 things blocked it (tao's default `dbus` feature and a Linux-only `gtk`
@@ -414,15 +414,18 @@ tooling are in place (IOS-PLAN.md Phases I-1 to I-3). `kiln init` writes an
 the staticlib, stages it and runs `xcodebuild` for the simulator (or `--target
 device`, unsigned); `run` boots and drives a simulator over `simctl`; `verify`
 asserts the app reaches its Rust entry. Command parity is now three-way.
-What is *not* done yet: nothing iOS-side has been executed on a Mac — every
-build and verify above needs macOS with Xcode, and the Phase I-4 CI job that
-proves it has not gone green yet.
+The Phase I-4 CI job that proves this now passes: the simulator job boots the
+app, waits for its Rust entry, and drives a command round-trip (run 44788618663
+onward). What is still unverified is anything the simulator job does not script,
+and a device build, which CI does not attempt.
 
 `cargo check` for Windows and macOS runs in this repo. macOS cannot be *fully*
 compiled off a Mac (its Objective-C shims need the Apple SDK), so `ci.yml`
 builds and tests both natively on GitHub runners. Treat "compiles" and "runs"
-as different claims: the runtime behaviour on Windows and macOS has not been
-exercised by hand yet.
+as different claims: both engines now run the verification harness in CI —
+WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows — and all three
+assert the same guarantees. What CI cannot do is exercise them by hand, so an
+interaction CI does not script is still unverified on Windows and macOS.
 
 ## Compatibility policy
 

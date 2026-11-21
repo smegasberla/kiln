@@ -222,24 +222,25 @@ addressed; finding 3 is now fixed by the per-window allowlist (2026-11-19).
 | # | Severity | Status | Where |
 | --- | --- | --- | --- |
 | 1 | HIGH | **fixed** — the Android exception was removed rather than documented: the release policy ships `script-src 'self'` after the emulator measurement under C2 showed the bridge survives it. The policy is a named const (`ANDROID_RELEASE_CSP`) pinned by `the_android_release_string_is_pinned_where_every_target_runs` on every target, not only where the Android branch compiles, and the contradicting module comment is gone | `kiln/src/security.rs` |
-| 2 | MEDIUM-HIGH | **fixed in CI** — Windows and macOS jobs now run `bun scripts/verify.ts`; the harness gained a `win32` `.exe` suffix, a loud Linux-only skip for the `ldd` composition check, and per-platform skip reporting | `scripts/verify.ts`, `.github/workflows/ci.yml` |
+| 2 | MEDIUM-HIGH | **fixed and proven on all three engines** — Windows and macOS jobs run `bun scripts/verify.ts`, green on WebKitGTK, WKWebView (run 44788618663) and WebView2 (run 44901970031). WebView2 needed a real fix first: it rewrites the page origin like Android, which `f5b70d0` made the page origin follow. The harness gained a `win32` `.exe` suffix, a loud Linux-only skip for the `ldd` composition check, and per-platform skip reporting | `scripts/verify.ts`, `kiln/src/security.rs`, `kiln/src/lib.rs`, `.github/workflows/ci.yml` |
 | 3 | MEDIUM | **fixed** — `kiln.json` gains a `windows` map keyed by window label; a listed window's surface is the intersection of its list and the global allowlist, resolved from the calling webview, never from anything the page sends. Unit tests cover narrowing and the no-widening rule; `verify.ts` opens a second window with an empty list and asserts the denied envelope | `kiln/src/config.rs`, `kiln/src/ipc.rs`, `kiln/src/lib.rs`, `scripts/verify.ts` |
 | 4 | MEDIUM | **fixed** — `reporting::set_reporter` installs an application sink that receives every record, so telemetry no longer requires forking the module; philosophy (nothing phones home by default) unchanged | `kiln/src/reporting.rs` |
 | 5 | LOW-MEDIUM | **fixed** — `unreadableRegistrations()` surfaces dynamic-name registrations in the parity result message, and the parser's known limitations are documented in-file | `cli/src/parity.ts` |
 | 6 | LOW | **fixed** — the crash log rotates at 512 KiB to `<name>.old` (the previous file survives); tested by `the_log_file_stays_bounded`, which drives more entries than the cap and asserts the bound and the rotation | `kiln/src/reporting.rs` |
 | 7 | LOW | **fixed** — `CHANGELOG.md` added (Keep a Changelog), README gained a "Compatibility policy" section naming what is and is not breaking | `CHANGELOG.md`, `README.md` |
 
-Caveats kept honest: finding 2's fix is CI-only and proves itself the first time
-the Windows and macOS jobs run. macOS has: its `End-to-end verification` step passed
-in run 44788618663, so the WKWebView harness is green on real hardware. WebView2
-is **not**: the Windows job's first real run of the harness (attempt 1 of run
-44795282689) passed Shell/init/build/size/no-JS-runtime/launch-skip and then failed
-three checks — `embedded round-trip + emit` killed by its 30s timeout, `dev-mode
-round-trip` with `TypeError: Failed to fetch`, and `second window narrowed by
-kiln.json` with no reply — so finding 2 stays open until WebView2 divergence is
-diagnosed. The Android CSP exception that finding 1's fix documented was later
-removed after the emulator measurement recorded under C2, so that caveat is
-closed.
+Caveats kept honest: finding 2's fix is CI-only, and it has now proved itself on
+both engines. WKWebView passed in run 44788618663; WebView2 passed in run
+44901970031 after `f5b70d0`, which is the run where all eight jobs went green.
+That first Windows run was not noise: it exposed a real bug — WebView2 cannot
+intercept a custom scheme, so wry rewrites the page origin there the way it does
+on Android, and Kiln had only taught Android about it, so no command was
+reachable at all on Windows until `f5b70d0` made the page origin follow the
+target. No `runtime behaviour on Windows is unverified` caveat remains, and the
+guarantees (panic containment, remote script/fetch/eval blocked, navigation
+locked down, second-window narrowing) are asserted on all three webview engines.
+The Android CSP exception that finding 1's fix documented was removed after the
+emulator measurement recorded under C2, so that caveat is closed too.
 
 ---
 
@@ -324,12 +325,14 @@ emulator, and the guard test pins it.
 future contributor) → D (minutes) → C1 (design, then code) → C2 (needs an
 emulator session).
 
-## What the iOS CI job measures — provisional until it goes green (2026-11-19)
+## What the iOS CI job measures — green since run 44788618663 (2026-11-20)
 
-Phases I-1 to I-5 of `IOS-PLAN.md` are landed. The CI macOS runner is the
-first real execution of the whole iOS chain, and as of this writing that job
-has not passed once: what follows is what the job asserts, not a measurement,
-until the run is green:
+Phases I-1 to I-5 of `IOS-PLAN.md` are landed, and the CI macOS runner has
+executed the whole chain. The job first failed (run 44758659109); two real bugs
+came out of it — the simulator console was being joined as byte values so no
+marker could ever match, and tao's `create_window` aborts before
+`UIApplicationMain` has run — and both are fixed. What follows is now a
+measurement, not a description:
 
 - a fresh `kiln init` builds for the simulator: frontend bundled and embedded
   in the staticlib, staged, linked through the XcodeGen-generated project, and
