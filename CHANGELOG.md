@@ -214,6 +214,13 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Added
 
+- A second registration of the same command name is now recorded as a
+  diagnostics event. Registration stays last-wins, but silent replacement is
+  data loss: the first handler's command stops existing and the second answers
+  calls meant for it, and the registry cannot report it afterwards because only
+  the survivor is left in the map. Two plugins claiming `open` is the realistic
+  case, and `callable()` cannot see it.
+
 - Plugins: a crate implements `Plugin` and an app installs it with
   `App::plugin(...)`. There is no manifest, no codegen and no new dependency,
   because Cargo already resolves versions and the linker already fails when a

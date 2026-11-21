@@ -18,8 +18,25 @@ impl super::registry::Registry {
     where
         F: Fn(&AppHandle, Value) -> Result<Value, Error> + Send + Sync + 'static,
     {
-        self.handlers
-            .insert(method.to_owned(), Handler::Sync(Box::new(handler)));
+        self.insert_handler(method, Handler::Sync(Box::new(handler)));
+    }
+
+    /// The one place a handler enters the table.
+    ///
+    /// Registration is last-wins in a flat namespace, so a name claimed twice is
+    /// silent data loss: the first handler's command stops existing and the
+    /// second answers calls meant for it. Two plugins that both claim `open` is
+    /// the realistic case, and nothing else reports it, not even [`Self::callable`]
+    /// since only the survivor is left in the map.
+    fn insert_handler(&mut self, method: &str, handler: Handler) {
+        if self.handlers.contains_key(method) {
+            crate::diagnostics::record(
+                crate::diagnostics::Kind::App,
+                "command registered twice",
+                serde_json::json!({ "command": method }),
+            );
+        }
+        self.handlers.insert(method.to_owned(), handler);
     }
 
     /// Register a handler that runs on a worker thread.
@@ -31,10 +48,7 @@ impl super::registry::Registry {
     where
         F: Fn(AppHandle, Value) -> Result<Value, Error> + Send + Sync + 'static,
     {
-        self.handlers.insert(
-            method.to_owned(),
-            Handler::Async(std::sync::Arc::new(handler)),
-        );
+        self.insert_handler(method, Handler::Async(std::sync::Arc::new(handler)));
     }
 
     /// Register a command whose argument and reply are concrete types.
@@ -78,8 +92,9 @@ impl super::registry::Registry {
     {
         let handler = std::sync::Arc::new(handler);
         let method = method.to_owned();
-        self.handlers.insert(
-            method.clone(),
+        let name = method.clone();
+        self.insert_handler(
+            &name,
             Handler::Deferred(Box::new(move |handle, payload, done| {
                 let args = match decode_args::<P>(payload) {
                     Ok(args) => args,

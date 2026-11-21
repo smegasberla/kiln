@@ -733,3 +733,26 @@ fn a_path_that_decodes_to_invalid_utf8_is_refused() {
     assert_eq!(method_from_path("/__kiln/%ff"), None);
     assert_eq!(method_from_path("/__kiln/%c3"), None);
 }
+
+#[test]
+fn a_command_registered_twice_is_recorded() {
+    // Last-wins is the behaviour, but silent replacement is data loss: the first
+    // handler's command stops existing and the second answers calls meant for it.
+    // A plugin claiming a name the app already uses is the realistic case, and
+    // the map alone cannot report it afterwards, only the survivor is left.
+    crate::diagnostics::clear();
+    let mut reg = Registry::new();
+    reg.add("dup", |_h, _p| Ok(serde_json::json!("first")));
+    reg.add("dup", |_h, _p| Ok(serde_json::json!("second")));
+
+    let recorded = crate::diagnostics::entries()
+        .iter()
+        .any(|entry| entry.to_string().contains("command registered twice"));
+    assert!(recorded, "a duplicate registration must leave a trace");
+
+    // Still last-wins, so the fix is a warning and not a behaviour change.
+    assert_eq!(
+        crate::transport::respond(&reg, &empty_handle(), "dup", Value::Null),
+        r#"{"ok":"second"}"#
+    );
+}
