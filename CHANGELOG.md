@@ -9,6 +9,12 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Added
 
+- Per-window command allowlists: a `windows` map in `kiln.json`, keyed by window
+  label, narrows what that window may call to the intersection of its own list
+  and the global `commands` list. The label is resolved by the shell from the
+  calling webview, never from the request, so a page cannot claim another
+  window's surface; a window with no entry keeps the global allowlist.
+
 - Install scripts: `install.sh` for Linux, macOS and the BSDs, `install.ps1`
   for Windows. Each installs the toolchain dependencies (system webview dev
   files, Git, Bun, Rust) when they are missing, builds the CLI from source —
