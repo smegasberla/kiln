@@ -9,6 +9,37 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Added
 
+- `kiln dev --verbose`: structured diagnostics for development. Records each hot
+  library swap with its rebuild-to-reload latency, every dispatch at or above
+  50 ms, refused navigations, dropped bridge messages, and handler panics, keeps
+  the last 256 in a bounded buffer, and prints a per-command latency table when the
+  app exits. The buffer is reachable from the page as `__kiln_diagnostics` (and
+  `__kiln_diagnostics_enabled` for the flag alone), which is the only way to read
+  it on a platform with no terminal. Everything is off unless `KILN_VERBOSE` is
+  set, so a release build pays a single cached atomic load per dispatch and
+  allocates nothing; `Registry::latencies` and `latency_report` expose the samples
+  to a shell or a test.
+
+- `kiln::rt::sleep`: sleep on the shared async runtime without an app depending on
+  a particular executor. The choice of runtime behind `async_fn` is `kiln`'s, and a
+  handler that needs a delay should not have to name it.
+
+- The documentation book in `docs/`, and `kiln docs` to build it. Eighteen
+  chapters from "Your first app" through packaging, the security model,
+  multi-window, hot reload, diagnostics and the platform matrix, rendered by mdBook
+  with no external asset so it works offline. `kiln docs --check` validates the
+  structure without mdBook installed: every chapter listed in `SUMMARY.md`, every
+  link real, no duplicate entries, no orphan pages. CI runs the check. When mdBook
+  is missing it names the exact release asset for the host (tar.gz on Unix, zip on
+  Windows, arm64 and x64) rather than only linking the releases page, because the
+  machine that cannot `cargo install mdbook` is the one that needs the download.
+
+- `bun scripts/bench.ts --dispatch`: measures `command` (UI thread),
+  `async_command` (thread per call) and `async_fn` (task per call) on the real
+  registry path at concurrency 1, 8, 64 and 512, reports the raw dispatch floor of
+  each, finds the first concurrency where the pool wins, and gates on it. The
+  measured answer is in the book's benchmark chapter.
+
 - Per-window command allowlists at runtime: `WindowOptions.allowlist` (also
   accepted as `commands` from the page) narrows one window's surface, intersected
   with the global `commands` list, so a window that renders untrusted content can

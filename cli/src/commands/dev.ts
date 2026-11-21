@@ -24,12 +24,16 @@ import { join } from "node:path";
 import { spawn } from "../proc.ts";
 import { writeAssetTable } from "../pipeline.ts";
 import { crateDir, requireProject } from "../project.ts";
-import { stringFlag, type Args } from "../args.ts";
+import { boolFlag, stringFlag, type Args } from "../args.ts";
 
 export async function dev(args: Args): Promise<number> {
   const project = requireProject();
   const port = Number(stringFlag(args, "port") ?? 5177);
   const crate = crateDir(project);
+  // The shell reads this itself; the CLI only has to hand it over. Turning it
+  // off explicitly matters when a shell profile already exports it for every
+  // cargo invocation, which would otherwise make `kiln dev` verbose by accident.
+  const verbose = boolFlag(args, "verbose");
 
   if (!Bun.which("cargo")) {
     console.error("kiln: `cargo` is not on PATH; install Rust first");
@@ -50,10 +54,12 @@ export async function dev(args: Args): Promise<number> {
 
   let initial: { gen: number } | null = null;
   let stopWatching = () => {};
-  const env: Record<string, string> = {
-    ...process.env,
-    KILN_DEV_URL: `http://127.0.0.1:${port}`,
-  } as Record<string, string>;
+  const env: Record<string, string> = devEnv(port, verbose);
+
+  if (verbose) {
+    // Said once, so the extra lines below are not mistaken for a problem.
+    console.log("  verbose: reloads, slow commands and refused navigations are recorded");
+  }
 
   if (hotSupported) {
     // Generation 1 exists before the shell starts, so its first load is
@@ -83,6 +89,21 @@ export async function dev(args: Args): Promise<number> {
   stopWatching();
   server.stop(true);
   return code;
+}
+
+/** The environment the shell is launched with.
+ *
+ *  Exported so a test can assert the two flags this decides: `KILN_DEV_URL` must
+ *  point at this port, and `KILN_VERBOSE` must be set *either way*. Leaving it
+ *  unset when off would inherit a developer's shell export and silently turn
+ *  diagnostics on for everybody's `kiln dev`.
+ */
+export function devEnv(port: number, verbose: boolean, base: Record<string, string | undefined> = process.env): Record<string, string> {
+  return {
+    ...base,
+    KILN_DEV_URL: `http://127.0.0.1:${port}`,
+    KILN_VERBOSE: verbose ? "1" : "0",
+  } as Record<string, string>;
 }
 
 /** The platform's cdylib filename for the `commands` lib target. */

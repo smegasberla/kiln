@@ -65,6 +65,10 @@ pub struct Registry {
     /// a release build never compiles it.
     #[cfg(feature = "hot-reload")]
     hot: Option<std::sync::Arc<crate::hot::HotLib>>,
+    /// Dispatch latency samples per method, filled only while diagnostics are
+    /// on. Behind an `Arc` so an async dispatch can record from its worker
+    /// thread without borrowing the registry.
+    latency: std::sync::Arc<std::sync::Mutex<HashMap<String, Vec<u64>>>>,
 }
 
 impl Default for Registry {
@@ -78,6 +82,7 @@ impl Registry {
         Self {
             handlers: HashMap::new(),
             allow: None,
+            latency: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
             window_allow: std::sync::Arc::new(std::sync::RwLock::new(HashMap::new())),
             #[cfg(feature = "hot-reload")]
             hot: None,
@@ -338,19 +343,32 @@ impl Registry {
                 &Error::UnknownMethod(method.to_owned()),
             ));
         }
+        // Timed around the handler, not the whole transport: this is the number
+        // `kiln dev --verbose` reports as command latency. Reading a `bool` is
+        // free and `Instant::now` is skipped entirely when diagnostics are off.
+        let timed = crate::diagnostics::enabled();
+
         match self.handlers.get(method) {
             Some(Handler::Sync(handler)) => {
-                done(ok_or_error(method, run_isolated(handler, handle, payload)))
+                let started = timed.then(std::time::Instant::now);
+                let outcome = run_isolated(handler, handle, payload);
+                if let Some(started) = started {
+                    self.note_latency(method, started.elapsed());
+                }
+                done(ok_or_error(method, outcome))
             }
             Some(Handler::Async(handler)) => {
                 let handler = std::sync::Arc::clone(handler);
                 let handle = handle.clone();
                 let method = method.to_owned();
+                let samples = std::sync::Arc::clone(&self.latency);
                 std::thread::spawn(move || {
-                    done(ok_or_error(
-                        &method,
-                        run_isolated_async(&handler, handle, payload),
-                    ));
+                    let started = timed.then(std::time::Instant::now);
+                    let outcome = run_isolated_async(&handler, handle, payload);
+                    if let Some(started) = started {
+                        record_latency(&samples, &method, started.elapsed());
+                    }
+                    done(ok_or_error(&method, outcome));
                 });
             }
             #[cfg(feature = "rt")]
@@ -359,6 +377,57 @@ impl Registry {
             }
             None => self.dispatch_unclaimed(method, payload, done),
         }
+    }
+
+    /// Latency totals per command, for the diagnostics report.
+    ///
+    /// Only populated while diagnostics are on, so a release build allocates
+    /// nothing here. The map is per registry, which is per app, so two apps in
+    /// one process (a test harness, say) do not share numbers.
+    pub fn latencies(&self) -> Vec<(String, crate::diagnostics::Summary)> {
+        let samples = self
+            .latency
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut out: Vec<(String, crate::diagnostics::Summary)> = samples
+            .iter()
+            .map(|(method, times)| (method.clone(), crate::diagnostics::Summary::of(times)))
+            .collect();
+        // Slowest mean first: the list is read to find the command to fix.
+        out.sort_by_key(|left| std::cmp::Reverse(left.1.mean_ms()));
+        out
+    }
+
+    /// Every command's latency as JSON, slowest first.
+    ///
+    /// This is what `kiln dev --verbose` prints when the app exits: the map is
+    /// already sorted by mean, so the first lines are the commands to look at.
+    pub fn latency_report(&self) -> serde_json::Value {
+        let entries: Vec<serde_json::Value> = self
+            .latencies()
+            .into_iter()
+            .map(|(method, summary)| {
+                let mut value = summary.to_json();
+                value["method"] = serde_json::Value::String(method);
+                value
+            })
+            .collect();
+        serde_json::Value::Array(entries)
+    }
+
+    /// Drop the latency samples, so a dev session can measure one scenario.
+    pub fn clear_latencies(&self) -> usize {
+        let mut samples = self
+            .latency
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let count: usize = samples.values().map(Vec::len).sum();
+        samples.clear();
+        count
+    }
+
+    fn note_latency(&self, method: &str, elapsed: std::time::Duration) {
+        record_latency(&self.latency, method, elapsed);
     }
 
     /// A name no static handler claimed. Release: unknown command, exactly as
@@ -487,9 +556,61 @@ pub(crate) fn error_envelope_for(method: &str, error: &Error) -> String {
     format!(r#"{{"error":{{"message":{message},"kind":{kind},"method":{method}}}}}"#)
 }
 
+/// How many latency samples to keep per command.
+///
+/// Bounded because a dev session can call one command a million times; a
+/// percentile over the last thousand calls answers "is this slow" just as well
+/// as over all of them.
+const LATENCY_SAMPLES: usize = 1_000;
+
+/// A dispatch at or above this many milliseconds is recorded by name.
+///
+/// 50 ms is three frames at 60 Hz: below it a command is invisible to the user,
+/// above it a window visibly hitches.
+const SLOW_COMMAND_MS: u64 = 50;
+
+/// Record one dispatch against a shared sample map.
+///
+/// Free-standing so the async path can call it from a worker thread that does
+/// not have the registry, and so the sync path and the async path cannot drift
+/// into measuring different things.
+fn record_latency(
+    samples: &std::sync::Mutex<HashMap<String, Vec<u64>>>,
+    method: &str,
+    elapsed: std::time::Duration,
+) {
+    if !crate::diagnostics::enabled() {
+        return;
+    }
+    let millis = elapsed.as_millis() as u64;
+    {
+        let mut samples = samples
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let slot = samples.entry(method.to_owned()).or_default();
+        if slot.len() == LATENCY_SAMPLES {
+            slot.remove(0);
+        }
+        slot.push(millis);
+    }
+    // One line per slow call, which is the one a developer acts on; the aggregate
+    // comes from `latencies()` rather than flooding stderr on every dispatch.
+    if millis >= SLOW_COMMAND_MS {
+        crate::diagnostics::record(
+            crate::diagnostics::Kind::Dispatch,
+            "slow command",
+            serde_json::json!({ "method": method, "ms": millis }),
+        );
+    }
+}
+
 fn report_panic(payload: &(dyn std::any::Any + Send)) -> Error {
     let message = panic_message(payload);
-    eprintln!("kiln: handler panicked: {message}");
+    crate::diagnostics::record(
+        crate::diagnostics::Kind::App,
+        "handler panicked",
+        serde_json::json!({ "message": message }),
+    );
     Error::Panic(message)
 }
 
@@ -636,6 +757,61 @@ mod tests {
         )]));
         assert!(dispatch_for(&reg, Some("preview"), "a").contains(r#""ok""#));
         assert!(dispatch_for(&reg, Some("preview"), "b").contains(r#""kind":"unknown""#));
+    }
+
+    #[test]
+    fn dispatch_latency_is_recorded_only_while_diagnostics_are_on() {
+        let _guard = crate::diagnostics::test_guard();
+        // One test, both states: a release build must not pay for the map, and a
+        // verbose dev run must actually get numbers out of it.
+        let reg = registry_with(&["greet"]);
+        let handle = crate::AppHandle::detached_for_tests();
+
+        crate::diagnostics::set_enabled(false);
+        assert_eq!(reg.clear_latencies(), 0);
+        let _ = reg.dispatch(&handle, "greet", Value::Null);
+        assert!(
+            reg.latencies().is_empty(),
+            "a timed dispatch must cost nothing when diagnostics are off"
+        );
+
+        crate::diagnostics::set_enabled(true);
+        let _ = reg.dispatch(&handle, "greet", Value::Null);
+        let _ = reg.dispatch(&handle, "greet", Value::Null);
+        let latencies = reg.latencies();
+        crate::diagnostics::set_enabled(false);
+
+        let (method, summary) = latencies.first().expect("a timed command is reported");
+        assert_eq!(method, "greet");
+        assert_eq!(summary.count, 2, "both calls are counted");
+        assert_eq!(reg.clear_latencies(), 2);
+        assert!(reg.latencies().is_empty());
+    }
+
+    #[test]
+    fn a_latency_report_is_sorted_slowest_first_and_names_each_command() {
+        let _guard = crate::diagnostics::test_guard();
+        let reg = registry_with(&["fast", "slow"]);
+        let handle = crate::AppHandle::detached_for_tests();
+        crate::diagnostics::set_enabled(true);
+        let _ = reg.dispatch(&handle, "fast", Value::Null);
+        let _ = reg.dispatch(&handle, "slow", Value::Null);
+        let report = reg.latency_report();
+        crate::diagnostics::set_enabled(false);
+
+        let commands = report.as_array().expect("a report is an array");
+        assert_eq!(commands.len(), 2);
+        for command in commands {
+            assert!(command["method"].is_string());
+            assert!(command["p50_ms"].is_number());
+            assert!(command["count"].as_u64().unwrap_or(0) >= 1);
+        }
+        // Sorted by mean, so a reader takes the first line as the one to fix.
+        let means: Vec<u64> = commands
+            .iter()
+            .map(|command| command["mean_ms"].as_u64().unwrap_or(0))
+            .collect();
+        assert!(means.windows(2).all(|pair| pair[0] >= pair[1]), "{means:?}");
     }
 
     #[test]

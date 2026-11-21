@@ -56,8 +56,10 @@ own noisy runs — re-run it on a quiet machine before quoting these):
 | Direct dependencies | 2 | 3 portable (4 on Linux) |
 
 `bun scripts/bench.ts` and `bun scripts/verify.ts` reproduce those numbers and
-assert the rest of the guarantees. The verifier runs 14 checks and exits non-zero
-if any fails: shell unit tests, embedded round-trip + `emit`, `kiln init`,
+assert the rest of the guarantees. `bun scripts/bench.ts --dispatch` measures the
+async dispatch paths instead, and its result is recorded in
+[the benchmark chapter](docs/src/benchmarks.md). The verifier runs 12 checks and
+exits non-zero if any fails: shell unit tests, embedded round-trip + `emit`, `kiln init`,
 `kiln build`, binary size, no JS runtime embedded, OS webview only, the app
 surviving launch, dev-mode cross-origin invoke, the compiled CLI working with
 neither Bun nor Node on `PATH`, handler panic containment, remote
@@ -98,7 +100,8 @@ Rust commands hot-reload too: `kiln dev` watches `native/commands/src`,
 rebuilds *only* that crate, and swaps the resulting library into the running
 shell — no process restart, no lost window state, and a failed build keeps the
 last good library while the compiler error stays on screen. Every swap prints
-its rebuild-to-reload latency. Release builds never load anything dynamically:
+its rebuild-to-reload latency; `kiln dev --verbose` also records it, together with
+slow commands and refused navigations, so it survives the terminal scrolling. Release builds never load anything dynamically:
 the same command table links statically into the binary, behind a cargo
 feature `kiln build --release` does not enable. Two rules come with this:
 statics inside the commands crate do not survive a reload (keep persistent
@@ -583,6 +586,14 @@ examples/counter/    a real CLI-scaffolded app, kept in-tree and buildable
 examples/scratch/    a notebook app for both platforms: one shared command list,
                      per-note markdown files, menu bar on desktop, PopupMenu and
                      drawer on Android
-scripts/verify.ts    13 end-to-end checks (the acceptance gates)
-scripts/bench.ts     cold-start comparison against the baseline
+scripts/verify.ts    12 end-to-end checks (the acceptance gates)
+scripts/bench.ts     cold-start comparison, plus `--dispatch` for async dispatch
+docs/                the mdBook: `kiln docs` validates and builds it
 ```
+
+The book in `docs/` is generated from the same material as this README plus the
+inline rustdoc, and is the place to point someone who wants a narrative rather
+than a reference: "Your first app", "Commands & payloads", "Security model",
+"Multi-window", "Packaging", "Diagnostics". `kiln docs --check` validates the
+structure (every chapter listed, every link real) and runs in CI without mdBook
+installed; `kiln docs` renders it when mdBook is on `PATH`.

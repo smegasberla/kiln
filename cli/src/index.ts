@@ -10,6 +10,7 @@ import { init } from "./commands/init.ts";
 import { dev } from "./commands/dev.ts";
 import { build } from "./commands/build.ts";
 import { doctor } from "./commands/doctor.ts";
+import { docs } from "./commands/docs.ts";
 import { runPackage } from "./commands/package.ts";
 import * as android from "./commands/android.ts";
 import * as ios from "./commands/ios.ts";
@@ -29,12 +30,14 @@ Commands
   ios build      cross-compile and build the simulator app (or --target device)
   ios run        install and launch on a booted iOS simulator
   ios verify     build, install, launch and assert the Rust entry is reached
+  docs           validate the documentation book, then build it (needs mdbook)
   doctor         check the toolchain and report what is missing
 
 Options
   --name <n>     init: app name (default: from directory)
   --force        init: write into a non-empty directory
   --port <n>     dev: dev server port (default 5177)
+  --verbose      dev: record reloads, slow commands and refused navigations
   --debug        build: cargo debug profile instead of release
   --size         build: print the binary size
   --out <path>   build: copy the binary somewhere
@@ -47,6 +50,7 @@ Options
   --aab          android build: signed Android App Bundle for Play upload
   --target       ios build: sim (default) or device (unsigned build)
   --json         doctor: machine-readable output
+  --check        docs: validate SUMMARY.md and the chapters, build nothing
   -h, --help     show this help
 
 Docs
@@ -77,6 +81,9 @@ switch (args.command) {
     break;
   case "doctor":
     code = await doctor(args);
+    break;
+  case "docs":
+    code = await docs(args);
     break;
   case "package":
     code = await runPackage(args);

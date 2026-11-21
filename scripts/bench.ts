@@ -12,6 +12,16 @@ import { join, resolve } from "node:path";
 
 const repo = resolve(import.meta.dir, "..");
 const RUNS = 7;
+let dispatchFailed = false;
+
+// `--dispatch` measures the async dispatch path instead of cold start, and answers
+// the question §2 of the plan asks: is a task-per-call runtime worth its
+// dependency, or is thread-per-call good enough? The probe binary prints raw
+// measurements; the assertions live here so the gate is in one place.
+if (process.argv.includes("--dispatch")) {
+  await dispatch();
+  process.exit(dispatchFailed ? 1 : 0);
+}
 
 async function timeToReady(binary: string, cwd = repo): Promise<number | null> {
   const proc = Bun.spawn([binary], {
@@ -25,6 +35,99 @@ async function timeToReady(binary: string, cwd = repo): Promise<number | null> {
   clearTimeout(timer);
   const match = /READY (\d+)/.exec(out);
   return match ? Number(match[1]) : null;
+}
+
+/** Build the dispatch benchmark, run it, and assert what it reports. */
+async function dispatch(): Promise<void> {
+  const bin = join(repo, "target", "release", `dispatch${process.platform === "win32" ? ".exe" : ""}`);
+  const build = Bun.spawn(["cargo", "build", "-p", "kiln-probe", "--bin", "dispatch", "--release"], {
+    cwd: repo,
+    stdout: "pipe",
+    stderr: "inherit",
+  });
+  if ((await build.exited) !== 0) {
+    console.log("FAIL dispatch benchmark did not build");
+    dispatchFailed = true;
+    return;
+  }
+
+  const proc = Bun.spawn([bin], {
+    cwd: repo,
+    env: { ...process.env, KILN_BENCH_CALLS: "300" },
+    stdout: "pipe",
+    stderr: "inherit",
+  });
+  const output = await new Response(proc.stdout).text();
+  if ((await proc.exited) !== 0) {
+    console.log("FAIL dispatch benchmark exited non-zero");
+    dispatchFailed = true;
+    return;
+  }
+
+  const json = (tag: string) => {
+    const match = new RegExp(`^${tag} (.+)$`, "m").exec(output);
+    return match ? JSON.parse(match[1]!) : null;
+  };
+  const meta = json("BENCH-META");
+  const decision = json("BENCH-DECISION");
+  const crossover = json("BENCH-CROSSOVER");
+  const overheads: Record<string, number> = {};
+  for (const match of output.matchAll(/^BENCH-OVERHEAD (.+)$/gm)) {
+    const row = JSON.parse(match[1]!);
+    overheads[row.method] = row.per_call_us;
+  }
+
+  const rows = [...output.matchAll(/^BENCH (.+)$/gm)].map((match) => JSON.parse(match[1]!));
+  for (const row of rows) {
+    console.log(
+      `  ${String(row.method).padEnd(7)} c=${String(row.concurrency).padStart(3)}  ` +
+        `${row.per_call_ms.toFixed(3)} ms/call`,
+    );
+  }
+
+  const record = (name: string, ok: boolean, detail: string) => {
+    if (!ok) dispatchFailed = true;
+    console.log(`${ok ? "ok  " : "FAIL"} ${name.padEnd(34)} ${detail}`);
+  };
+
+  // A benchmark that ran the wrong thing is worse than none: assert the shape
+  // before asserting the conclusion.
+  record(
+    "benchmark ran every path",
+    meta !== null && rows.length > 0 && ["sync", "thread", "pool"].every((m) => overheads[m] !== undefined),
+    meta ? `${meta.calls} calls, levels ${meta.levels.join("/")}, work ${meta.work_ms} ms` : "no output",
+  );
+  // No work at all: dispatch overhead alone. The sync path must be the cheapest,
+  // or the registry itself is doing something surprising.
+  record(
+    "sync dispatch is the cheapest path",
+    overheads.sync !== undefined && overheads.sync < Math.min(overheads.thread ?? Infinity, overheads.pool ?? Infinity),
+    `sync ${overheads.sync?.toFixed(1)} us vs thread ${overheads.thread?.toFixed(0)} / pool ${overheads.pool?.toFixed(0)} us`,
+  );
+  // The decision §2 asks for. Not "the pool is always faster": it must win where a
+  // pool is for, and the crossover is reported so the number is not a claim.
+  record(
+    "the pool wins where concurrency exists",
+    decision !== null && decision.pooled_ms < decision.thread_per_call_ms,
+    decision
+      ? `at ${decision.concurrency}: pool ${decision.pooled_ms.toFixed(3)} ms vs thread ${decision.thread_per_call_ms.toFixed(3)} ms (${decision.ratio.toFixed(2)}x)`
+      : "no decision line",
+  );
+  record(
+    "crossover is reported",
+    crossover !== null && Number.isInteger(crossover.concurrency),
+    crossover ? `first level where the pool wins: ${crossover.concurrency}` : "no crossover line",
+  );
+  // The runtime is a dependency, so it must not be slower sequentially either. It
+  // is allowed to be close: a sleeping thread and a timer entry both cost about
+  // the sleep itself.
+  const sequential = (method: string) =>
+    rows.find((row) => row.method === method && row.concurrency === 1)?.per_call_ms ?? Infinity;
+  record(
+    "the pool is competitive sequentially",
+    sequential("pool") < sequential("thread") * 1.5,
+    `pool ${sequential("pool").toFixed(3)} ms vs thread ${sequential("thread").toFixed(3)} ms per call at concurrency 1`,
+  );
 }
 
 function median(values: number[]): number {

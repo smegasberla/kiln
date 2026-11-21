@@ -45,6 +45,7 @@
 
 mod assets;
 mod config;
+pub mod diagnostics;
 mod dispatch;
 mod error;
 mod event_loop;
@@ -101,6 +102,7 @@ use serde_json::Value;
 #[cfg(not(target_os = "ios"))]
 use tao::window::WindowBuilder;
 use tao::{
+    event::Event,
     event_loop::{EventLoopBuilder, EventLoopProxy},
     keyboard::{KeyCode, ModifiersState},
     window::Window,
@@ -727,6 +729,9 @@ impl App {
     /// the frontend hot-reloads without touching Rust. Release builds ignore it.
     pub fn run(self) -> Result<(), Error> {
         reporting::install_panic_hook();
+        // Read before anything else can log, so a startup denial is recorded
+        // instead of only printed.
+        diagnostics::init_from_env();
 
         let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
         let proxy = event_loop.create_proxy();
@@ -909,9 +914,45 @@ impl App {
             tray: tray_handle,
         };
 
+        // `run` never returns, so the summary cannot live after it. The loop's
+        // own teardown event is the last moment the totals are complete, and it
+        // is also the only hook that fires on every platform.
+        let summary_registry = Arc::clone(&registry);
         event_loop.run(move |event, event_loop, control_flow| {
+            if matches!(event, Event::LoopDestroyed) {
+                print_latency_summary(&summary_registry);
+            }
             event_loop::dispatch(&mut state, event, event_loop, control_flow);
         });
+    }
+}
+
+/// Print the per-command latency table when a verbose dev session exits.
+///
+/// Printed rather than only recorded: the developer is looking at the terminal
+/// when the app closes, and the buffer is about to go away with the process. The
+/// table is empty when diagnostics were off, so this is a no-op in a normal run.
+fn print_latency_summary(registry: &Registry) {
+    if !diagnostics::enabled() {
+        return;
+    }
+    let report = registry.latency_report();
+    let Some(commands) = report.as_array() else {
+        return;
+    };
+    if commands.is_empty() {
+        return;
+    }
+    eprintln!("kiln: command latency, slowest first:");
+    for command in commands {
+        eprintln!(
+            "  {:<28} p50 {} ms  p95 {} ms  max {} ms  n {}",
+            command["method"].as_str().unwrap_or("?"),
+            command["p50_ms"],
+            command["p95_ms"],
+            command["max_ms"],
+            command["count"],
+        );
     }
 }
 
@@ -944,7 +985,18 @@ fn build_factory(
             .with_devtools(devtools && cfg!(any(debug_assertions, feature = "devtools")))
             .with_initialization_script(&shim)
             .with_navigation_handler(move |url| {
-                security::navigation_allowed(&url, nav_origin.as_deref())
+                let allowed = security::navigation_allowed(&url, nav_origin.as_deref());
+                if !allowed {
+                    // The one place a page can learn why its link did nothing,
+                    // and the only trace a developer gets that the policy, not
+                    // the page, was what refused.
+                    crate::diagnostics::record(
+                        crate::diagnostics::Kind::Security,
+                        "navigation refused",
+                        serde_json::json!({ "url": url, "dev_origin": nav_origin }),
+                    );
+                }
+                allowed
             })
             .with_asynchronous_custom_protocol(
                 SCHEME.into(),
@@ -1266,6 +1318,23 @@ fn register_builtins(registry: &mut Registry, config: &Config) {
         Ok(serde_json::json!(reporting::entries()))
     });
 
+    // Dev diagnostics: what `kiln dev --verbose` prints, in the form a page can
+    // render. Answers even when verbose is off, because the buffer is what
+    // records the last few reloads and denials, not a live-tailing feature.
+    registry.add("__kiln_diagnostics", |_app, payload| {
+        let keep = payload.get("tail").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let enabled = diagnostics::enabled();
+        let entries = match keep {
+            0 => diagnostics::entries(),
+            keep => diagnostics::tail(keep),
+        };
+        Ok(serde_json::json!({ "verbose": enabled, "entries": entries }))
+    });
+
+    registry.add("__kiln_diagnostics_enabled", |_app, _payload| {
+        Ok(serde_json::json!({ "verbose": diagnostics::enabled() }))
+    });
+
     // A page that writes user data needs somewhere to put it, and the answer
     // differs per OS. Answered here rather than in the shim so the page never
     // has to guess a platform. `null` means it could not be determined, which
@@ -1536,6 +1605,7 @@ mod tests {
         for name in [
             "__kiln_version",
             "__kiln_reports",
+            "__kiln_diagnostics",
             "__kiln_open_window",
             "__kiln_windows",
             "__kiln_close_window",

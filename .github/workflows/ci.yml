@@ -72,6 +72,12 @@ jobs:
           bun run typecheck
           bun test
 
+      # The book is documentation that has to stay buildable: an orphan chapter or
+      # a SUMMARY link to a missing file fails here, without needing mdBook
+      # installed (`--check` validates structure only).
+      - name: Documentation book
+        run: bun cli/src/index.ts docs --check
+
       - name: Install script (checkout build)
         run: |
           sh -n install.sh

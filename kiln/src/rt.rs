@@ -67,6 +67,15 @@ where
     runtime().spawn(future);
 }
 
+/// Sleep for a duration on the shared runtime.
+///
+/// Re-exported so a handler can await a delay without depending on a particular
+/// async runtime: which one backs `async_fn` is `kiln`'s choice, not an app's, and
+/// hard-coding `tokio::time` in an app couples it to that choice.
+pub async fn sleep(duration: std::time::Duration) {
+    tokio::time::sleep(duration).await;
+}
+
 /// `true` once the runtime has been built. Tests use it to prove that a
 /// synchronous app never pays for the runtime.
 pub fn started() -> bool {

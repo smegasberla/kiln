@@ -237,24 +237,53 @@ test asserts the placeholder is replaced and the version is at least 2.
 
 ## T3 — Polish and operations
 
-### 11. `kiln dev` structured diagnostics
+### 11. `kiln dev` structured diagnostics — **DONE**
 
 Currently relies on eprintln + Bun dev output. A `--verbose` mode surfacing:
 hot-lib generation on each swap, reload latency (already measured as
 `built_at` in `hot.rs`), CSP/navigation denials in dev, command dispatch
 latency.
 
-### 12. Benchmark the async dispatch path
+**Landed.** `kiln dev --verbose` sets `KILN_VERBOSE=1`; the shell records every
+hot swap (generation, rebuild-to-reload latency), every dispatch at or above
+50 ms, every refused navigation, every dropped bridge message and every handler
+panic into a bounded 256-entry buffer, and prints a per-command latency table
+(p50/p95/max) on exit. The buffer is readable from the page through
+`__kiln_diagnostics`, which is what makes it useful on mobile. `kiln/src/
+diagnostics.rs` is `std`-only so the behaviour is identical on every target, and
+12 unit tests cover the line format, the bound, the tail, the summary and the
+enabled flag; two more in `ipc.rs` prove a dispatch is timed when enabled and
+costs nothing when not.
+
+### 12. Benchmark the async dispatch path — **DONE**
 
 `cli/src/bench.ts` exists; measure async dispatch (thread-per-call vs. a pool)
 before changing §2's implementation.
 
-### 13. Documentation site (mdBook)
+**Landed.** `probe/src/bin/dispatch.rs` measures all three registration paths on
+the real `Registry` at concurrency 1/8/64/512 with a 5 ms handler, reports the raw
+dispatch floor of each, and finds the crossover. `bun scripts/bench.ts --dispatch`
+builds and gates it on five assertions. **Decision: keep both, as measured.** The
+pool does not win on latency (a task submit and a thread spawn both cost single
+microseconds against a real handler), but it wins where a pool is for: at 512
+concurrent calls it is 2-3x faster per call and costs 512 tasks instead of 512
+stacks. Sequentially thread-per-call is marginally cheaper (5.3 ms vs 6.2 ms per
+call at 5 ms of work, the difference being spawn versus timer scheduling). So
+`async_fn` stays the recommendation for awaiting handlers and `async_command` for
+merely blocking ones, and that is now a measured claim rather than an opinion.
+
+### 13. Documentation site (mdBook) — **DONE**
 
 Everything lives in README + excellent inline rustdoc. A small mdBook ("Your
 first app", "Commands & payloads", "Security model", "Multi-window",
 "Packaging") generated from the same doc comments would make the framework feel
 finished.
+
+**Landed.** `docs/` is an 18-chapter mdBook covering every requested page plus
+typed commands, the two origins, allowlists, lifecycle, hot reload, diagnostics,
+benchmarks, the platform matrix and the compatibility policy. `kiln docs` builds
+it and `kiln docs --check` validates structure without mdBook; 15 CLI tests cover
+the parser and the checks, and CI runs `--check` on every push.
 
 ---
 

@@ -6,7 +6,7 @@ publish = false
 description = "Test fixture: an app whose commands exist to prove the shell's guarantees"
 
 [dependencies]
-kiln = { path = "../kiln", features = ["storage"] }
+kiln = { path = "../kiln", features = ["storage", "rt"] }
 
 [[bin]]
 name = "kiln-probe"

@@ -127,15 +127,18 @@ impl HotLib {
                     Ok((library, live)) => {
                         let latency = latest.built_at.map(|built| now_ms().saturating_sub(built));
                         this.install(live, library);
-                        match latency {
-                            Some(ms) => eprintln!(
-                                "kiln: hot commands gen {} active (rebuild-to-reload {} ms)",
-                                latest.generation, ms
-                            ),
-                            None => {
-                                eprintln!("kiln: hot commands gen {} active", latest.generation)
-                            }
-                        }
+                        // Kept as well as printed: `kiln dev --verbose` is not
+                        // the only consumer, and a reload that left the window
+                        // blank is diagnosed from this record, not from scrollback.
+                        crate::diagnostics::record(
+                            crate::diagnostics::Kind::HotSwap,
+                            format!("hot commands gen {} active", latest.generation),
+                            serde_json::json!({
+                                "gen": latest.generation,
+                                "rebuild_to_reload_ms": latency,
+                                "path": latest.path,
+                            }),
+                        );
                         // The shell-side state store outlives the library swap,
                         // so the generation it reports is the one that is live.
                         crate::state::note_reload();

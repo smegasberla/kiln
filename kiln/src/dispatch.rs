@@ -33,14 +33,22 @@ pub(crate) fn serve_bridge(
     let parsed: Value = match serde_json::from_str(message) {
         Ok(value) => value,
         Err(_) => {
-            eprintln!("kiln: bridge message is not valid JSON");
+            crate::diagnostics::record(
+                crate::diagnostics::Kind::Bridge,
+                "bridge message is not valid JSON",
+                serde_json::json!({ "bytes": message.len() }),
+            );
             return;
         }
     };
 
     let id = parsed.get("id").cloned().unwrap_or(Value::Null);
     let Some(method) = parsed.get("method").and_then(Value::as_str).map(str::to_owned) else {
-        eprintln!("kiln: bridge message has no method");
+        crate::diagnostics::record(
+            crate::diagnostics::Kind::Bridge,
+            "bridge message has no method",
+            serde_json::json!({ "keys": parsed.as_object().map(|map| map.keys().cloned().collect::<Vec<_>>()) }),
+        );
         return;
     };
     let payload = parsed.get("payload").cloned().unwrap_or(Value::Null);
