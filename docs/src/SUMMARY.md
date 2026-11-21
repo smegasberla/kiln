@@ -20,6 +20,7 @@ If you read nothing else, read [Concepts](concepts.md) and then
 - [Commands & payloads](ipc-contract.md)
   - [Typed commands](typed-commands.md)
   - [Errors the page can branch on](errors.md)
+  - [The App builder, method by method](app-api.md)
 - [Storage](storage.md)
   - [In-process state](state.md)
 - [Plugins](plugins.md)
