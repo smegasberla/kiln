@@ -214,6 +214,17 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Changed
 
+- `ipc.rs` is a directory of eight modules rather than one 1662-line file. The
+  split is by concern, not by size: `registry` holds the table, both allowlists
+  and the worker bound, `register` the `add*` surface, `dispatch` the path from a
+  method name to a response body (where the threat model is enforced), `handler`
+  the handler kinds and panic isolation, `envelope` the bytes a page receives,
+  `metrics` the latency samples, `worker` the permit that bounds thread-per-call
+  handlers, and `path` the endpoint decoder. The tests and the deterministic fuzz
+  module moved beside what they test. Nothing about the envelope, the allowlist
+  or the worker bound changed; the consts and re-exports at `ipc` are unchanged,
+  so `Registry` and `method_from_path` are still where they were.
+
 - The crate root is a map of the shell again, not a thousand-line module. `lib.rs`
   holds the public re-exports, `SCHEME` and `SHIM_PROTOCOL`; everything else moved
   beside it: `app.rs` (the builder, `run`, and `platform_name`), `handle.rs`
