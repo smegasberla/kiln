@@ -212,6 +212,18 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
   the moving `continuous` tag, and runs `cargo test --workspace` verbatim now
   that `kiln-android`'s dependencies are target-gated to Android.
 
+### Changed
+
+- The crate root is a map of the shell again, not a thousand-line module. `lib.rs`
+  holds the public re-exports, `SCHEME` and `SHIM_PROTOCOL`; everything else moved
+  beside it: `app.rs` (the builder, `run`, and `platform_name`), `handle.rs`
+  (`AppHandle`, `UserEvent`, envelope parsing), `hooks.rs` (`Fired` and the hook
+  types), `builtins.rs` (the commands the shell registers), `shell.rs` (webview
+  factory, menu and tray builders, the injected shim, the devtools shortcut),
+  `transport.rs` (the IPC seam) and `tests.rs`. No behaviour changed and no item
+  left the public API; the split is what makes the next change to any one of them
+  reviewable on its own.
+
 ### Fixed
 
 - `method_from_path` panicked on a multi-byte path. It decoded `%XX` escapes by
