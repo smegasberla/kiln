@@ -4,6 +4,20 @@ Two hooks bracket every window, including ones opened long after startup. Both
 fire exactly once per window, guarded against duplicate platform events, so "once"
 is a property of the code rather than of the webview's event habits.
 
+## Theory: why hooks and not a main loop
+
+In a classic native app you own `main`: you create a window, run a loop, and get
+callbacks. In a webview shell you do not own the loop — `wry` and `tao` do — so
+"when is my window actually ready" is a question only the framework can answer.
+
+Rather than expose every platform event (resize, focus, move, redraw), Voussoir
+exposes the two moments that have a *correctness* requirement:
+
+1. Something must happen when a window becomes able to receive data.
+2. Something must be saved when it goes away.
+
+Everything else belongs in the page, where the content lives.
+
 ## `on_ready`
 
 ```rust
@@ -15,13 +29,24 @@ App::new().on_ready(|app, label| {
 
 `on_ready` fires after the page has loaded and the shim is installed, which is the
 earliest point an event can reach a listener. It fires once per window, in
-whatever order the windows finish loading; a window opened from a command is
-covered as long as the hook was registered before the app started.
+whatever order windows finish loading; a window opened from a command is covered
+as long as the hook was registered before the app started.
 
-Use it for the state a window needs at birth: the current document, the theme, the
-user's preferences. Do not use it to poll: the page can ask for state itself with
-`invoke`, and a hook that emits on a timer is a hook that eventually races the
-window closing.
+**Why after the shim, not after the document?** Because an event delivered before
+`window.voussoir` exists is silently lost: the page has nothing to listen with.
+The point of the hook is to be the first moment a delivery can succeed.
+
+Use it for the state a window needs at birth:
+
+```rust
+.on_ready(|app, label| {
+    let theme = voussoir::state::get("theme").unwrap_or(json!("light"));
+    app.emit_to(Some(label), "theme", theme);
+})
+```
+
+Do not use it to poll. The page can ask for state itself with `invoke`, and a hook
+that emits on a timer is a hook that eventually races the window closing.
 
 ## `on_window_close`
 
@@ -34,31 +59,83 @@ App::new().on_window_close(|_app, label| {
 })
 ```
 
-Fires once as a window goes away, whichever side closed it. This is where per-window
-state belongs: a `Drop` impl on your own struct runs whenever Rust drops it, which
-is not the same moment, and a struct moved into the handler closure is dropped at
-process exit rather than at window close.
+Fires once as a window goes away, whichever side closed it: your code, the user's
+title bar, or the OS.
 
-The hook runs before the window is removed from the open list, so
-`app.windows()` inside it still contains the closing window. That is intentional:
-persisting "the set of windows" is a thing apps do, and it should include the one
-being closed.
+## Theory: why not `Drop`
+
+This is the trap that catches Rust developers specifically. A `Drop` impl runs
+whenever Rust drops the value, which is not the same moment a window closes:
+
+- A struct moved into a command closure is dropped when the registry is dropped,
+  which is at process exit, not at window close.
+- A value captured by `on_ready` outlives the window it was about.
+- On some platforms the process exits without dropping everything at all.
+
+So a `Drop` impl that saves state either runs too late or, worse, not at all.
+`on_window_close` is the hook that runs at the moment the state is still valid.
 
 ## Ordering guarantees
 
-For one window: `on_ready` strictly before any event it emits is delivered, and
-`on_window_close` strictly after the last event it can receive. Across windows
-there is no ordering, which is why both hooks take a label.
+For one window:
+
+- `on_ready` fires strictly before any event it emits is delivered.
+- `on_window_close` fires strictly after the last event it can receive.
+- `on_window_close` runs **before** the window is removed from the open list, so
+  `app.windows()` inside it still contains the closing window.
+
+That last one is intentional: persisting "the set of windows" is a thing apps do,
+and it should include the one being closed. Persisting it without the closing
+window would restore a session that is already missing something.
+
+Across windows there is no ordering, which is why both hooks take a label.
+
+## Platform notes
 
 The first window is a special case on iOS: `tao` cannot build a window before
 `UIApplicationMain` runs, so the first window is requested through the same path a
 command uses and `on_ready` fires once the loop is up. The hook contract is the
 same; only the timing differs.
 
-## Why not window events
+On Android the activity owns the event loop, so both hooks fire from the
+activity's callbacks rather than from a `main` loop. Again: same contract.
+
+## A complete example
+
+```rust
+fn main() -> Result<(), voussoir::Error> {
+    voussoir::App::new()
+        .config(include_str!("../../voussoir.json"))
+        .assets(voussoir::AssetTable)
+        .on_ready(|app, label| {
+            // Seed the page with whatever it needs to render its first frame.
+            let prefs = voussoir::state::get("prefs").unwrap_or(json!({}));
+            app.emit_to(Some(label), "boot", prefs);
+        })
+        .on_window_close(|app, label| {
+            // Persist what the page last reported for this window.
+            if let Some(draft) = voussoir::state::get(&format!("draft:{label}")) {
+                voussoir::state::set(&format!("saved:{label}"), draft);
+            }
+            let open: Vec<_> = app.windows();
+            voussoir::state::set("open_windows", json!(open));
+        })
+        .command("greet", |_app, payload| Ok(payload))
+        .run()
+}
+```
+
+## What is not exposed
 
 Listening to raw window events would give you `Resized`, `Focused`, `Moved` and
-much more. Voussoir does not expose them, because an app that needs to know about focus
-usually needs to know about *content* focus, and that belongs in the page. The two
-hooks here are the ones with a correctness requirement: something must happen at
-the start, and something must be saved at the end.
+much more. Voussoir does not expose them, because an app that needs to know about
+focus usually needs to know about *content* focus, and that belongs in the page
+(`document.activeElement`, `focus`/`blur` events).
+
+Keeping the surface small means the two hooks that exist can be tested for their
+ordering guarantees. A hundred event callbacks could not be.
+
+## Next
+
+- [Multi-window](multi-window.md) — labels and opening windows.
+- [Diagnostics](diagnostics.md) — recording what the hooks did.
