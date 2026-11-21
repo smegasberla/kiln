@@ -33,6 +33,25 @@ and holding nothing else.
 
 ## Why
 
+This started from a reaction to what frameworks hand you when you run `init`. The
+project appears, and before you have written a line you are reading a directory:
+a bundler config, a plugin manifest, capability files, a folder per feature, a
+`build` folder deeper than the app itself. Most of it you will never open, and
+none of it is yours. The cost is not the kilobytes. It is that nobody can hold
+the structure in their head, so every change begins with archaeology: what wrote
+this file, what reads it, what breaks if I delete it.
+
+So the first thing this project is measured on is its own scaffold.
+`voussoir init` gives a desktop app **12 files**. Three are configuration or
+housekeeping (`tsconfig.json`, `voussoir.json`, `.gitignore`) and the other nine
+are the app: two Rust crates, one page, one stylesheet, one script, and the
+generated types for the bridge. There is no bundler config because Bun needs
+none, no capability directory because registered handlers are the allowlist, and
+no plugin manifest because a plugin is just a crate. Every file has an owner and
+a reason, and you can read all twelve in one sitting. Mobile folders are
+generated too, but only for the platforms you asked for, and they sit in their
+own directories rather than thickening the desktop one.
+
 Most desktop shells sit on one side or the other of a line. Electron ships a
 browser. Tauri is a full application platform, with plugins, capability files and
 a build step per feature. Voussoir aims at the narrow middle: **the whole runtime
