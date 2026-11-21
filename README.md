@@ -83,27 +83,19 @@ voussoir doctor                   # toolchain and project checks
 ## Install
 
 One script installs the system webview, Git, Bun and Rust, builds the CLI, and
-puts `voussoir` on `PATH`. Pick the tab for the machine.
+puts `voussoir` on `PATH`.
 
-<table>
-<tr><th>Linux, macOS, BSD</th><th>Windows</th></tr>
-<tr>
-<td>
+Linux, macOS and the BSDs:
 
-```sh
+```curl
 curl -fsSL https://raw.githubusercontent.com/smegasberla/voussoir/master/install.sh | sh
 ```
 
-</td>
-<td>
+Windows:
 
-```powershell
+```irm
 irm https://raw.githubusercontent.com/smegasberla/voussoir/master/install.ps1 | iex
 ```
-
-</td>
-</tr>
-</table>
 
 Both read the script straight from the default branch, so there is no download
 step and nothing to keep up to date. They are the same for a first install and
