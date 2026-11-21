@@ -16,6 +16,7 @@ If you read nothing else, read [Concepts](concepts.md) and then
   - [Command-line reference](cli.md)
 - [Your first app](first-app.md)
   - [How a project is laid out](layout.md)
+  - [Configuring an app](configuration.md)
   - [The frontend](frontend.md)
 - [Commands & payloads](ipc-contract.md)
   - [Typed commands](typed-commands.md)
