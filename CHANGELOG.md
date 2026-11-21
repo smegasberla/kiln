@@ -7,6 +7,12 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-21
+
+First release intended for use outside this repository. The 0.x rule applies:
+the shim is protocol 3, and `Error` gained variants, so this is a minor bump
+rather than a patch.
+
 ### Added
 
 - Worker-thread commands are bounded. `add_async` spawns one thread per call, and

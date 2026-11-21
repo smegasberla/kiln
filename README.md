@@ -1,4 +1,4 @@
-// Kiln
+# Kiln
 
 A desktop app framework where **the shipped app is a Rust binary** and **Bun is
 build-time tooling**. One window, the operating system's own webview, and a
@@ -9,7 +9,7 @@ It is built directly on [`wry`](https://github.com/tauri-apps/wry) (webview) and
 crates Tauri sits on — but not on Tauri itself:
 
 ```
-kiln 0.1.0
+kiln 0.2.0
 ├── serde_json
 ├── tao
 └── wry
@@ -597,3 +597,17 @@ than a reference: "Your first app", "Commands & payloads", "Security model",
 "Multi-window", "Packaging", "Diagnostics". `kiln docs --check` validates the
 structure (every chapter listed, every link real) and runs in CI without mdBook
 installed; `kiln docs` renders it when mdBook is on `PATH`.
+
+## License
+
+Dual-licensed under either
+
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT license](LICENSE-MIT)
+
+at your option. `MIT OR Apache-2.0` is what the crate declares, so a downstream
+app can depend on it under either without asking.
+
+Unless you state otherwise, any contribution you intentionally submit for
+inclusion in this work shall be dual-licensed as above, with no additional
+terms or conditions.
