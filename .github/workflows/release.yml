@@ -35,7 +35,7 @@ jobs:
           bun-version: latest
       - name: Package the example app
         working-directory: examples/counter
-        run: bun ../../cli/src/index.ts package --icon ../../kiln/examples/studio/icon.png
+        run: bun ../../cli/src/index.ts package --icon ../../voussoir/examples/studio/icon.png
       - uses: actions/upload-artifact@v4
         with:
           name: linux-appimage

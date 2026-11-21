@@ -1,18 +1,18 @@
-/** `kiln init [dir]`: write a project.
+/** `voussoir init [dir]`: write a project.
  *
  *  Templates are inlined into the CLI binary at compile time, so an installed
- *  `kiln` has no asset directory to lose, and a scaffolded project contains no
+ *  `voussoir` has no asset directory to lose, and a scaffolded project contains no
  *  generated code: everything under `android/` is either configuration you may
  *  edit or source you own.
  */
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { kilnAndroidDependency, kilnDependency, kilnIosDependency } from "../framework.ts";
+import { voussoirAndroidDependency, voussoirDependency, voussoirIosDependency } from "../framework.ts";
 import { boolFlag, stringFlag, type Args } from "../args.ts";
 import { identifiers } from "../naming.ts";
 
-import kilnJson from "../../template/kiln.json.tmpl" with { type: "text" };
+import voussoirJson from "../../template/voussoir.json.tmpl" with { type: "text" };
 import cargoToml from "../../template/Cargo.toml.tmpl" with { type: "text" };
 import mainRs from "../../template/main.rs.tmpl" with { type: "text" };
 import assetsRs from "../../template/assets.rs.tmpl" with { type: "text" };
@@ -20,7 +20,7 @@ import indexHtml from "../../template/index.html.tmpl" with { type: "text" };
 import mainTs from "../../template/main.ts.tmpl" with { type: "text" };
 import styleCss from "../../template/style.css.tmpl" with { type: "text" };
 import tsconfig from "../../template/tsconfig.json.tmpl" with { type: "text" };
-import kilnDts from "../../template/kiln.d.ts.tmpl" with { type: "text" };
+import voussoirDts from "../../template/voussoir.d.ts.tmpl" with { type: "text" };
 import gitignore from "../../template/gitignore.tmpl" with { type: "text" };
 
 import androidBuildGradle from "../../template/android/build.gradle.tmpl" with { type: "text" };
@@ -29,15 +29,15 @@ import androidProps from "../../template/android/gradle.properties.tmpl" with { 
 import androidManifest from "../../template/android/AndroidManifest.xml.tmpl" with { type: "text" };
 import androidThemes from "../../template/android/themes.xml.tmpl" with { type: "text" };
 import androidActivity from "../../template/android/MainActivity.java.tmpl" with { type: "text" };
-import androidDialogs from "../../template/android/KilnDialogs.java.tmpl" with { type: "text" };
-import androidMenu from "../../template/android/KilnMenu.java.tmpl" with { type: "text" };
-import androidTray from "../../template/android/KilnTray.java.tmpl" with { type: "text" };
-import androidHttp from "../../template/android/KilnHttp.java.tmpl" with { type: "text" };
-import androidMenuTest from "../../template/android/androidTest/KilnMenuTest.java.tmpl" with { type: "text" };
-import androidDialogsTest from "../../template/android/androidTest/KilnDialogsTest.java.tmpl" with { type: "text" };
-import androidLifecycleTest from "../../template/android/androidTest/KilnLifecycleTest.java.tmpl" with { type: "text" };
-import androidDeviceSupport from "../../template/android/androidTest/KilnDeviceSupport.java.tmpl" with { type: "text" };
-import androidDeviceTest from "../../template/android/androidTest/KilnDeviceTest.java.tmpl" with { type: "text" };
+import androidDialogs from "../../template/android/VoussoirDialogs.java.tmpl" with { type: "text" };
+import androidMenu from "../../template/android/VoussoirMenu.java.tmpl" with { type: "text" };
+import androidTray from "../../template/android/VoussoirTray.java.tmpl" with { type: "text" };
+import androidHttp from "../../template/android/VoussoirHttp.java.tmpl" with { type: "text" };
+import androidMenuTest from "../../template/android/androidTest/VoussoirMenuTest.java.tmpl" with { type: "text" };
+import androidDialogsTest from "../../template/android/androidTest/VoussoirDialogsTest.java.tmpl" with { type: "text" };
+import androidLifecycleTest from "../../template/android/androidTest/VoussoirLifecycleTest.java.tmpl" with { type: "text" };
+import androidDeviceSupport from "../../template/android/androidTest/VoussoirDeviceSupport.java.tmpl" with { type: "text" };
+import androidDeviceTest from "../../template/android/androidTest/VoussoirDeviceTest.java.tmpl" with { type: "text" };
 import androidCargo from "../../template/android/Cargo.toml.tmpl" with { type: "text" };
 import androidLib from "../../template/android/lib.rs.tmpl" with { type: "text" };
 import androidAssets from "../../template/android/assets.rs.tmpl" with { type: "text" };
@@ -48,7 +48,7 @@ import iosAssets from "../../template/ios/assets.rs.tmpl" with { type: "text" };
 import iosProjectYml from "../../template/ios/project.yml.tmpl" with { type: "text" };
 import iosPlist from "../../template/ios/Info.plist.tmpl" with { type: "text" };
 import iosMainSwift from "../../template/ios/main.swift.tmpl" with { type: "text" };
-import iosBridge from "../../template/ios/KilnBridge.h.tmpl" with { type: "text" };
+import iosBridge from "../../template/ios/VoussoirBridge.h.tmpl" with { type: "text" };
 
 import commandsCargo from "../../template/commands/Cargo.toml.tmpl" with { type: "text" };
 import commandsLib from "../../template/commands/src/lib.rs.tmpl" with { type: "text" };
@@ -65,7 +65,7 @@ export function init(args: Args): number {
   const ids = identifiers(name, stringFlag(args, "package"));
 
   if (existsSync(dir) && readdirSync(dir).length > 0 && !force) {
-    console.error(`kiln: ${dir} is not empty (pass --force to write anyway)`);
+    console.error(`voussoir: ${dir} is not empty (pass --force to write anyway)`);
     return 1;
   }
 
@@ -77,10 +77,10 @@ export function init(args: Args): number {
     JNI_PACKAGE: ids.jniPackage,
     DOMAIN: ids.domain,
     LEAF: ids.leaf,
-    KILN_PATH: kilnDependency(),
-    KILN_PATH_INNER: kilnDependency(),
-    KILN_ANDROID_PATH_INNER: kilnAndroidDependency(),
-    KILN_IOS_PATH_INNER: kilnIosDependency(),
+    VOUSSOIR_PATH: voussoirDependency(),
+    VOUSSOIR_PATH_INNER: voussoirDependency(),
+    VOUSSOIR_ANDROID_PATH_INNER: voussoirAndroidDependency(),
+    VOUSSOIR_IOS_PATH_INNER: voussoirIosDependency(),
   };
 
   // Every placeholder in one pass, so a template can reference any of them and a
@@ -98,11 +98,11 @@ export function init(args: Args): number {
   console.log(`\nScaffolding ${ids.display} in ${dir}\n`);
 
   // Shared by desktop and Android: one frontend, one config, one set of commands.
-  write("kiln.json", fill(kilnJson));
+  write("voussoir.json", fill(voussoirJson));
   write("index.html", fill(indexHtml));
   write("src/main.ts", fill(mainTs));
   write("src/style.css", fill(styleCss));
-  write("src/kiln.d.ts", kilnDts);
+  write("src/voussoir.d.ts", voussoirDts);
   write("tsconfig.json", fill(tsconfig));
   write(".gitignore", gitignore);
 
@@ -126,23 +126,23 @@ export function init(args: Args): number {
   write("android/app/src/main/res/values/themes.xml", fill(androidThemes));
   const java = `android/app/src/main/java/${ids.package.replace(/\./g, "/")}`;
   write(`${java}/MainActivity.java`, fill(androidActivity));
-  write(`${java}/KilnDialogs.java`, fill(androidDialogs));
-  write(`${java}/KilnMenu.java`, fill(androidMenu));
-  write(`${java}/KilnTray.java`, fill(androidTray));
-  write(`${java}/KilnHttp.java`, fill(androidHttp));
+  write(`${java}/VoussoirDialogs.java`, fill(androidDialogs));
+  write(`${java}/VoussoirMenu.java`, fill(androidMenu));
+  write(`${java}/VoussoirTray.java`, fill(androidTray));
+  write(`${java}/VoussoirHttp.java`, fill(androidHttp));
 
   // Instrumentation tests, in two layers. The first asserts pure data
   // translation, which needs no window: menu ids, intent construction, MIME
   // mapping. The second drives the real round trips on a device, which is the
   // only place a `content://` URI becoming a path, a notification being posted, or
   // a TLS request through the system trust store can be observed at all.
-  // `KilnDeviceSupport` is shared plumbing for both, not a test.
+  // `VoussoirDeviceSupport` is shared plumbing for both, not a test.
   const androidTest = `android/app/src/androidTest/java/${ids.package.replace(/\./g, "/")}`;
-  write(`${androidTest}/KilnMenuTest.java`, fill(androidMenuTest));
-  write(`${androidTest}/KilnDialogsTest.java`, fill(androidDialogsTest));
-  write(`${androidTest}/KilnLifecycleTest.java`, fill(androidLifecycleTest));
-  write(`${androidTest}/KilnDeviceSupport.java`, fill(androidDeviceSupport));
-  write(`${androidTest}/KilnDeviceTest.java`, fill(androidDeviceTest));
+  write(`${androidTest}/VoussoirMenuTest.java`, fill(androidMenuTest));
+  write(`${androidTest}/VoussoirDialogsTest.java`, fill(androidDialogsTest));
+  write(`${androidTest}/VoussoirLifecycleTest.java`, fill(androidLifecycleTest));
+  write(`${androidTest}/VoussoirDeviceSupport.java`, fill(androidDeviceSupport));
+  write(`${androidTest}/VoussoirDeviceTest.java`, fill(androidDeviceTest));
 
   // iOS shell. Same app a third time: Swift's `main.swift` calls the staticlib's
   // entry as the first thing the process does, and XcodeGen generates the
@@ -153,7 +153,7 @@ export function init(args: Args): number {
   write("ios/project.yml", fill(iosProjectYml));
   write("ios/app/Info.plist", fill(iosPlist));
   write("ios/app/main.swift", fill(iosMainSwift));
-  write("ios/app/KilnBridge.h", fill(iosBridge));
+  write("ios/app/VoussoirBridge.h", fill(iosBridge));
 
   // `cd .` is what an in-place scaffold would otherwise print, which is not an
   // instruction. Left out when the project was written into the current directory.
@@ -163,21 +163,21 @@ export function init(args: Args): number {
     next.push(`  cd ${target}`);
   }
   if (!mobile) {
-    next.push("  kiln dev              # desktop, with hot reload");
-    next.push("  kiln build --size     # desktop release binary");
+    next.push("  voussoir dev              # desktop, with hot reload");
+    next.push("  voussoir build --size     # desktop release binary");
   }
-  next.push("  kiln android build    # APK");
-  next.push("  kiln android build --aab  # Play-ready bundle");
-  next.push("  kiln android run      # install and launch on a device or emulator");
-  next.push("  kiln ios build        # simulator app (macOS with Xcode)");
-  next.push("  kiln ios run          # install and launch on a booted simulator");
+  next.push("  voussoir android build    # APK");
+  next.push("  voussoir android build --aab  # Play-ready bundle");
+  next.push("  voussoir android run      # install and launch on a device or emulator");
+  next.push("  voussoir ios build        # simulator app (macOS with Xcode)");
+  next.push("  voussoir ios run          # install and launch on a booted simulator");
   next.push("");
   console.log(next.join("\n"));
   return 0;
 }
 
 function humanize(slug: string): string {
-  const base = slug === "." || slug === "" ? "kiln-app" : slug;
+  const base = slug === "." || slug === "" ? "voussoir-app" : slug;
   return base
     .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())

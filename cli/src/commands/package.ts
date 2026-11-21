@@ -1,4 +1,4 @@
-/** `kiln package`: turn a built app into something a user can install.
+/** `voussoir package`: turn a built app into something a user can install.
  *
  *  Each platform gets the format users there actually expect:
  *
@@ -57,7 +57,7 @@ export function identifierFor(name: string, overridden?: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return `com.kiln.${slug || "app"}`;
+  return `com.voussoir.${slug || "app"}`;
 }
 
 /** The `.desktop` entry an AppImage needs to be launchable and installable. */
@@ -65,7 +65,7 @@ export function desktopEntry(input: PackageInput, execName: string): string {
   return `[Desktop Entry]
 Type=Application
 Name=${input.name}
-Comment=Created with Kiln
+Comment=Created with Voussoir
 Exec=${execName}
 Icon=${input.identifier}
 Terminal=false
@@ -144,7 +144,7 @@ export async function runPackage(args: Args): Promise<number> {
   let iconPath: string | null = null;
   if (icon) {
     if (!existsSync(resolve(icon))) {
-      console.warn(`kiln: icon not found at ${icon}; using the generated default`);
+      console.warn(`voussoir: icon not found at ${icon}; using the generated default`);
     } else {
       iconPath = resolve(icon);
     }
@@ -166,7 +166,7 @@ export async function runPackage(args: Args): Promise<number> {
     extraFiles: [],
   };
 
-  console.log(`kiln package: ${input.name} ${version} (${identifier})`);
+  console.log(`voussoir package: ${input.name} ${version} (${identifier})`);
 
   const built = await packageForPlatform(input);
   console.log(`\n  ${built}`);
@@ -220,8 +220,8 @@ async function packageBsd(input: PackageInput): Promise<string> {
       `version: "${input.version}"`,
       `origin: local/${input.identifier}`,
       `comment: ${input.name}`,
-      "desc: A desktop app built with Kiln",
-      "www: https://github.com/smegasberla/kiln",
+      "desc: A desktop app built with Voussoir",
+      "www: https://github.com/smegasberla/voussoir",
       "maintainer: unset@example.invalid",
       "prefix: /usr/local",
       `abi: "*"`,
@@ -241,7 +241,7 @@ async function packageBsd(input: PackageInput): Promise<string> {
   });
   const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
   if (code !== 0) {
-    console.warn(`kiln: pkg create failed, leaving the staged tree: ${stderr.slice(-200)}`);
+    console.warn(`voussoir: pkg create failed, leaving the staged tree: ${stderr.slice(-200)}`);
     return stage;
   }
   return out;
@@ -283,7 +283,7 @@ async function packageLinux(input: PackageInput): Promise<string> {
     // Without appimagetool the AppDir is still a working portable app, so say
     // what was produced rather than failing the whole build.
     console.warn(
-      "kiln: appimagetool not found; leaving a runnable AppDir instead of an AppImage.\n" +
+      "voussoir: appimagetool not found; leaving a runnable AppDir instead of an AppImage.\n" +
         "      install it from https://github.com/AppImage/appimagetool/releases",
     );
     return appdir;
@@ -339,7 +339,7 @@ async function packageWindows(input: PackageInput): Promise<string> {
       `Windows 11. On older systems install the Evergreen WebView2 Runtime:\r\n` +
       `https://developer.microsoft.com/microsoft-edge/webview2/\r\n\r\n` +
       `Run ${execName} to start. This build is unsigned, so Windows may show a\r\n` +
-      `SmartScreen warning; see the signing notes from \`kiln package\`.\r\n`,
+      `SmartScreen warning; see the signing notes from \`voussoir package\`.\r\n`,
   );
 
   const zip = join(input.appDir, `${basename(execName, ".exe")}-${input.version}-windows-x64.zip`);

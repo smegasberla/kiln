@@ -1,4 +1,4 @@
-/** `kiln doctor`: environment and project checks, without spawning a build.
+/** `voussoir doctor`: environment and project checks, without spawning a build.
  *
  *  Every check reads something real (a binary on PATH, a file, a manifest) so a
  *  green report means the next command will actually work.
@@ -64,20 +64,20 @@ export async function doctor(args: Args): Promise<number> {
     checks.push({
       name: "android NDK",
       ok: Boolean(ndk) && existsSync(ndk!),
-      detail: ndk ?? "ANDROID_NDK_HOME not set (only needed for kiln android)",
+      detail: ndk ?? "ANDROID_NDK_HOME not set (only needed for voussoir android)",
     });
     const adb = Bun.which("adb");
     checks.push({
       name: "adb",
       ok: Boolean(adb),
-      detail: adb ?? "not on PATH (only needed for kiln android run)",
+      detail: adb ?? "not on PATH (only needed for voussoir android run)",
     });
   }
 
   checks.push({
     name: "project",
     ok: Boolean(project),
-    detail: project ? project.root : "no kiln.json in this directory or a parent",
+    detail: project ? project.root : "no voussoir.json in this directory or a parent",
   });
 
   if (project) {

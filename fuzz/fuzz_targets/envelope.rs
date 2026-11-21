@@ -13,7 +13,7 @@
 //! cargo +nightly fuzz run path     -- -max_total_time=60
 //! ```
 //!
-//! The always-on version of these properties lives in `kiln/src/ipc.rs` under
+//! The always-on version of these properties lives in `voussoir/src/ipc.rs` under
 //! `mod fuzz`: a fixed-seed mutational loop that runs on stable with every
 //! `cargo test`. This harness is for longer, coverage-guided runs.
 
@@ -23,7 +23,7 @@ use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     // The HTTP body: must either parse or refuse, never panic.
-    if let Ok(value) = kiln::transport::parse_payload(data) {
+    if let Ok(value) = voussoir::transport::parse_payload(data) {
         // A reply is built by serializing whatever came back, so the round trip
         // has to hold or the page's parser breaks on a valid-looking envelope.
         let _ = serde_json::to_string(&value);
@@ -33,7 +33,7 @@ fuzz_target!(|data: &[u8]| {
     // UTF-8 reaches it on a real device, and invalid input must be refused the
     // same way rather than reaching `from_str`.
     if let Ok(text) = std::str::from_utf8(data) {
-        if let Ok((method, payload)) = kiln::transport::parse_message(text) {
+        if let Ok((method, payload)) = voussoir::transport::parse_message(text) {
             // A method that survived parsing is a real name; the registry must
             // answer it with an envelope, never a panic.
             assert!(!method.is_empty());

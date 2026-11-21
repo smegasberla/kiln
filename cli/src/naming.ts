@@ -12,9 +12,9 @@ export type Identifiers = {
   crate: string;
   /** Rust `lib` name for the Android cdylib, e.g. "my_notes". Must be a valid identifier. */
   lib: string;
-  /** Android package, e.g. "com.kiln.my_notes". */
+  /** Android package, e.g. "com.voussoir.my_notes". */
   package: string;
-  /** JNI mangling of the package, e.g. "com_kiln_my_1notes". */
+  /** JNI mangling of the package, e.g. "com_voussoir_my_1notes". */
   jniPackage: string;
   /** First segment of the JNI package for tao, e.g. "com". */
   domain: string;
@@ -25,7 +25,7 @@ export type Identifiers = {
 /** Slug for directories and crates: lowercase, hyphens, no leading digits. */
 export function crateName(name: string): string {
   const base = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  const safe = base === "" ? "kiln-app" : base;
+  const safe = base === "" ? "voussoir-app" : base;
   return /^[0-9]/.test(safe) ? `app-${safe}` : safe;
 }
 
@@ -41,10 +41,10 @@ export function libName(crate: string): string {
   return keywords.has(snake) ? `${snake}_app` : snake;
 }
 
-/** A reverse-DNS package. `com.kiln.<slug>` by default, overridable by the user. */
+/** A reverse-DNS package. `com.voussoir.<slug>` by default, overridable by the user. */
 export function packageName(crate: string, override?: string): string {
   if (override) return override;
-  return `com.kiln.${libName(crate)}`;
+  return `com.voussoir.${libName(crate)}`;
 }
 
 /** JNI mangles `_` as `_1` and `.` as `_`. */
@@ -58,7 +58,7 @@ export function identifiers(name: string, packageOverride?: string): Identifiers
   const pkg = packageName(crate, packageOverride);
   const segments = pkg.split(".");
   return {
-    display: name.trim() === "" ? "Kiln App" : name.trim(),
+    display: name.trim() === "" ? "Voussoir App" : name.trim(),
     crate,
     lib,
     package: pkg,

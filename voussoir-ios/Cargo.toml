@@ -1,0 +1,20 @@
+[package]
+name = "voussoir-ios"
+version = "0.1.0"
+edition = "2021"
+description = "iOS bootstrap for Voussoir: the UIKit entry point and the app lifetime glue"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# The crate root is `#![cfg(target_os = "ios")]`, so off iOS this library
+# compiles to nothing — and its dependencies must not compile either. The same
+# rule keeps `cargo test --workspace` green on a desktop that has no Apple SDK
+# (see voussoir-android/Cargo.toml for the history of this exact trap).
+[target.'cfg(target_os = "ios")'.dependencies]
+voussoir = { path = "../voussoir" }
+tao = { version = "0.37", default-features = false }
+wry = { version = "0.57" }
+
+[lib]
+name = "voussoir_ios"
+crate-type = ["staticlib", "rlib"]

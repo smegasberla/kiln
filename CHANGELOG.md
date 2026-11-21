@@ -1,11 +1,30 @@
 # Changelog
 
-All notable changes to the `kiln` crate and the `kiln` CLI. Format follows
+All notable changes to the `voussoir` crate and the `voussoir` CLI. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the 0.x rule
 described under [Compatibility](../README.md#compatibility-policy) in the README.
 
 ## [Unreleased]
+
+### Changed
+
+- Renamed from Kiln to Voussoir. The crate is `voussoir`, the binary and CLI are
+  `voussoir`, the config file is `voussoir.json`, the page bridge is
+  `window.voussoir`, the reserved command prefix is `__voussoir_`, the custom
+  protocol is `voussoir://localhost`, and the environment variables are
+  `VOUSSOIR_*`. The reason is availability rather than taste: `kiln` on crates.io
+  has been taken and yanked since 2019, so the crate could not be published under
+  it. There is no compatibility shim, since 0.2.0 is the first release meant for
+  use outside this repository and an app that wants to keep the old names can
+  alias them itself.
+
+### Added
+
+- `brand/voussoir.svg`: the wordmark's mark. Nine wedge stones on a radial joint,
+  with the keystone at the crown rendered in the ember gradient, which is the
+  design the name describes rather than a generic window or box. It is one
+  self-contained file with no text, so it reads at 16px and needs no font.
 
 ## [0.2.0] - 2026-11-21
 
@@ -26,11 +45,11 @@ rather than a patch.
   nothing ran"; `Registry::async_limit` and `async_inflight` expose the state for
   diagnostics and tests.
 
-- `window.kiln.pageOrigin` (shim protocol 3): the origin the page is actually
+- `window.voussoir.pageOrigin` (shim protocol 3): the origin the page is actually
   served from. Windows rewrites the app origin to a host form, so a page that built
   an absolute URL from a literal was correct on four targets and broken on one.
   Combined with the existing `protocol` number, the honest feature test is
-  `kiln.protocol >= 3` with a relative URL as the fallback.
+  `voussoir.protocol >= 3` with a relative URL as the fallback.
 
 - A transport conformance test over the IPC seam, plus a fuzz target for the
   envelope parsers. The two transports already share `transport::respond`; the
@@ -45,25 +64,25 @@ rather than a patch.
   `cargo llvm-cov`; the threshold is deliberately not a gate yet, because a bound
   picked before a published number is a guess.
 
-- `kiln dev --verbose`: structured diagnostics for development. Records each hot
+- `voussoir dev --verbose`: structured diagnostics for development. Records each hot
   library swap with its rebuild-to-reload latency, every dispatch at or above
   50 ms, refused navigations, dropped bridge messages, and handler panics, keeps
   the last 256 in a bounded buffer, and prints a per-command latency table when the
-  app exits. The buffer is reachable from the page as `__kiln_diagnostics` (and
-  `__kiln_diagnostics_enabled` for the flag alone), which is the only way to read
-  it on a platform with no terminal. Everything is off unless `KILN_VERBOSE` is
+  app exits. The buffer is reachable from the page as `__voussoir_diagnostics` (and
+  `__voussoir_diagnostics_enabled` for the flag alone), which is the only way to read
+  it on a platform with no terminal. Everything is off unless `VOUSSOIR_VERBOSE` is
   set, so a release build pays a single cached atomic load per dispatch and
   allocates nothing; `Registry::latencies` and `latency_report` expose the samples
   to a shell or a test.
 
-- `kiln::rt::sleep`: sleep on the shared async runtime without an app depending on
-  a particular executor. The choice of runtime behind `async_fn` is `kiln`'s, and a
+- `voussoir::rt::sleep`: sleep on the shared async runtime without an app depending on
+  a particular executor. The choice of runtime behind `async_fn` is `voussoir`'s, and a
   handler that needs a delay should not have to name it.
 
-- The documentation book in `docs/`, and `kiln docs` to build it. Eighteen
+- The documentation book in `docs/`, and `voussoir docs` to build it. Eighteen
   chapters from "Your first app" through packaging, the security model,
   multi-window, hot reload, diagnostics and the platform matrix, rendered by mdBook
-  with no external asset so it works offline. `kiln docs --check` validates the
+  with no external asset so it works offline. `voussoir docs --check` validates the
   structure without mdBook installed: every chapter listed in `SUMMARY.md`, every
   link real, no duplicate entries, no orphan pages. CI runs the check. When mdBook
   is missing it names the exact release asset for the host (tar.gz on Unix, zip on
@@ -79,25 +98,25 @@ rather than a patch.
 - Per-window command allowlists at runtime: `WindowOptions.allowlist` (also
   accepted as `commands` from the page) narrows one window's surface, intersected
   with the global `commands` list, so a window that renders untrusted content can
-  be given a strict subset without declaring its label in `kiln.json` up front.
+  be given a strict subset without declaring its label in `voussoir.json` up front.
 
 - Multi-window bookkeeping: `AppHandle::open_window` returns the window's label,
-  `__kiln_open_window` answers `{"label": "..."}`, unnamed windows get a distinct
-  label (`index.html`, `index.html-2`, …) instead of colliding, `__kiln_windows`
-  lists the open labels in opening order, and `kiln.windows()` wraps it. The shim
+  `__voussoir_open_window` answers `{"label": "..."}`, unnamed windows get a distinct
+  label (`index.html`, `index.html-2`, …) instead of colliding, `__voussoir_windows`
+  lists the open labels in opening order, and `voussoir.windows()` wraps it. The shim
   protocol stays at 2; `windows()` is the only method protocol 2 promises.
 
 - Runtime tray and menu state: `TrayItem::check()`/`checked(bool)` and
   `MenuItem::check()`/`checked(bool)` declare a check item, and
   `AppHandle::set_tray_tooltip`, `set_tray_checked`, `popup_tray` and
-  `set_menu_checked` (plus the `__kiln_tray_*`/`__kiln_menu_checked` built-ins and
-  the `kiln.tray`/`kiln.menu` shim helpers) update it after the app started. Each
+  `set_menu_checked` (plus the `__voussoir_tray_*`/`__voussoir_menu_checked` built-ins and
+  the `voussoir.tray`/`voussoir.menu` shim helpers) update it after the app started. Each
   validates before queueing, so a plain item, an undeclared tray, or a platform
   whose tray is a posted notification gets an error naming the reason rather than
   a silent no-op. The native call runs on the UI thread, which is where the
   objects live.
 
-- `kiln::state`: a shell-owned `serde_json` store that survives a hot reload, with
+- `voussoir::state`: a shell-owned `serde_json` store that survives a hot reload, with
   `get`/`set`/`remove`/`contains`/`keys`/`clear` and `reload_generation()`. The
   hot loader bumps the generation on each successful swap, so reloaded code can
   see which library is live and keep its state instead of losing it with the
@@ -108,7 +127,7 @@ rather than a patch.
   concrete types. The payload is deserialized before the body runs, so a wrong
   shape is rejected as `kind: "payload"` naming the command instead of becoming a
   silently defaulted field. The raw `Value` API is unchanged and still the base
-  layer; `kiln` re-exports `serde` so the derives need no extra dependency.
+  layer; `voussoir` re-exports `serde` so the derives need no extra dependency.
 
 - The `rt` feature and `App::async_fn`: register a real `async fn` command. Its
   future runs on one shared multi-threaded runtime rather than a thread per call,
@@ -139,7 +158,7 @@ rather than a patch.
   and the storage round-trip through the real IPC transport on every OS, so the
   T1 surface is proven on WebKitGTK, WebView2 and WKWebView rather than assumed.
 
-- Per-window command allowlists: a `windows` map in `kiln.json`, keyed by window
+- Per-window command allowlists: a `windows` map in `voussoir.json`, keyed by window
   label, narrows what that window may call to the intersection of its own list
   and the global `commands` list. The label is resolved by the shell from the
   calling webview, never from the request, so a page cannot claim another
@@ -149,21 +168,21 @@ rather than a patch.
   for Windows. Each installs the toolchain dependencies (system webview dev
   files, Git, Bun, Rust) when they are missing, builds the CLI from source —
   from the checkout when run inside one, a fresh clone otherwise — and puts
-  `kiln` on the user's PATH, finishing with an execution check of the
+  `voussoir` on the user's PATH, finishing with an execution check of the
   installed binary. Dependency steps are skipped when the tool is already
   present, and a failed package install warns instead of aborting, so
-  `kiln doctor` reports any remaining gap by name.
+  `voussoir doctor` reports any remaining gap by name.
 
 - iOS support through the simulator, per Phases I-1 to I-4 of `IOS-PLAN.md`:
-  the `kiln-ios` bootstrap crate, platform gates with honest fallbacks (menus,
+  the `voussoir-ios` bootstrap crate, platform gates with honest fallbacks (menus,
   dialogs, tray and the updater's fetch decline on iOS), UIKit lifecycle mapped
   onto the shared `lifecycle` events, an `ios/` shell scaffold (staticlib,
-  XcodeGen project, one-symbol bridging header), and `kiln ios build|run|verify`
+  XcodeGen project, one-symbol bridging header), and `voussoir ios build|run|verify`
   — built and round-trip-verified on a booted simulator, green in CI since run
   44788618663.
 - Hot-reloadable commands behind a cargo feature: the scaffold now ships a
   `commands` crate with one `static COMMANDS: &[Command]` table (with
-  `Kind::Sync` / `Kind::Async`), and `kiln dev` watches its `src/`, rebuilds
+  `Kind::Sync` / `Kind::Async`), and `voussoir dev` watches its `src/`, rebuilds
   only that crate, and swaps the new library into the running shell. The
   harness (`scripts/verify-hot.ts`) proves the swap leaves the page running —
   one `performance.timeOrigin` across command edits, a panic, a broken build
@@ -180,7 +199,7 @@ rather than a patch.
 
 ### Changed
 
-- `kiln init` scaffolds commands as a table in a separate crate instead of
+- `voussoir init` scaffolds commands as a table in a separate crate instead of
   inline `.command()` calls in `main.rs`, so the same code hot-reloads in dev
   and links statically in release. `.command()` remains for commands that need
   the `App` itself; release still builds with every feature, as it did.
@@ -207,8 +226,8 @@ rather than a patch.
 ### Fixed
 
 - WebView2 could not reach a command at all. It cannot intercept a custom
-  scheme, so wry rewrites `kiln://localhost` to `http://kiln.localhost`, the
-  same way it does on Android; Kiln only taught Android about the rewritten
+  scheme, so wry rewrites `voussoir://localhost` to `http://voussoir.localhost`, the
+  same way it does on Android; Voussoir only taught Android about the rewritten
   origin, so on Windows the shim allowlisted an origin the page never reports,
   `invoke` posted to an endpoint nothing intercepts, and the first navigation
   was refused. The page origin now follows the target, and the dev CSP, the
@@ -216,17 +235,17 @@ rather than a patch.
 
 - The Linux job pins `appimagetool` to the 1.9.1 release by SHA-256 instead of
   the moving `continuous` tag, and runs `cargo test --workspace` verbatim now
-  that `kiln-android`'s dependencies are target-gated to Android.
+  that `voussoir-android`'s dependencies are target-gated to Android.
 
 ### Added
 
-- `command_timeout_ms` in `kiln.json` (default 30 s, `0` disables) and a
+- `command_timeout_ms` in `voussoir.json` (default 30 s, `0` disables) and a
   per-call `invoke(method, payload, { timeout })` override. The shim's `fetch`
   had no deadline, so a handler that deadlocked left the page awaiting a promise
   that never settled, and a hang was indistinguishable from slowness. The
   deadline aborts the request rather than only rejecting, so the socket is freed
   too, and rejects with `kind: "timeout"` so a page branches on the class. The
-  value is exposed as `kiln.timeout` so frontend code does not have to guess it.
+  value is exposed as `voussoir.timeout` so frontend code does not have to guess it.
 
 - `set_max_pending` / `max_pending` / `pending` bound how many async requests
   the shell will hold at once, separately from the worker limit. The worker
@@ -284,7 +303,7 @@ rather than a patch.
 ### Fixed
 
 - `method_from_path` panicked on a multi-byte path. It decoded `%XX` escapes by
-  slicing the path `&str` at byte offsets, so `/__kiln/%` followed by any
+  slicing the path `&str` at byte offsets, so `/__voussoir/%` followed by any
   multi-byte character landed inside a char boundary and aborted the request
   thread. It now decodes bytes, refuses a result that is not valid UTF-8, and has
   three regression tests plus a fuzz target.
@@ -302,18 +321,18 @@ First published version.
 
 ### Added
 
-- `App` builder with compile-time embedded config (`kiln.json`) and assets, and a
+- `App` builder with compile-time embedded config (`voussoir.json`) and assets, and a
   cloneable `AppHandle` for `emit`, `emit_to`, `eval`, and `open_window`.
-- One JSON IPC endpoint (`POST kiln://localhost/__kiln/<method>`), with sync
+- One JSON IPC endpoint (`POST voussoir://localhost/__voussoir/<method>`), with sync
   handlers on the UI thread and `async_command` handlers on worker threads.
 - Panic containment for every handler: a panicking command returns
   `{"error":"command panicked: ..."}` and the window survives.
 - Navigation allowlist and Content-Security-Policy served with every response,
-  plus the origin-scoped `window.kiln` shim.
+  plus the origin-scoped `window.voussoir` shim.
 - Optional features: `menu`, `tray`, `dialog`, `updater`, `devtools`, `full`.
 - Crash reporting to an in-memory ring buffer, an optional log file, and the
-  `__kiln_reports` command.
-- `kiln-android` crate, driven by an activity that owns the event loop and uses
+  `__voussoir_reports` command.
+- `voussoir-android` crate, driven by an activity that owns the event loop and uses
   wry's IPC handler instead of the custom protocol.
 - CLI: `init`, `dev`, `build`, `package`, `android build`, `android run`,
   `doctor`, compiled with `bun build --compile` so end users need no JS runtime.

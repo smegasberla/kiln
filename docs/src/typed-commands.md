@@ -8,7 +8,7 @@ malformed request with `kind: "payload"` naming the command.
 ## A typed command
 
 ```rust
-use kiln::serde::{Deserialize, Serialize};
+use voussoir::serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 struct EchoArgs {

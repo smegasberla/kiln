@@ -1,4 +1,4 @@
-# Kiln — iOS Support Plan
+# Voussoir — iOS Support Plan
 
 Written 2026-11-19, after Phase C (per-window allowlists, Android CSP tightening)
 landed. Everything below is grounded in what exists today; file and line
@@ -8,24 +8,24 @@ references point at the seams the work hangs on.
 
 The Android work already built the two hard parts of mobile support:
 
-- **The transport seam** (`kiln/src/lib.rs:893`, `pub mod transport`): a mobile
+- **The transport seam** (`voussoir/src/lib.rs:893`, `pub mod transport`): a mobile
   build replaces only the *transport* (wry's IPC handler on Android,
   `WKScriptMessageHandler` on iOS) and the *entry point* (JNI vs `fn main`).
   The envelope, the registry, the allowlists (global and per-window, Phase C),
   the CSP and the navigation policy are shared code.
 - **The `MessageBridge` kind** (`transport::Kind::MessageBridge`) and
   `serve_bridge(registry, handle, label, message)` already parse
-  `{id, method, payload}` and answer with `__kiln_resolve(id, envelope)`. The
+  `{id, method, payload}` and answer with `__voussoir_resolve(id, envelope)`. The
   iOS shim needs the same bridge shape, so the page-side shim is already
   written.
 
-What iOS needs is the platform glue: a `kiln-ios` crate, a CLI command, an
+What iOS needs is the platform glue: a `voussoir-ios` crate, a CLI command, an
 Xcode project template, CI, and the same verify story Android has.
 
 ## Open decision to settle first (spike, one day)
 
 **Does the protocol transport work on iOS?** On iOS wry can register custom
-protocols through `WKURLSchemeHandler`. If `kiln://localhost` serving works
+protocols through `WKURLSchemeHandler`. If `voussoir://localhost` serving works
 there, iOS can use the *same* transport as desktop (`transport::Kind::Protocol`)
 and skip the message bridge entirely — pages would need no per-platform
 distinction at all, and the Phase C per-window label threading (already done for
@@ -46,12 +46,12 @@ code already supports both kinds. `security.rs`'s Android branch comment
 documents why Android cannot use the protocol; iOS's answer should be written
 there the same way, whatever the spike says.
 
-## Phase I-1 — the `kiln-ios` crate (the entry point)
+## Phase I-1 — the `voussoir-ios` crate (the entry point)
 
-Mirror `kiln-android/` (140 lines): a crate whose root is
+Mirror `voussoir-android/` (140 lines): a crate whose root is
 `#![cfg(target_os = "ios")]`, compiling to nothing elsewhere, with
 **target-gated dependencies** — the lesson from B1
-(`kiln-android/Cargo.toml`'s comment; `cargo test --workspace` must stay green
+(`voussoir-android/Cargo.toml`'s comment; `cargo test --workspace` must stay green
 on every host). Workspace membership rules from B1 apply verbatim.
 
 Contents:
@@ -59,26 +59,26 @@ Contents:
 - A `pub fn run(app: App)` called from a small Swift/Objective-C entry (the iOS
   counterpart of JNI `MainActivity.onCreate`), which:
   - resolves the registry/app-handle singletons the way
-    `kiln-android/src/lib.rs:38` does (`runtime()`),
+    `voussoir-android/src/lib.rs:38` does (`runtime()`),
   - drives the shared `run` path — window creation happens on the main thread;
     on iOS the event loop is the UIApplication run loop (tao supports iOS; the
     spike confirms the tao 0.37 window/window-handle path).
 - `#[no_mangle]` extern "C" shims the template's Swift calls into.
-- No `ndk`-style dependency needed; log via `os_log`/`NSLog` with the `Kiln`
-  tag, mirroring `kiln_android::log`.
+- No `ndk`-style dependency needed; log via `os_log`/`NSLog` with the `Voussoir`
+  tag, mirroring `voussoir_android::log`.
 
-*Acceptance:* `cargo check -p kiln-ios --target aarch64-apple-ios-sim` green on
+*Acceptance:* `cargo check -p voussoir-ios --target aarch64-apple-ios-sim` green on
 a macOS runner; `cargo test --workspace` stays green on Linux (the crate is
-empty off-iOS, like `kiln-android` off-Android).
+empty off-iOS, like `voussoir-android` off-Android).
 
-*Landed 2026-11-19.* The crate is in place (`kiln-ios/`, `staticlib` + `rlib`,
+*Landed 2026-11-19.* The crate is in place (`voussoir-ios/`, `staticlib` + `rlib`,
 target-gated deps) and the CI `ios-check` job runs the device-target check on
 macOS. On this Linux host, every dependency type-checks for
 `aarch64-apple-ios` once `rustc` is pinned to the rustup toolchain; the only
 failure left is `objc2-exception-helper`'s build script, which needs the Apple
 SDK's `xcrun` — precisely the split the CI job resolves.
 
-## Phase I-2 — platform correctness inside `kiln`
+## Phase I-2 — platform correctness inside `voussoir`
 
 Small, already half-done pieces:
 
@@ -93,7 +93,7 @@ Small, already half-done pieces:
   - `updater.rs`: keep, but its on-disk state must live in the sandbox
     directory; document that iOS app updates come from the App Store, so the
     updater is diagnostic-only on iOS initially.
-  - Second windows: iOS is single-window in practice; `__kiln_open_window` and
+  - Second windows: iOS is single-window in practice; `__voussoir_open_window` and
     Phase C per-window lists stay supported at the API level (Phase C tests are
     host-platform), but the scaffold page hides the affordance like it does on
     Android.
@@ -118,7 +118,7 @@ those into the same `lifecycle` events Android emits. Still open, and owned
 by I-3/I-4: executing any of it — the simulator run that makes the
 acceptance line more than code review.
 
-## Phase I-3 — `kiln ios build|run|verify` in the CLI
+## Phase I-3 — `voussoir ios build|run|verify` in the CLI
 
 Mirror `cli/src/commands/android.ts` (276 lines) command-for-command:
 
@@ -127,11 +127,11 @@ Mirror `cli/src/commands/android.ts` (276 lines) command-for-command:
   `cargo build --target aarch64-apple-ios-sim` (simulator) or
   `aarch64-apple-ios` (device, signing out of scope), stage the staticlib into
   the Xcode project, run `xcodebuild` against the template project.
-- Project template: an `ios/` directory generated at `kiln init`, committed
+- Project template: an `ios/` directory generated at `voussoir init`, committed
   like `android/`'s Gradle files (no build-time generation — same rule). Keep
   it XcodeGen-friendly (`project.yml`) so the CLI does not parse Xcode state.
   Contents: Info.plist (origin allowlist for the app transport security, the
-  `kiln` scheme), the Swift entry file, bridging header, and the
+  `voussoir` scheme), the Swift entry file, bridging header, and the
   `WKScriptMessageHandler` glue if the spike picks the bridge.
 - `parity`: extend `cli/src/parity.ts` to check desktop ↔ Android ↔ iOS
   command sets — three-way, not pairwise.
@@ -139,17 +139,17 @@ Mirror `cli/src/commands/android.ts` (276 lines) command-for-command:
   Android run's `RustStdoutStderr` logcat trick with simulator stdout.
 - `verify`: the iOS counterpart of the emulator job — install the scaffold,
   assert the page's console reports the round-trip (the same
-  `KILN_INVOKE_DONE`-style marker pattern used for the C2 measurement), plus
+  `VOUSSOIR_INVOKE_DONE`-style marker pattern used for the C2 measurement), plus
   the hostile checks where they exist on mobile (remote script blocked,
   navigation locked down — the policy is shared code, so this mostly works by
   construction, but assert it, as finding 1's discipline demands).
 
 *Acceptance:* `bun cli/src/index.ts ios build` produces a simulator app from a
-fresh `kiln init`; `ios verify` green in CI.
+fresh `voussoir init`; `ios verify` green in CI.
 
-*Landed 2026-11-19, code side.* `kiln init` writes the `ios/` shell (staticlib
+*Landed 2026-11-19, code side.* `voussoir init` writes the `ios/` shell (staticlib
 crate, `main_rs` entry, XcodeGen `project.yml`, Info.plist, `main.swift`,
-bridging header) and `kiln ios build|run|verify` mirror the android commands:
+bridging header) and `voussoir ios build|run|verify` mirror the android commands:
 build cross-compiles, stages `lib<name>.a` and runs `xcodebuild` with signing
 disabled; run drives `simctl` including booting a simulator; verify asserts the
 app reaches its Rust entry through `--console-pty`. Command parity is now
@@ -165,7 +165,7 @@ commands is Phase I-4's macOS CI job.
 Add a `ios` job mirroring the `android` job (`ci.yml:150-220`): macOS runner,
 `aarch64-apple-ios-sim` target, Xcode/simctl from the runner image, `ios
 build` + `ios verify`, plus the B1 `cargo test --workspace` host check already
-covered by the Linux job (macOS adds the cross-check of `kiln-ios` being
+covered by the Linux job (macOS adds the cross-check of `voussoir-ios` being
 empty off-iOS). No code signing, no device build in CI; both are documented
 out of scope.
 
@@ -176,8 +176,8 @@ the transport or the shim regresses, the way the Android emulator job does.
 `aarch64-apple-ios-sim`, xcodegen from brew, then scaffold → `ios build` →
 `ios verify --no-build` on a booted simulator. Verify now asserts both halves
 of the round trip through the console, the only observer that sees both sides
-on iOS: `KILN_IOS_START` (the staticlib reached its Rust entry) and
-`KILN_IOS_ROUND_TRIP`, printed by the scaffold shell's `greet` when the page's
+on iOS: `VOUSSOIR_IOS_START` (the staticlib reached its Rust entry) and
+`VOUSSOIR_IOS_ROUND_TRIP`, printed by the scaffold shell's `greet` when the page's
 call has crossed the bridge and been answered. The workspace test suite runs
 on the Mac too, where it doubles as the proof that the mobile-gated crates
 compile to nothing off mobile. Signing and device builds stay out of scope.
@@ -215,7 +215,7 @@ Risks, in order of how much they can hurt:
    advertise iOS, but the pinned versions' iOS paths are less-trafficked than
    their Android ones. If the spike hits a wall, the fallback is a wry upgrade
    (breaking-change review against `README.md:382`'s list first).
-2. **The event loop must own the main thread on iOS.** `kiln-ios::run` cannot
+2. **The event loop must own the main thread on iOS.** `voussoir-ios::run` cannot
    spawn its own loop the way desktop `fn main` does; it must return control to
    `UIApplicationMain`. This shapes the entry point and is why the spike comes
    first.

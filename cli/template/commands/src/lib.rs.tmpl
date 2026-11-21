@@ -1,9 +1,9 @@
-//! Your app's commands, in one crate that `kiln dev` can hot-reload.
+//! Your app's commands, in one crate that `voussoir dev` can hot-reload.
 //!
 //! # Why this crate exists
 //!
 //! Release builds link this crate statically into the shell binary — exactly
-//! one executable, no dynamic loading, no runtime dependency. `kiln dev`
+//! one executable, no dynamic loading, no runtime dependency. `voussoir dev`
 //! builds the very same source as a cdylib and swaps it into the *running*
 //! shell, so an edit here shows up without restarting the process or losing
 //! the webview's state. One source of truth, two link modes; there is no
@@ -15,12 +15,12 @@
 //! one symbol per command, so nothing can drift out of sync on reload:
 //!
 //! ```text
-//! kiln_dispatch(method, payload) -> envelope   UTF-8 in, UTF-8 out
-//! kiln_free(ptr)                               frees a kiln_dispatch reply
+//! voussoir_dispatch(method, payload) -> envelope   UTF-8 in, UTF-8 out
+//! voussoir_free(ptr)                               frees a voussoir_dispatch reply
 //! ```
 //!
 //! The reply is the same envelope the statically-linked path produces:
-//! `{"ok": <value>}` or `{"error": {"message": "<text>", "kind": "<class>"}}`. `kiln_dispatch` catches all
+//! `{"ok": <value>}` or `{"error": {"message": "<text>", "kind": "<class>"}}`. `voussoir_dispatch` catches all
 //! panics internally so nothing unwinds across the dynamic-library boundary;
 //! the shell wraps its call in `catch_unwind` again, so a panic here behaves
 //! like a panic in a static command: an error envelope to the page, window
@@ -36,7 +36,7 @@
 //!
 //! # Desktop only
 //!
-//! Hot reloading exists for desktop `kiln dev` only. Mobile platforms
+//! Hot reloading exists for desktop `voussoir dev` only. Mobile platforms
 //! restrict or disallow loading dynamic code, and the Android/iOS scaffold
 //! registers its commands statically as always.
 
@@ -48,7 +48,7 @@ use serde_json::{json, Value};
 /// How the shell should run a command when it is registered statically.
 ///
 /// In a release build the shell consults this to pick `command` (inline, UI
-/// thread) versus `async_command` (worker thread). Under `kiln dev` every
+/// thread) versus `async_command` (worker thread). Under `voussoir dev` every
 /// command runs on a worker thread anyway, so `slow_task` cannot freeze the
 /// window even mid-reload.
 #[derive(Clone, Copy)]
@@ -171,12 +171,12 @@ fn parse_payload(text: &str) -> Result<Value, String> {
 // --- convention in the shell's `hot.rs` and PLAN.md together.
 
 /// Resolve one call from the shell. Returns a heap-allocated envelope string
-/// the shell must hand back to `kiln_free`.
+/// the shell must hand back to `voussoir_free`.
 ///
 /// Safety: pointers must be valid NUL-terminated UTF-8 (the shell always
 /// passes `CString`s) or null, which is treated as an empty string.
 #[no_mangle]
-pub extern "C" fn kiln_dispatch(method: *const c_char, payload: *const c_char) -> *mut c_char {
+pub extern "C" fn voussoir_dispatch(method: *const c_char, payload: *const c_char) -> *mut c_char {
     let method = unsafe { from_c(method) }.unwrap_or_default();
     let body = match unsafe { from_c(payload) }
         .map(|text| parse_payload(&text))
@@ -192,12 +192,12 @@ pub extern "C" fn kiln_dispatch(method: *const c_char, payload: *const c_char) -
         .unwrap_or(std::ptr::null_mut())
 }
 
-/// Free a pointer returned by `kiln_dispatch`. Cross-allocator safety: the
+/// Free a pointer returned by `voussoir_dispatch`. Cross-allocator safety: the
 /// shell never frees dylib memory itself.
 ///
 /// Safety: `ptr` must be null or a pointer this library returned.
 #[no_mangle]
-pub extern "C" fn kiln_free(ptr: *mut c_char) {
+pub extern "C" fn voussoir_free(ptr: *mut c_char) {
     if !ptr.is_null() {
         drop(unsafe { CString::from_raw(ptr) });
     }
@@ -275,10 +275,10 @@ mod tests {
     fn call(method: &str, payload: &str) -> String {
         let method = CString::new(method).unwrap();
         let payload = CString::new(payload).unwrap();
-        let ptr = kiln_dispatch(method.as_ptr(), payload.as_ptr());
+        let ptr = voussoir_dispatch(method.as_ptr(), payload.as_ptr());
         assert!(!ptr.is_null());
         let body = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned();
-        kiln_free(ptr);
+        voussoir_free(ptr);
         body
     }
 
@@ -303,14 +303,14 @@ mod tests {
             r#"{"error":{"message":"unknown command: nope","kind":"unknown"}}"#
         );
         // Null pointers are treated as empty, not dereferenced.
-        let ptr = kiln_dispatch(std::ptr::null(), std::ptr::null());
+        let ptr = voussoir_dispatch(std::ptr::null(), std::ptr::null());
         let body = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned();
-        kiln_free(ptr);
+        voussoir_free(ptr);
         assert_eq!(
             body,
             r#"{"error":{"message":"unknown command: ","kind":"unknown"}}"#
         );
-        kiln_free(std::ptr::null_mut()); // must be a no-op
+        voussoir_free(std::ptr::null_mut()); // must be a no-op
     }
 
     #[test]

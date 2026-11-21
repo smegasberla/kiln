@@ -4,8 +4,8 @@
 //   B) POST to the custom protocol - request/response, response read as text.
 //
 // Serve-time behaviour:
-//   - KILN_PAGE_URL unset  -> page served from kiln:// (production path)
-//   - KILN_PAGE_URL set    -> page served from a Bun dev server over http
+//   - VOUSSOIR_PAGE_URL unset  -> page served from voussoir:// (production path)
+//   - VOUSSOIR_PAGE_URL set    -> page served from a Bun dev server over http
 //
 // The page reports each transport's outcome over the IPC channel; the probe
 // prints it and exits, so this is verifiable without a human looking at pixels.
@@ -31,7 +31,7 @@ function say(s) { log.push(s); document.getElementById('out').textContent = log.
 (async () => {
   const results = {};
   try {
-    const r = await fetch('kiln://localhost/__kiln/greet', { method: 'POST', body: '{"name":"json"}' });
+    const r = await fetch('voussoir://localhost/__voussoir/greet', { method: 'POST', body: '{"name":"json"}' });
     results.protocol = r.status + ' ' + (await r.text());
   } catch (e) { results.protocol = 'THREW ' + e; }
   say('protocol: ' + results.protocol);
@@ -51,7 +51,7 @@ fn main() -> wry::Result<()> {
         .build(&event_loop)
         .unwrap();
 
-    let dev_url = std::env::var("KILN_PAGE_URL").ok();
+    let dev_url = std::env::var("VOUSSOIR_PAGE_URL").ok();
     let origin = dev_url.as_deref().map(|u| {
         let scheme = u.split("://").next().unwrap_or("http");
         let host = u.split("://").nth(1).unwrap_or("").trim_end_matches('/');
@@ -60,7 +60,7 @@ fn main() -> wry::Result<()> {
 
     let tx2 = tx.clone();
     let builder = WebViewBuilder::new()
-        .with_custom_protocol("kiln".into(), move |_id, req: Request<Vec<u8>>| {
+        .with_custom_protocol("voussoir".into(), move |_id, req: Request<Vec<u8>>| {
             let cors = origin.clone();
             let mut b = Response::builder();
             if let Some(o) = &cors {
@@ -75,7 +75,7 @@ fn main() -> wry::Result<()> {
                 let _ = std::io::stdout().flush();
                 return b.status(204).body(Vec::new().into()).unwrap();
             }
-            if path == "/__kiln/greet" {
+            if path == "/__voussoir/greet" {
                 let body = String::from_utf8_lossy(req.body()).to_string();
                 println!("[protocol] POST {path} body={body}");
                 let _ = std::io::stdout().flush();
@@ -108,7 +108,7 @@ fn main() -> wry::Result<()> {
 
     let builder = match dev_url {
         Some(url) => builder.with_url(url),
-        None => builder.with_url("kiln://localhost/"),
+        None => builder.with_url("voussoir://localhost/"),
     };
 
     #[cfg(any(target_os = "windows", target_os = "macos"))]

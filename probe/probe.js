@@ -18,14 +18,14 @@
   }
 
   try {
-    const res = await fetch(`${ORIGIN}/__kiln/boom`, { method: "POST", body: "null" });
+    const res = await fetch(`${ORIGIN}/__voussoir/boom`, { method: "POST", body: "null" });
     out.panic = await res.text();
   } catch (error) {
     out.panic = "THREW " + error;
   }
 
   try {
-    const res = await fetch(`${ORIGIN}/__kiln/alive`, { method: "POST", body: "null" });
+    const res = await fetch(`${ORIGIN}/__voussoir/alive`, { method: "POST", body: "null" });
     out.after = (await res.json()).ok;
   } catch (error) {
     out.after = "THREW " + error;
@@ -34,7 +34,7 @@
   // Typed commands: a wrong shape must come back as `payload`, naming the
   // command, without the handler body ever running.
   try {
-    const res = await fetch(`${ORIGIN}/__kiln/typed_echo`, {
+    const res = await fetch(`${ORIGIN}/__voussoir/typed_echo`, {
       method: "POST",
       body: JSON.stringify({ text: 5 }),
     });
@@ -47,7 +47,7 @@
   // The same command with the right shape, to prove the typed path works at all
   // and not merely that it rejects.
   try {
-    const res = await fetch(`${ORIGIN}/__kiln/typed_echo`, {
+    const res = await fetch(`${ORIGIN}/__voussoir/typed_echo`, {
       method: "POST",
       body: JSON.stringify({ text: "ok" }),
     });
@@ -59,19 +59,19 @@
   // Storage: persist a value, read it back. This is the only check that proves
   // the platform data directory is writable on the target under test.
   try {
-    await fetch(`${ORIGIN}/__kiln/storage.set`, {
+    await fetch(`${ORIGIN}/__voussoir/storage.set`, {
       method: "POST",
       body: JSON.stringify({ key: "probe", value: { round: 1 } }),
     });
     const got = await (
-      await fetch(`${ORIGIN}/__kiln/storage.get`, {
+      await fetch(`${ORIGIN}/__voussoir/storage.get`, {
         method: "POST",
         body: JSON.stringify({ key: "probe" }),
       })
     ).json();
     out.storage = got.ok;
     const keys = await (
-      await fetch(`${ORIGIN}/__kiln/storage.keys`, { method: "POST", body: "null" })
+      await fetch(`${ORIGIN}/__voussoir/storage.keys`, { method: "POST", body: "null" })
     ).json();
     out.storageKeys = Array.isArray(keys.ok) && keys.ok.indexOf("probe") !== -1;
   } catch (error) {
@@ -83,7 +83,7 @@
   // from the new window while the page itself still works.
   try {
     const opened = await (
-      await fetch(`${ORIGIN}/__kiln/__kiln_open_window`, {
+      await fetch(`${ORIGIN}/__voussoir/__voussoir_open_window`, {
         method: "POST",
         body: JSON.stringify({
           label: "probe-narrow",
@@ -92,14 +92,14 @@
           height: 240,
           // Multi-window bookkeeping stays reachable so this window can be
           // listed and closed; the app's own surface is narrowed to one command.
-          allowlist: ["__kiln_windows", "__kiln_close_window", "alive"],
+          allowlist: ["__voussoir_windows", "__voussoir_close_window", "alive"],
         }),
       })
     ).json();
     out.openLabel = opened.ok && opened.ok.label;
 
     const listed = await (
-      await fetch(`${ORIGIN}/__kiln/__kiln_windows`, { method: "POST", body: "null" })
+      await fetch(`${ORIGIN}/__voussoir/__voussoir_windows`, { method: "POST", body: "null" })
     ).json();
     out.windows = listed.ok && listed.ok.windows;
     out.windowsIncludes = Array.isArray(out.windows) && out.windows.indexOf("probe-narrow") !== -1;
@@ -107,14 +107,14 @@
     // An unnamed second window must get a distinct label, or the page could not
     // address either of them.
     const second = await (
-      await fetch(`${ORIGIN}/__kiln/__kiln_open_window`, {
+      await fetch(`${ORIGIN}/__voussoir/__voussoir_open_window`, {
         method: "POST",
         body: JSON.stringify({ width: 200, height: 150 }),
       })
     ).json();
     out.unnamedLabel = second.ok && second.ok.label;
 
-    await fetch(`${ORIGIN}/__kiln/__kiln_close_window`, {
+    await fetch(`${ORIGIN}/__voussoir/__voussoir_close_window`, {
       method: "POST",
       body: JSON.stringify({ label: "probe-narrow" }),
     });
@@ -124,7 +124,7 @@
 
   // State that lives in the shell rather than in the page or the command crate.
   try {
-    const res = await fetch(`${ORIGIN}/__kiln/remember`, {
+    const res = await fetch(`${ORIGIN}/__voussoir/remember`, {
       method: "POST",
       body: JSON.stringify({ round: 2 }),
     });
@@ -136,11 +136,11 @@
   // The shim version, which is what a frontend feature-detects on.
   try {
     const shim = await (
-      await fetch(`${ORIGIN}/__kiln/__kiln_version`, { method: "POST", body: "null" })
+      await fetch(`${ORIGIN}/__voussoir/__voussoir_version`, { method: "POST", body: "null" })
     ).json();
-    out.kilnVersion = shim.ok && shim.ok.kiln;
+    out.voussoirVersion = shim.ok && shim.ok.voussoir;
   } catch (error) {
-    out.kilnVersion = "THREW " + error;
+    out.voussoirVersion = "THREW " + error;
   }
 
   out.nav = await new Promise((resolve) => {
@@ -154,7 +154,7 @@
   });
 
   try {
-    await fetch(`${ORIGIN}/__kiln/report`, { method: "POST", body: JSON.stringify(out) });
+    await fetch(`${ORIGIN}/__voussoir/report`, { method: "POST", body: JSON.stringify(out) });
   } catch (error) {
     console.error("probe report failed: " + error);
   }

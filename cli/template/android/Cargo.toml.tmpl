@@ -8,8 +8,8 @@ name = "{{LIB}}"
 crate-type = ["cdylib"]
 
 [dependencies]
-kiln = { {{KILN_PATH_INNER}}, features = ["full"] }
-kiln-android = { {{KILN_ANDROID_PATH_INNER}} }
+voussoir = { {{VOUSSOIR_PATH_INNER}}, features = ["full"] }
+voussoir-android = { {{VOUSSOIR_ANDROID_PATH_INNER}} }
 # Required by tao's and wry's android_binding! macros, which expand to items here.
 tao = { version = "0.37", default-features = false }
 wry = { version = "0.57" }

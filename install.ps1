@@ -1,7 +1,7 @@
-# Kiln installer for Windows.
+# Voussoir installer for Windows.
 #
 # Installs the toolchain dependencies (Git, Bun, Rust, WebView2 check), builds
-# the CLI from source, and puts `kiln` on PATH for the current user.
+# the CLI from source, and puts `voussoir` on PATH for the current user.
 #
 #   powershell -ExecutionPolicy Bypass -File install.ps1 [-Prefix DIR] [-Repo URL] [-NoDeps]
 #
@@ -10,8 +10,8 @@
 
 [CmdletBinding()]
 param(
-  [string]$Prefix = (Join-Path $env:LOCALAPPDATA "kiln"),
-  [string]$Repo = "https://github.com/smegasberla/kiln.git",
+  [string]$Prefix = (Join-Path $env:LOCALAPPDATA "voussoir"),
+  [string]$Repo = "https://github.com/smegasberla/voussoir.git",
   [switch]$NoDeps
 )
 
@@ -20,7 +20,7 @@ $ErrorActionPreference = "Stop"
 function Fail([string]$Message) {
   # throw, not exit: the script is also run via `irm ... | iex`, where an
   # exit would take the user's whole terminal session with it.
-  throw "kiln-install: error: $Message"
+  throw "voussoir-install: error: $Message"
 }
 
 function Refresh-Path {
@@ -42,7 +42,7 @@ $src = $null
 if ($scriptDir -and (Test-Path (Join-Path $scriptDir "cli\package.json")) -and
     (Test-Path (Join-Path $scriptDir "Cargo.toml"))) {
   $src = $scriptDir
-  Write-Host "kiln-install: building from the checkout at $src"
+  Write-Host "voussoir-install: building from the checkout at $src"
 }
 
 # --- dependencies -----------------------------------------------------------
@@ -50,7 +50,7 @@ if ($scriptDir -and (Test-Path (Join-Path $scriptDir "cli\package.json")) -and
 if (-not $NoDeps) {
   if (-not $src -and -not (Test-Command "git")) {
     if (Test-Command "winget") {
-      Write-Host "kiln-install: installing Git"
+      Write-Host "voussoir-install: installing Git"
       winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements | Out-Host
       Refresh-Path
     }
@@ -58,7 +58,7 @@ if (-not $NoDeps) {
   }
 
   if (-not (Test-Command "bun")) {
-    Write-Host "kiln-install: installing Bun"
+    Write-Host "voussoir-install: installing Bun"
     if (Test-Command "winget") {
       winget install --id Oven-sh.Bun -e --source winget --accept-package-agreements --accept-source-agreements | Out-Host
       Refresh-Path
@@ -70,7 +70,7 @@ if (-not $NoDeps) {
   }
 
   if (-not (Test-Command "cargo")) {
-    Write-Host "kiln-install: installing Rust"
+    Write-Host "voussoir-install: installing Rust"
     if (-not (Test-Command "winget")) {
       Fail "cargo is missing and winget is not available; install Rust (rustup) first"
     }
@@ -97,13 +97,13 @@ if ($pf86) {
 # --- clone when not run from a checkout -------------------------------------
 
 if (-not $src) {
-  $src = Join-Path $env:LOCALAPPDATA "kiln\src"
+  $src = Join-Path $env:LOCALAPPDATA "voussoir\src"
   if (Test-Path (Join-Path $src ".git")) {
-    Write-Host "kiln-install: updating $src"
+    Write-Host "voussoir-install: updating $src"
     git -C $src pull --ff-only
     if ($LASTEXITCODE -ne 0) { Write-Warning "could not update; building what is there" }
   } else {
-    Write-Host "kiln-install: cloning $Repo to $src"
+    Write-Host "voussoir-install: cloning $Repo to $src"
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $src) | Out-Null
     git clone --depth 1 $Repo $src
     if ($LASTEXITCODE -ne 0) { Fail "clone failed; pass -Repo with a reachable URL" }
@@ -112,7 +112,7 @@ if (-not $src) {
 
 # --- build ------------------------------------------------------------------
 
-Write-Host "kiln-install: building the CLI"
+Write-Host "voussoir-install: building the CLI"
 Push-Location (Join-Path $src "cli")
 try {
   bun install
@@ -123,30 +123,30 @@ try {
   Pop-Location
 }
 
-$built = Join-Path $src "cli\dist\kiln.exe"
-if (-not (Test-Path $built)) { $built = Join-Path $src "cli\dist\kiln" }
-if (-not (Test-Path $built)) { Fail "build finished but dist\kiln(.exe) is missing" }
+$built = Join-Path $src "cli\dist\voussoir.exe"
+if (-not (Test-Path $built)) { $built = Join-Path $src "cli\dist\voussoir" }
+if (-not (Test-Path $built)) { Fail "build finished but dist\voussoir(.exe) is missing" }
 
 # --- install ----------------------------------------------------------------
 
 $binDir = Join-Path $Prefix "bin"
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-Copy-Item $built (Join-Path $binDir "kiln.exe") -Force
-Write-Host "kiln-install: installed $(Join-Path $binDir 'kiln.exe')"
+Copy-Item $built (Join-Path $binDir "voussoir.exe") -Force
+Write-Host "voussoir-install: installed $(Join-Path $binDir 'voussoir.exe')"
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 $inUserPath = $userPath -and ($userPath -like "*$binDir*")
 if (-not $inUserPath) {
   $newPath = if ($userPath) { "$userPath;$binDir" } else { $binDir }
   [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-  Write-Host "kiln-install: added $binDir to your user PATH (new terminals pick it up)"
+  Write-Host "voussoir-install: added $binDir to your user PATH (new terminals pick it up)"
 }
 $env:Path = "$env:Path;$binDir"
 
 # --- verify -----------------------------------------------------------------
 
-Write-Host "kiln-install: verifying the installed binary"
-& (Join-Path $binDir "kiln.exe") help *> $null
-if ($LASTEXITCODE -ne 0) { Fail "the installed kiln failed to run" }
+Write-Host "voussoir-install: verifying the installed binary"
+& (Join-Path $binDir "voussoir.exe") help *> $null
+if ($LASTEXITCODE -ne 0) { Fail "the installed voussoir failed to run" }
 
-Write-Host "kiln-install: done. next: kiln init myapp; cd myapp; kiln dev   (kiln doctor checks a project)"
+Write-Host "voussoir-install: done. next: voussoir init myapp; cd myapp; voussoir dev   (voussoir doctor checks a project)"

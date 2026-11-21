@@ -3,7 +3,7 @@
 //! `method_from_path` turns a page-controlled URL into a command name before
 //! any allowlist check runs, so it is the first thing untrusted input touches. A
 //! panic here aborts the request thread; the original implementation sliced the
-//! path `&str` by byte index and did exactly that for `/__kiln/%€`.
+//! path `&str` by byte index and did exactly that for `/__voussoir/%€`.
 //!
 //! Run with:
 //!
@@ -24,8 +24,8 @@ fuzz_target!(|data: &[u8]| {
     };
 
     // Both shapes: the full path a page would request, and the bare suffix.
-    let with_prefix = format!("/__kiln/{text}");
-    let decoded = kiln::method_from_path(&with_prefix);
+    let with_prefix = format!("/__voussoir/{text}");
+    let decoded = voussoir::method_from_path(&with_prefix);
 
     if let Some(method) = decoded {
         // A decoded name must be a usable command name: non-empty, and if it has
@@ -33,7 +33,7 @@ fuzz_target!(|data: &[u8]| {
         assert!(!method.is_empty(), "empty method");
         if !method.contains('%') {
             assert_eq!(
-                kiln::method_from_path(&format!("/__kiln/{method}")),
+                voussoir::method_from_path(&format!("/__voussoir/{method}")),
                 Some(method),
                 "decoding changed a name that had nothing to decode"
             );
@@ -41,5 +41,5 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // A path without the prefix is never a command, whatever the input.
-    assert!(kiln::method_from_path(text).is_none() || text.starts_with("/__kiln/"));
+    assert!(voussoir::method_from_path(text).is_none() || text.starts_with("/__voussoir/"));
 });

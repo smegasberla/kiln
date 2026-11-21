@@ -11,17 +11,17 @@
 
 use std::sync::{Arc, Mutex};
 
-use kiln::serde_json::json;
-use kiln::{App, AppHandle, Error};
+use voussoir::serde_json::json;
+use voussoir::{App, AppHandle, Error};
 
 mod assets;
 
 /// `shift` arguments.
 ///
 /// `#[serde(crate = ...)]` is what lets the derive find the re-exported crate:
-/// an app depends on `kiln` alone, never on `serde` directly.
-#[derive(Debug, kiln::serde::Deserialize)]
-#[serde(crate = "kiln::serde")]
+/// an app depends on `voussoir` alone, never on `serde` directly.
+#[derive(Debug, voussoir::serde::Deserialize)]
+#[serde(crate = "voussoir::serde")]
 struct ShiftArgs {
     /// How far to move the counter. Omitted means zero, not an error.
     #[serde(default)]
@@ -29,8 +29,8 @@ struct ShiftArgs {
 }
 
 /// The reply shape every counter command shares, so the page has one type.
-#[derive(Debug, Clone, kiln::serde::Serialize)]
-#[serde(crate = "kiln::serde")]
+#[derive(Debug, Clone, voussoir::serde::Serialize)]
+#[serde(crate = "voussoir::serde")]
 struct Snapshot {
     value: i64,
     history: Vec<i64>,
@@ -55,7 +55,7 @@ fn main() -> Result<(), Error> {
     let state = Arc::new(Mutex::new(Counter::default()));
 
     App::new()
-        .config(include_str!("../../kiln.json"))
+        .config(include_str!("../../voussoir.json"))
         .assets(assets::ASSETS)
         // A typed command with no arguments: the payload type is `()`.
         .command_typed("current", {

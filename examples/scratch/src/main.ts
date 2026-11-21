@@ -1,4 +1,4 @@
-/// <reference path="./kiln.d.ts" />
+/// <reference path="./voussoir.d.ts" />
 
 /**
  * Scratch's page: a text editor bound to one note at a time.
@@ -28,7 +28,7 @@ type Snapshot = {
 
 type Counts = { words: number; characters: number; lines: number };
 
-const platform = window.kiln.platform;
+const platform = window.voussoir.platform;
 const isMobile = platform === "android" || platform === "ios";
 
 const titleLabel = document.getElementById("title") as HTMLElement;
@@ -112,7 +112,7 @@ async function selectNote(key: string) {
   }
   await flushSave();
   try {
-    renderSnapshot(await window.kiln.invoke<Snapshot>("open", { key }));
+    renderSnapshot(await window.voussoir.invoke<Snapshot>("open", { key }));
   } catch (error) {
     showStatus(`error: ${(error as Error).message}`);
   }
@@ -130,7 +130,7 @@ async function flushSave() {
   dirty = false;
   showStatus("saving…");
   try {
-    const reply = await window.kiln.invoke<{ statistics: Counts; snapshot: Snapshot }>("save", {
+    const reply = await window.voussoir.invoke<{ statistics: Counts; snapshot: Snapshot }>("save", {
       key: openKey,
       body,
     });
@@ -175,14 +175,14 @@ editor.addEventListener("input", () => {
 // wait for a promise here, and the save is already off the UI thread in Rust.
 window.addEventListener("pagehide", () => {
   if (dirty && openKey) {
-    void window.kiln.invoke("save", { key: openKey, body: editor.value }).catch(() => {});
+    void window.voussoir.invoke("save", { key: openKey, body: editor.value }).catch(() => {});
   }
 });
 
 async function createNote() {
   await flushSave();
   try {
-    renderSnapshot(await window.kiln.invoke<Snapshot>("create", {}));
+    renderSnapshot(await window.voussoir.invoke<Snapshot>("create", {}));
     editor.focus();
     if (isMobile) setDrawer(false);
   } catch (error) {
@@ -196,7 +196,7 @@ async function deleteNote() {
   if (!sure) return;
   try {
     dirty = false;
-    renderSnapshot(await window.kiln.invoke<Snapshot>("delete", { key: openKey }));
+    renderSnapshot(await window.voussoir.invoke<Snapshot>("delete", { key: openKey }));
   } catch (error) {
     showStatus(`error: ${(error as Error).message}`);
   }
@@ -225,7 +225,7 @@ if (isMobile) {
 
 // The shell's own menu, wherever it exists: the desktop menu bar and the Android
 // PopupMenu both arrive as this event, so there is one handler for both.
-window.kiln.listen<{ id: string }>("menu", ({ id }) => {
+window.voussoir.listen<{ id: string }>("menu", ({ id }) => {
   if (id === "new") void createNote();
   else if (id === "save") void flushSave();
   else if (id === "delete") void deleteNote();
@@ -233,17 +233,17 @@ window.kiln.listen<{ id: string }>("menu", ({ id }) => {
 
 // A save that happened elsewhere, including in the second desktop window: adopt
 // the list, but never the body of the note this window is editing.
-window.kiln.listen<{ key: string; statistics: Counts; snapshot: Snapshot }>("saved", (event) => {
+window.voussoir.listen<{ key: string; statistics: Counts; snapshot: Snapshot }>("saved", (event) => {
   if (event.snapshot) renderList(event.snapshot);
   if (event.key === openKey) renderCounts(event.statistics);
 });
 
-window.kiln.listen<{ state: string }>("lifecycle", ({ state }) => {
+window.voussoir.listen<{ state: string }>("lifecycle", ({ state }) => {
   // Leaving the foreground is exactly when an unsaved draft would be lost.
   if (state === "pause" || state === "stop") void flushSave();
 });
 
-window.kiln.listen<string>("location", (directory) => {
+window.voussoir.listen<string>("location", (directory) => {
   locationLabel.textContent = directory;
   locationLabel.hidden = false;
   locationLabel.title = directory;
@@ -251,7 +251,7 @@ window.kiln.listen<string>("location", (directory) => {
 
 void (async () => {
   try {
-    renderSnapshot(await window.kiln.invoke<Snapshot>("current"));
+    renderSnapshot(await window.voussoir.invoke<Snapshot>("current"));
   } catch (error) {
     showStatus(`error: ${(error as Error).message}`);
   }

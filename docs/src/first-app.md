@@ -1,15 +1,15 @@
 # Your first app
 
-Kiln is a Rust shell around the platform webview, with the frontend built by Bun.
+Voussoir is a Rust shell around the platform webview, with the frontend built by Bun.
 The Rust side owns the window, the security policy and the commands the page can
 call; the frontend is ordinary TypeScript, JSX, CSS or HTML. Nothing about
-shipping requires Node, Bun or a bundler at runtime: `kiln build` produces a
+shipping requires Node, Bun or a bundler at runtime: `voussoir build` produces a
 single native binary with the frontend embedded.
 
 ```bash
-bun x kiln init notes
+bun x voussoir init notes
 cd notes
-bun x kiln dev
+bun x voussoir dev
 ```
 
 That is the whole setup. `init` writes a working app, `dev` starts the frontend
@@ -19,7 +19,7 @@ server and launches the shell against it.
 
 ```
 notes/
-  kiln.json                  name, window size, entry page, optional allowlist
+  voussoir.json                  name, window size, entry page, optional allowlist
   index.html                 entry page, bundled by Bun
   src/main.ts                frontend code
   src/style.css
@@ -30,7 +30,7 @@ notes/
 ```
 
 Two Rust files matter. `native/commands/src/lib.rs` holds the command table and
-is rebuilt on save while `kiln dev` runs. `native/src/main.rs` configures the app
+is rebuilt on save while `voussoir dev` runs. `native/src/main.rs` configures the app
 and registers commands that need the app itself, such as opening a window.
 
 ## The smallest real app
@@ -38,7 +38,7 @@ and registers commands that need the app itself, such as opening a window.
 `native/commands/src/lib.rs`:
 
 ```rust
-use kiln::serde_json::{json, Value};
+use voussoir::serde_json::{json, Value};
 
 pub fn greet(payload: &Value) -> Result<Value, String> {
     let name = payload.get("name").and_then(Value::as_str).unwrap_or("world");
@@ -49,25 +49,25 @@ pub fn greet(payload: &Value) -> Result<Value, String> {
 `src/main.ts`:
 
 ```ts
-const message = await window.kiln.invoke<string>("greet", { name: "you" });
+const message = await window.voussoir.invoke<string>("greet", { name: "you" });
 document.querySelector("#out")!.textContent = message;
 ```
 
-`index.html` loads `src/main.ts` and the shim installs `window.kiln` before any of
+`index.html` loads `src/main.ts` and the shim installs `window.voussoir` before any of
 your scripts run. There is no import, no provider, no bundler plugin.
 
 ## Run, build, package
 
 | Command | What it does |
 | --- | --- |
-| `kiln dev` | Bun dev server with HMR, shell watching for Rust edits |
-| `kiln dev --verbose` | the same, plus structured diagnostics on stderr |
-| `kiln build` | bundle the frontend, compile the release binary |
-| `kiln build --size` | the same, then print the binary size |
-| `kiln package` | build, then wrap it in an installer for this OS |
-| `kiln doctor` | check the toolchain and say what is missing |
+| `voussoir dev` | Bun dev server with HMR, shell watching for Rust edits |
+| `voussoir dev --verbose` | the same, plus structured diagnostics on stderr |
+| `voussoir build` | bundle the frontend, compile the release binary |
+| `voussoir build --size` | the same, then print the binary size |
+| `voussoir package` | build, then wrap it in an installer for this OS |
+| `voussoir doctor` | check the toolchain and say what is missing |
 
-`kiln doctor` is the first command to run when something does not build; it
+`voussoir doctor` is the first command to run when something does not build; it
 reports the missing piece by name instead of letting a linker error surface two
 minutes later.
 

@@ -6,7 +6,7 @@ report failures, and the shell can report failures, without either side inventin
 a second convention.
 
 ```
-POST kiln://localhost/__kiln/<method>
+POST voussoir://localhost/__voussoir/<method>
 body:     <payload as JSON, or null>
 response: {"ok": <json>}
         | {"error": {"message": "<text>", "kind": "<class>", "method": "<name>"}}
@@ -27,12 +27,12 @@ helper. Branch on `kind`; never match `message` text, which is for humans.
 
 ## The page side
 
-The shim installs `window.kiln` before any of your scripts run:
+The shim installs `window.voussoir` before any of your scripts run:
 
 ```ts
-const greeting = await window.kiln.invoke<string>("greet", { name: "you" });
+const greeting = await window.voussoir.invoke<string>("greet", { name: "you" });
 
-const off = window.kiln.listen<{ value: number }>("count", (event) => {
+const off = window.voussoir.listen<{ value: number }>("count", (event) => {
   render(event.value);
 });
 
@@ -47,15 +47,15 @@ twice is harmless.
 The shim also carries `platform` (`"linux"`, `"windows"`, `"macos"`, `"bsd"`,
 `"android"`, `"ios"`) and `protocol`, the shim's own version number. Feature-detect
 on `protocol`, not on `platform`: a page that needs `windows()` asks
-`kiln.protocol >= 2` and degrades in one place instead of in every platform branch.
+`voussoir.protocol >= 2` and degrades in one place instead of in every platform branch.
 
 ## The Rust side
 
 A command that needs no app handle lives in the commands crate, in one table:
 
 ```rust
-use kiln::{Command, Kind};
-use kiln::serde_json::{json, Value};
+use voussoir::{Command, Kind};
+use voussoir::serde_json::{json, Value};
 
 pub static COMMANDS: &[Command] = &[
     Command { name: "greet", kind: Kind::Sync, run: greet },
@@ -99,12 +99,12 @@ performance decision the contract asks you to make.
 .async_command("read_file", |_app, _payload| {
     std::fs::read_to_string("/etc/hostname")
         .map(|text| json!(text))
-        .map_err(kiln::Error::Handler)
+        .map_err(voussoir::Error::Handler)
 })
 
 // A real async fn on the shared runtime. Requires the `rt` feature.
 .async_fn("fetch", |_app, _payload: FetchArgs| async move {
-    let body = kiln::rt::http_get("https://example.com").await?;
+    let body = voussoir::rt::http_get("https://example.com").await?;
     Ok(json!(body))
 })
 ```

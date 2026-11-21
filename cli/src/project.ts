@@ -1,4 +1,4 @@
-/** Project discovery and the small `kiln.json` contract. */
+/** Project discovery and the small `voussoir.json` contract. */
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -17,9 +17,9 @@ export type ProjectConfig = {
   entry: string;
 };
 
-const CONFIG_FILE = "kiln.json";
+const CONFIG_FILE = "voussoir.json";
 
-/** Walk up from `cwd` to the directory holding kiln.json. */
+/** Walk up from `cwd` to the directory holding voussoir.json. */
 export function findProject(start = process.cwd()): Project | null {
   let dir = resolve(start);
   for (;;) {
@@ -50,7 +50,7 @@ function readConfig(path: string, root: string): ProjectConfig {
     fail(`${path} must contain a JSON object`);
   }
   const obj = raw as Record<string, unknown>;
-  const name = typeof obj.name === "string" ? obj.name : "Kiln App";
+  const name = typeof obj.name === "string" ? obj.name : "Voussoir App";
   return {
     name,
     title: typeof obj.title === "string" ? obj.title : undefined,

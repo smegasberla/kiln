@@ -25,7 +25,7 @@ a cross-compile from Linux.
 ## Windows
 
 The one real difference is the origin: WebView2 cannot intercept a custom scheme,
-so pages are served from `http://kiln.localhost`. See [The two origins](origins.md).
+so pages are served from `http://voussoir.localhost`. See [The two origins](origins.md).
 
 ## Mobile
 

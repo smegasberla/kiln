@@ -1,6 +1,6 @@
-/** The one place that knows how a Kiln project turns into a Rust binary.
+/** The one place that knows how a Voussoir project turns into a Rust binary.
  *
- *  `kiln dev` and `kiln build` differ in exactly two things: whether the
+ *  `voussoir dev` and `voussoir build` differ in exactly two things: whether the
  *  frontend is bundled to disk or served by Bun, and the cargo profile. Both
  *  funnel through `writeAssetTable` so the Rust side is identical either way.
  */

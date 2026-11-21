@@ -10,7 +10,7 @@ The shim turns that into a rejected promise, so ordinary `try`/`catch` works:
 
 ```ts
 try {
-  await window.kiln.invoke("save", { path });
+  await window.voussoir.invoke("save", { path });
 } catch (error) {
   const { kind, method, message } = error as {
     kind: "unknown" | "payload" | "handler" | "panic" | "busy" | "runtime";
@@ -40,13 +40,13 @@ indistinguishable from inside the webview.
 ## Writing an error
 
 ```rust
-fn save(payload: &Value) -> Result<Value, kiln::Error> {
+fn save(payload: &Value) -> Result<Value, voussoir::Error> {
     let path = payload
         .get("path")
         .and_then(Value::as_str)
-        .ok_or_else(|| kiln::Error::Payload("save needs a \"path\" string".to_owned()))?;
+        .ok_or_else(|| voussoir::Error::Payload("save needs a \"path\" string".to_owned()))?;
     std::fs::write(path, b"")
-        .map_err(|error| kiln::Error::Handler(format!("could not write {path}: {error}")))?;
+        .map_err(|error| voussoir::Error::Handler(format!("could not write {path}: {error}")))?;
     Ok(Value::Null)
 }
 ```
@@ -60,12 +60,12 @@ as a sentence, not a debug string.
 A panic inside a handler is caught before it crosses the webview's FFI boundary,
 where unwinding would abort the process. The page gets `kind: "panic"` and the app
 keeps running with its windows and unsaved work intact. The panic is also recorded
-in the diagnostics buffer and in `__kiln_reports`, which is why a crash in the
+in the diagnostics buffer and in `__voussoir_reports`, which is why a crash in the
 field is diagnosable rather than a blank window.
 
 ## Errors that never reach the page
 
 A request dropped by the allowlist check and a bridge message that is not JSON are
-recorded in `kiln dev --verbose` instead. They are programming errors in the shell
+recorded in `voussoir dev --verbose` instead. They are programming errors in the shell
 or the page, not something a user action can cause, and answering them would leak
 which commands exist.

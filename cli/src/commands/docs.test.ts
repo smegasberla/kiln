@@ -6,7 +6,7 @@ import { checkBook, hostTriple, markdownFiles, mdbookAsset, parseSummary } from 
 
 /** A book on disk, so the checks run against real files rather than mocks. */
 function book(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), "kiln-docs-"));
+  const root = mkdtempSync(join(tmpdir(), "voussoir-docs-"));
   for (const [path, content] of Object.entries(files)) {
     const full = join(root, path);
     mkdirSync(join(full, ".."), { recursive: true });

@@ -44,6 +44,6 @@ export function which(bin: string): string | null {
 }
 
 export function fail(message: string): never {
-  console.error(`kiln: ${message}`);
+  console.error(`voussoir: ${message}`);
   process.exit(1);
 }

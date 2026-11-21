@@ -6,14 +6,14 @@ publish = false
 
 [lib]
 # One source of truth for command code. The release shell links this as an
-# rlib; `kiln dev` builds it as a cdylib and swaps it into the running shell.
+# rlib; `voussoir dev` builds it as a cdylib and swaps it into the running shell.
 # The explicit `name` keeps the artifact filename stable (`libcommands.so`,
-# `libcommands.dylib`, `commands.dll`), which is what `kiln dev` watches for.
+# `libcommands.dylib`, `commands.dll`), which is what `voussoir dev` watches for.
 name = "commands"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-# Deliberately the only dependency: `kiln dev` rebuilds this crate alone
+# Deliberately the only dependency: `voussoir dev` rebuilds this crate alone
 # (`cargo build -p {{CRATE}}-commands`) on every edit, and keeping wry, tao
 # and gtk out of its tree is what makes that rebuild fast. Nothing except
 # UTF-8 JSON strings crosses the dylib boundary, so nothing else is needed.

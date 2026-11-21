@@ -15,13 +15,13 @@
 //! Run through `bun scripts/bench.ts --dispatch`, which builds it, checks the
 //! answers, and gates on the pooled path not being slower than the thread one.
 //!
-//! `KILN_BENCH_CALLS` overrides the call count (default 500 per level).
+//! `VOUSSOIR_BENCH_CALLS` overrides the call count (default 500 per level).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use kiln::serde_json::{json, Value};
-use kiln::{AppHandle, Registry};
+use voussoir::serde_json::{json, Value};
+use voussoir::{AppHandle, Registry};
 
 /// Concurrency levels to measure.
 ///
@@ -40,7 +40,7 @@ const LEVELS: &[usize] = &[1, 8, 64, 512];
 const WORK: Duration = Duration::from_millis(5);
 
 fn main() {
-    let calls: usize = std::env::var("KILN_BENCH_CALLS")
+    let calls: usize = std::env::var("VOUSSOIR_BENCH_CALLS")
         .ok()
         .and_then(|text| text.parse().ok())
         .unwrap_or(500);
@@ -52,10 +52,7 @@ fn main() {
     // handler that returns instantly would look like the fastest option.
     for method in ["sync", "thread", "pool"] {
         let reply = registry.dispatch(&handle, method, Value::Null);
-        assert!(
-            reply.contains("\"ok\""),
-            "{method} did not answer: {reply}"
-        );
+        assert!(reply.contains("\"ok\""), "{method} did not answer: {reply}");
         assert!(
             reply.contains(method),
             "{method} answered the wrong thing: {reply}"
@@ -163,9 +160,9 @@ fn build_registry() -> Registry {
 
     registry.add_async_fn("pool", |_app: AppHandle, _payload: Value| async move {
         // A sleep rather than a CPU spin: the point is a handler that yields, not
-        // one that competes for cores. `kiln::rt::sleep` keeps this binary free of
+        // one that competes for cores. `voussoir::rt::sleep` keeps this binary free of
         // a direct tokio dependency.
-        kiln::rt::sleep(WORK).await;
+        voussoir::rt::sleep(WORK).await;
         Ok(json!("pool"))
     });
 

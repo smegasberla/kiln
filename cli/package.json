@@ -1,13 +1,13 @@
 {
-  "name": "kiln-cli",
+  "name": "voussoir-cli",
   "version": "0.2.0",
   "private": true,
   "type": "module",
   "bin": {
-    "kiln": "./src/index.ts"
+    "voussoir": "./src/index.ts"
   },
   "scripts": {
-    "build": "bun build --compile --minify src/index.ts --outfile dist/kiln",
+    "build": "bun build --compile --minify src/index.ts --outfile dist/voussoir",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },

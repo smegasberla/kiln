@@ -30,53 +30,53 @@ import android.webkit.WebView;
  * they share only the natives declared below:
  *
  * <ul>
- *   <li>{@link KilnDialogs}: {@code rfd} has no Android backend. A file picker
+ *   <li>{@link VoussoirDialogs}: {@code rfd} has no Android backend. A file picker
  *       here is a system intent, so the answer is a {@code content://} URI that
  *       has to become a path before Rust can use it.
- *   <li>{@link KilnMenu}: a desktop app has a menu bar, Android has none, so the
+ *   <li>{@link VoussoirMenu}: a desktop app has a menu bar, Android has none, so the
  *       menu only exists while a {@code PopupMenu} is up. That is why installing
  *       it and showing it are two separate calls.
- *   <li>{@link KilnTray}: there is no status area either. The tray becomes a
+ *   <li>{@link VoussoirTray}: there is no status area either. The tray becomes a
  *       notification whose actions are PendingIntents back into this activity.
- *   <li>{@link KilnHttp}: the updater's request goes through
+ *   <li>{@link VoussoirHttp}: the updater's request goes through
  *       {@code HttpURLConnection} so it uses the system certificate store,
  *       which a bundled TLS stack would have to be taught separately.
  * </ul>
  *
  * <p>Every native method declared below is called <em>from</em> Java and
- * implemented in {@code android/src/lib.rs}; every {@code public void kiln*}
+ * implemented in {@code android/src/lib.rs}; every {@code public void voussoir*}
  * method is called <em>from</em> Rust through JNI and implemented here. They are
  * separate directions and the names are only similar.
  */
 public class MainActivity extends WryActivity {
-    static final String TAG = "Kiln";
+    static final String TAG = "Voussoir";
 
     /** Intent extra carrying a tray item id through a notification tap. */
-    static final String TRAY_EXTRA = "kiln.tray.id";
+    static final String TRAY_EXTRA = "voussoir.tray.id";
 
     // Java -> Rust. Package-private rather than private: the service classes call
     // them, and JNI does not care which of the two it is.
 
     /** A picker answered. {@code json} is the reply shape, or null for a cancel. */
-    static native void kilnCompleteDialog(long id, String json);
+    static native void voussoirCompleteDialog(long id, String json);
 
     /** A picker could not be shown. Not the same thing as a cancel. */
-    static native void kilnFailDialog(long id, String message);
+    static native void voussoirFailDialog(long id, String message);
 
-    static native void kilnMenuClicked(String id);
+    static native void voussoirMenuClicked(String id);
 
     /**
      * A lifecycle transition: {@code resume}, {@code pause}, {@code stop}, or
-     * {@code destroy}. The page hears it as {@code kiln.listen("lifecycle", ...)}.
+     * {@code destroy}. The page hears it as {@code voussoir.listen("lifecycle", ...)}.
      *
      * <p>Reported rather than interpreted here. The shell queues a state that
      * arrives before the page can run a script, so calling this from any of the
      * overrides below is safe even before the app has started.
      */
-    static native void kilnLifecycle(String state);
+    static native void voussoirLifecycle(String state);
 
     /** True when the click reached the shell, so a too-early tap can be retried. */
-    static native boolean kilnTrayClicked(String id);
+    static native boolean voussoirTrayClicked(String id);
 
     static {
         System.loadLibrary("{{LIB}}");
@@ -85,9 +85,9 @@ public class MainActivity extends WryActivity {
     // One of each, because each holds state that must outlive a single call: the
     // picker holds the id it is waiting on, the menu the groups it was given, and
     // the tray whether the notification permission has already been asked for.
-    private final KilnDialogs dialogs = new KilnDialogs(this);
-    private final KilnMenu menus = new KilnMenu(this);
-    private final KilnTray tray = new KilnTray(this);
+    private final VoussoirDialogs dialogs = new VoussoirDialogs(this);
+    private final VoussoirMenu menus = new VoussoirMenu(this);
+    private final VoussoirTray tray = new VoussoirTray(this);
 
     @Override
     public void onWebViewCreate(WebView webView) {
@@ -108,7 +108,7 @@ public class MainActivity extends WryActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        kilnLifecycle("resume");
+        voussoirLifecycle("resume");
         // A notification tap that starts the process arrives here rather than at
         // `onNewIntent`, because this activity was created by it.
         tray.deliverClick();
@@ -119,13 +119,13 @@ public class MainActivity extends WryActivity {
         // Reported before super: the shell has to know the page is going away
         // while the activity is still usable, because `super.onPause` is what
         // lets the OS tear the window down.
-        kilnLifecycle("pause");
+        voussoirLifecycle("pause");
         super.onPause();
     }
 
     @Override
     protected void onStop() {
-        kilnLifecycle("stop");
+        voussoirLifecycle("stop");
         super.onStop();
     }
 
@@ -134,7 +134,7 @@ public class MainActivity extends WryActivity {
         // A configuration change destroys the activity and recreates it, so
         // `destroy` is not process death. It is the last moment this instance can
         // report anything, and the shell queues the state either way.
-        kilnLifecycle("destroy");
+        voussoirLifecycle("destroy");
         super.onDestroy();
     }
 
@@ -150,22 +150,22 @@ public class MainActivity extends WryActivity {
      * is the same JSON shape the desktop dialogs return: {@code {"path": ...}},
      * {@code {"paths": [...]}}, or null for a cancel.
      */
-    public void kilnDialog(long id, String requestJson) {
+    public void voussoirDialog(long id, String requestJson) {
         runOnUiThread(() -> dialogs.show(id, requestJson));
     }
 
-    /** Keep the menu until {@link #kilnShowMenu()} can put it on screen. */
-    public void kilnInstallMenu(String json) {
+    /** Keep the menu until {@link #voussoirShowMenu()} can put it on screen. */
+    public void voussoirInstallMenu(String json) {
         menus.install(json);
     }
 
     /** Show the installed menu as a popup anchored on the content view. */
-    public void kilnShowMenu() {
+    public void voussoirShowMenu() {
         menus.show();
     }
 
     /** Post the tray configuration as a notification. */
-    public void kilnNotify(String json) {
+    public void voussoirNotify(String json) {
         tray.post(json);
     }
 
@@ -175,7 +175,7 @@ public class MainActivity extends WryActivity {
      * <p>Blocking, and must stay off the UI thread. Rust calls this from the
      * updater's worker thread, which is what makes the blocking call safe.
      */
-    public String kilnHttpGet(String url) {
-        return KilnHttp.get(url);
+    public String voussoirHttpGet(String url) {
+        return VoussoirHttp.get(url);
     }
 }

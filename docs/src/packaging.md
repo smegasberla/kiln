@@ -1,6 +1,6 @@
 # Packaging
 
-`kiln package` builds the release binary and wraps it in the format users on that
+`voussoir package` builds the release binary and wraps it in the format users on that
 platform actually install. It runs on the platform you are packaging for; there is
 no cross-packaging.
 
@@ -11,9 +11,9 @@ no cross-packaging.
 | Windows | the `.exe` in a `.zip`, with the WebView2 requirement noted |
 
 ```bash
-kiln package                      # default icon
-kiln package --icon icon.png      # 256x256 PNG, or .icns on macOS
-kiln package --identifier com.example.notes
+voussoir package                      # default icon
+voussoir package --icon icon.png      # 256x256 PNG, or .icns on macOS
+voussoir package --identifier com.example.notes
 ```
 
 An icon is optional. Without one the packager draws a default, so a build never
@@ -32,9 +32,9 @@ rather than a design intent.
 
 ## Signing
 
-Kiln does not attempt to sign. Signing needs credentials the tool cannot invent,
+Voussoir does not attempt to sign. Signing needs credentials the tool cannot invent,
 and a package that looks signed without being signed is worse than an honestly
-unsigned one. `kiln package` prints the exact command for the platform instead:
+unsigned one. `voussoir package` prints the exact command for the platform instead:
 
 - macOS: `codesign` then `notarytool submit`
 - Windows: `signtool sign`
@@ -47,7 +47,7 @@ downloadable result.
 ## Size
 
 A release binary is a few megabytes: `opt-level = "s"`, `lto = true`, `strip =
-true`, `codegen-units = 1`. `kiln build --size` prints the result, and
+true`, `codegen-units = 1`. `voussoir build --size` prints the result, and
 `verify.ts` fails if it grows past the recorded bound without the README being
 updated.
 

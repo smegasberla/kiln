@@ -3,7 +3,7 @@
 Feature plan only. The original project plan lives in git history
 (`git show 93caa52:PLAN.md`).
 
-Goal: `kiln dev` recompiles and swaps command code into the running app without
+Goal: `voussoir dev` recompiles and swaps command code into the running app without
 restarting the process or the webview. Release builds keep compiling commands
 statically into the single shell binary, with zero dependency or size change.
 
@@ -11,7 +11,7 @@ statically into the single shell binary, with zero dependency or size change.
 
 1. Release builds unaffected: static linking, no `libloading`, same shell size.
 2. No new dependency in the release tree. `libloading` is behind a cargo
-   feature that `kiln build --release` never enables.
+   feature that `voussoir build --release` never enables.
 3. Desktop only. Android/iOS out of scope for v1 (dynamic loading is
    restricted on mobile).
 4. A panic in a hot-reloaded command must not kill the host (envelope error,
@@ -34,13 +34,13 @@ accident.
 **ABI contract (v1, fixed).** Three C symbols, no per-command symbols:
 
 ```text
-kiln_dispatch(method: *const c_char, payload: *const c_char) -> *mut c_char
+voussoir_dispatch(method: *const c_char, payload: *const c_char) -> *mut c_char
     UTF-8 in, UTF-8 out; returns the standard envelope {"ok":…}|{"error":…}.
     Body catches all panics (catch_unwind) so nothing unwinds across the
     dylib boundary; the host wraps the call in catch_unwind again (belt).
-kiln_free(ptr: *mut c_char)
-    Frees a pointer returned by kiln_dispatch (cross-allocator safety).
-kiln_methods() -> *const c_char
+voussoir_free(ptr: *mut c_char)
+    Frees a pointer returned by voussoir_dispatch (cross-allocator safety).
+voussoir_methods() -> *const c_char
     JSON array of the command names this build serves, so the host can list
     hot commands diagnostically and distinguish "removed" from "unknown".
 ```
@@ -52,7 +52,7 @@ through the hot path. A name removed from the commands crate resolves to
 "unknown command" after the next reload (no stale static copy: the table is
 only registered statically when the `hot-reload` feature is off).
 
-**Swap safety.** New dylibs are copied to `target/kiln-hot/commands-<gen>.<ext>`
+**Swap safety.** New dylibs are copied to `target/voussoir-hot/commands-<gen>.<ext>`
 (temp + rename) and pointed at by `latest.json`. The shell polls that file on a
 background thread (std only, no watcher dependency). Replaced libraries are
 never unloaded — kept alive for the life of the dev session; correctness over
@@ -64,7 +64,7 @@ not survive a reload. Persistent state must be owned by the shell and passed
 into each call. No state-migration system in v1.
 
 **Fast rebuild assumption.** The commands crate depends on `serde_json` only
-(no `kiln`, no wry/tao/gtk), so `cargo build -p commands` is the scoped
+(no `voussoir`, no wry/tao/gtk), so `cargo build -p commands` is the scoped
 rebuild. Actual rebuild-to-reload latency is measured and reported every
 reload (built timestamp in `latest.json`, shell prints total).
 
@@ -78,24 +78,24 @@ reload (built timestamp in `latest.json`, shell prints total).
   `open_settings` locally, when `hot-reload` is off.
 - `init.ts` writes the new files; parity checker learns to read the commands
   crate alongside `main.rs` so desktop/Android command names still match.
-- **Done when:** `kiln init` → `kiln build` produces a working app; parity and
-  all CLI tests pass; `cargo test -p kiln` unaffected.
+- **Done when:** `voussoir init` → `voussoir build` produces a working app; parity and
+  all CLI tests pass; `cargo test -p voussoir` unaffected.
 
 ### Phase 2 — ABI boundary in the commands crate
-- `kiln_dispatch` / `kiln_free` / `kiln_methods` exports, panic caught inside,
+- `voussoir_dispatch` / `voussoir_free` / `voussoir_methods` exports, panic caught inside,
   envelope produced by the same shape the static path uses.
 - **Done when:** commands-crate unit tests cover: happy dispatch, unknown
   method, malformed payload, and a panicking command returning
   `{"error":…}` instead of unwinding.
 
 ### Phase 3 — Shell: feature, swap, registry routing
-- `kiln` gains feature `hot-reload = ["dep:libloading"]` (never part of
+- `voussoir` gains feature `hot-reload = ["dep:libloading"]` (never part of
   `full`), module `hot.rs`: load, generation swap under `RwLock`, keep-alive
-  list, poll thread on `KILN_HOT_DIR/latest.json`, `call()` wrapped in
+  list, poll thread on `VOUSSOIR_HOT_DIR/latest.json`, `call()` wrapped in
   `catch_unwind`.
 - `Registry` gains an optional hot slot; `dispatch_deferred` falls through to
   it after static handlers, still behind the config allowlist.
-- `App::hot_commands_from_env()` (reads `KILN_HOT_LIB`, `KILN_HOT_DIR`;
+- `App::hot_commands_from_env()` (reads `VOUSSOIR_HOT_LIB`, `VOUSSOIR_HOT_DIR`;
   loud message when the feature is on but the env is absent).
 - **Done when:** unit tests cover swap-with-test-`extern "C"` functions,
   panic containment through `call()`, allowlist still narrowing hot methods,
@@ -112,7 +112,7 @@ reload (built timestamp in `latest.json`, shell prints total).
   old behavior retained, error shown.
 
 ### Phase 5 — Verification harness
-- `scripts/verify-hot.ts`: scaffolds an app, drives `kiln dev` headless
+- `scripts/verify-hot.ts`: scaffolds an app, drives `voussoir dev` headless
   (xvfb), page reports each `greet` reply + a monotonically increasing
   page-side counter over HTTP to the harness. Asserts: reply changes after an
   edit while the counter never resets (no process/webview restart); panic
@@ -132,7 +132,7 @@ reload (built timestamp in `latest.json`, shell prints total).
 - **Done when:** docs match behavior (each claim maps to a verified check).
 
 ### Phase 7 — Full suite, commit, push
-- `cargo test -p kiln --all-features`, `cargo clippy --all-features -D
+- `cargo test -p voussoir --all-features`, `cargo clippy --all-features -D
   warnings`, `bun test`, `bun run typecheck`, `bun scripts/verify.ts`,
   `bun scripts/verify-hot.ts` all green; commit; push.
 

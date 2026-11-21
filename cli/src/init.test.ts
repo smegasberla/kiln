@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 function scaffold(flags: Args["flags"] = {}): string {
-  const root = mkdtempSync(join(tmpdir(), "kiln-init-"));
+  const root = mkdtempSync(join(tmpdir(), "voussoir-init-"));
   roots.push(root);
   const dir = join(root, "app");
   const args: Args = { command: "init", positionals: [dir], flags, help: false };
@@ -29,7 +29,7 @@ function scaffold(flags: Args["flags"] = {}): string {
   return dir;
 }
 
-describe("kiln init", () => {
+describe("voussoir init", () => {
   test("a default project has both shells", () => {
     const dir = scaffold({ name: "Both Shells" });
     expect(existsSync(join(dir, "native", "src", "main.rs"))).toBe(true);

@@ -12,7 +12,7 @@ Three tools exist for it, and each is measured rather than asserted:
   contract. It is the source of the guarantees claimed elsewhere in this book.
 - `bun scripts/bench.ts` measures cold start against a bare `wry`+`tao` binary, and
   with `--dispatch` measures the async dispatch path.
-- `kiln dev --verbose` records reload, dispatch and denial events while you work.
+- `voussoir dev --verbose` records reload, dispatch and denial events while you work.
 
 ## What "verified" means here
 

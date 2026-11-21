@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use kiln::serde_json::{json, Value};
-use kiln::{App, AppHandle};
+use voussoir::serde_json::{json, Value};
+use voussoir::{App, AppHandle};
 
 /// Everything the app knows, held in one place.
 ///
@@ -98,7 +98,7 @@ impl Scratch {
     /// database file: a plain-text notebook whose contents need this app to read
     /// is a worse deal for the user than one that does not.
     fn load(app_name: &str) -> Self {
-        let dir = kiln::data_dir(app_name);
+        let dir = voussoir::data_dir(app_name);
         let mut documents = BTreeMap::new();
 
         if let Some(dir) = &dir {
@@ -230,7 +230,7 @@ pub fn build(app_name: &'static str) -> App {
     let state = Arc::new(Mutex::new(Scratch::load(app_name)));
 
     App::new()
-        .config(include_str!("../../kiln.json"))
+        .config(include_str!("../../voussoir.json"))
         .assets(crate::assets::ASSETS)
         .command("current", {
             let state = Arc::clone(&state);
@@ -242,7 +242,7 @@ pub fn build(app_name: &'static str) -> App {
                 let key = payload.get("key").and_then(Value::as_str).unwrap_or_default();
                 let mut scratch = state.lock().unwrap();
                 if !scratch.documents.contains_key(key) {
-                    return Err(kiln::Error::Handler(format!("no note named {key}")));
+                    return Err(voussoir::Error::Handler(format!("no note named {key}")));
                 }
                 scratch.open = Some(key.to_owned());
                 Ok(scratch.snapshot())
@@ -265,7 +265,7 @@ pub fn build(app_name: &'static str) -> App {
                 scratch.open = Some(key.clone());
                 // A note exists on disk before it has content, so the directory
                 // listing matches the sidebar even if the app dies immediately.
-                scratch.write(&key).map_err(kiln::Error::Handler)?;
+                scratch.write(&key).map_err(voussoir::Error::Handler)?;
                 Ok(scratch.snapshot())
             }
         })
@@ -276,7 +276,7 @@ pub fn build(app_name: &'static str) -> App {
                 let title = payload.get("title").and_then(Value::as_str).unwrap_or_default().to_owned();
                 let mut scratch = state.lock().unwrap();
                 let Some(document) = scratch.documents.get_mut(&key) else {
-                    return Err(kiln::Error::Handler(format!("no note named {key}")));
+                    return Err(voussoir::Error::Handler(format!("no note named {key}")));
                 };
                 // The title is the first line of the file, so renaming rewrites the
                 // file rather than storing a second name somewhere else.
@@ -287,7 +287,7 @@ pub fn build(app_name: &'static str) -> App {
                 };
                 document.title = title_of(&document.body, &key);
                 document.modified = now_millis();
-                scratch.write(&key).map_err(kiln::Error::Handler)?;
+                scratch.write(&key).map_err(voussoir::Error::Handler)?;
                 Ok(scratch.snapshot())
             }
         })
@@ -318,7 +318,7 @@ pub fn build(app_name: &'static str) -> App {
                 let reply = {
                     let mut scratch = state.lock().unwrap();
                     let Some(document) = scratch.documents.get_mut(&key) else {
-                        return Err(kiln::Error::Handler(format!("no note named {key}")));
+                        return Err(voussoir::Error::Handler(format!("no note named {key}")));
                     };
                     if let Some(body) = body {
                         document.body = body;
@@ -342,7 +342,7 @@ pub fn build(app_name: &'static str) -> App {
                         "snapshot": snapshot,
                     }));
                 }
-                saved.map_err(kiln::Error::Handler)?;
+                saved.map_err(voussoir::Error::Handler)?;
                 Ok(json!({ "saved": true, "statistics": statistics, "snapshot": snapshot }))
             }
         })
@@ -356,7 +356,7 @@ pub fn build(app_name: &'static str) -> App {
         // Multi-window is desktop-only, and the page hides the button when it is
         // not, so this is only reachable if a page asks anyway.
         .command("open_second", |app: &AppHandle, _payload| {
-            app.open_window(kiln::WindowOptions {
+            app.open_window(voussoir::WindowOptions {
                 label: Some("notes".to_owned()),
                 title: Some("Scratch notes".to_owned()),
                 width: Some(560.0),

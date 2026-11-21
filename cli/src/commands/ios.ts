@@ -1,4 +1,4 @@
-/** `kiln ios <build|run|verify>`: the iOS half of a Kiln project.
+/** `voussoir ios <build|run|verify>`: the iOS half of a Voussoir project.
  *
  *  The toolchain is entirely different from Android's: a Rust staticlib that
  *  Xcode links, instead of a `.so` an activity loads. Everything else is shared
@@ -19,7 +19,7 @@ import { requireProject, type Project } from "../project.ts";
 import { checkParity } from "../parity.ts";
 import { run } from "../proc.ts";
 
-/** Targets Kiln builds, and the SDK `xcodebuild` uses for each. */
+/** Targets Voussoir builds, and the SDK `xcodebuild` uses for each. */
 const TARGETS: Record<string, { target: string; sdk: string; products: string }> = {
   sim: { target: "aarch64-apple-ios-sim", sdk: "iphonesimulator", products: "Debug-iphonesimulator" },
   device: { target: "aarch64-apple-ios", sdk: "iphoneos", products: "Debug-iphoneos" },
@@ -33,7 +33,7 @@ export function iosDir(project: Project): string {
 export function iosLibName(project: Project): string {
   const manifest = join(iosDir(project), "Cargo.toml");
   if (!existsSync(manifest)) {
-    throw new Error(`no iOS crate at ${manifest}; run kiln init in this project`);
+    throw new Error(`no iOS crate at ${manifest}; run voussoir init in this project`);
   }
   const text = readFileSync(manifest, "utf8");
   const match = /\[lib\][\s\S]*?name\s*=\s*"([^"]+)"/.exec(text);
@@ -45,7 +45,7 @@ export function iosLibName(project: Project): string {
 
 /** The XcodeGen target/scheme name, read from the committed project.yml.
  *
- *  `kiln init` writes `name: <crate>-iOS` once at the top and uses it for both
+ *  `voussoir init` writes `name: <crate>-iOS` once at the top and uses it for both
  *  the target and the scheme, so the first `name:` line is the single source. */
 export function readScheme(project: Project): string {
   const file = join(iosDir(project), "project.yml");
@@ -75,13 +75,13 @@ export async function build(args: Args): Promise<number> {
   // "unknown command". Catch it at build time instead.
   const parity = checkParity(project.root);
   if (!parity.ok) {
-    console.error(`kiln: command parity problem between the shells\n  ${parity.message}`);
+    console.error(`voussoir: command parity problem between the shells\n  ${parity.message}`);
     return 1;
   }
   console.log(`  ${parity.message}`);
 
   // The frontend must be bundled before it can be embedded.
-  console.log(`kiln ios build: ${project.config.name} (${variant})`);
+  console.log(`voussoir ios build: ${project.config.name} (${variant})`);
   await bundle(project, true);
   writeAssetTable(project, ios);
 
@@ -160,11 +160,11 @@ export async function runOnDevice(args: Args): Promise<number> {
   const udid = await bootedSimulator();
   const app = findApp(project, "sim");
   if (!app) {
-    console.error("kiln: no simulator app yet; run `kiln ios build` first");
+    console.error("voussoir: no simulator app yet; run `voussoir ios build` first");
     return 1;
   }
 
-  console.log(`kiln ios run: ${bundle}`);
+  console.log(`voussoir ios run: ${bundle}`);
   await run(["xcrun", "simctl", "install", udid, app], { silent: true });
   await run(["xcrun", "simctl", "terminate", udid, bundle], { silent: true }).catch(() => {});
 
@@ -185,8 +185,8 @@ export async function runOnDevice(args: Args): Promise<number> {
  *
  *  Two markers, both read from the app's own stdout through `--console-pty`,
  *  because on iOS there is no logcat: the console is the only observer that
- *  sees both sides. `KILN_IOS_START` proves the staticlib loaded and Rust is
- *  running; `KILN_IOS_ROUND_TRIP` is printed by the shell's `greet` command,
+ *  sees both sides. `VOUSSOIR_IOS_START` proves the staticlib loaded and Rust is
+ *  running; `VOUSSOIR_IOS_ROUND_TRIP` is printed by the shell's `greet` command,
  *  so it only appears after the page has loaded, called a command, and had
  *  that command answered — the full transport, shim and registry loop. */
 export async function verify(args: Args): Promise<number> {
@@ -200,7 +200,7 @@ export async function verify(args: Args): Promise<number> {
   }
   const app = findApp(project, "sim");
   if (!app) {
-    console.error("kiln: no simulator app; run `kiln ios build` first");
+    console.error("voussoir: no simulator app; run `voussoir ios build` first");
     return 1;
   }
 
@@ -224,7 +224,7 @@ export async function verify(args: Args): Promise<number> {
       text += new TextDecoder().decode(value);
       // Stop waiting as soon as the round trip lands; a healthy launch needs
       // seconds, and the timeout only exists for a wedged one.
-      if (text.includes("KILN_IOS_ROUND_TRIP")) {
+      if (text.includes("VOUSSOIR_IOS_ROUND_TRIP")) {
         proc.kill();
         break;
       }
@@ -234,14 +234,14 @@ export async function verify(args: Args): Promise<number> {
   }
 
   const problems: string[] = [];
-  if (!text.includes("KILN_IOS_START")) {
+  if (!text.includes("VOUSSOIR_IOS_START")) {
     problems.push("the app never reached its Rust entry");
   }
-  if (!text.includes("KILN_IOS_ROUND_TRIP")) {
+  if (!text.includes("VOUSSOIR_IOS_ROUND_TRIP")) {
     problems.push("the page never completed a command round trip");
   }
   if (problems.length > 0) {
-    console.error(`kiln ios verify: ${problems.join("; ")}`);
+    console.error(`voussoir ios verify: ${problems.join("; ")}`);
     const tail = text.trimEnd().split("\n").slice(-20).join("\n");
     if (tail) console.error(tail);
     return 1;

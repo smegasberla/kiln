@@ -8,8 +8,8 @@ name = "scratch"
 crate-type = ["cdylib"]
 
 [dependencies]
-kiln = { path = "../../../../kiln", features = ["full"] }
-kiln-android = { path = "../../../../kiln-android" }
+voussoir = { path = "../../../../voussoir", features = ["full"] }
+voussoir-android = { path = "../../../../voussoir-android" }
 # Required by tao's and wry's android_binding! macros, which expand to items here.
 tao = { version = "0.37", default-features = false }
 wry = { version = "0.57" }

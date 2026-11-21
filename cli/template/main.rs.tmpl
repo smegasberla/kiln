@@ -1,13 +1,13 @@
-//! {{NAME}} - a Kiln desktop app.
+//! {{NAME}} - a Voussoir desktop app.
 //!
 //! Everything shipped is here: the windows and the embedded frontend bytes.
 //! Commands live in the `commands` crate beside this file — release links them
-//! statically into this binary, `kiln dev` hot-reloads them from a cdylib.
+//! statically into this binary, `voussoir dev` hot-reloads them from a cdylib.
 //! `cargo build --release` produces the whole app.
 
 #[cfg(not(feature = "hot-reload"))]
 use commands::{commands, Kind};
-use kiln::{App, AppHandle, Error, WindowOptions};
+use voussoir::{App, AppHandle, Error, WindowOptions};
 
 mod assets;
 
@@ -17,8 +17,8 @@ mod assets;
 /// number belongs gets a `payload` rejection naming the command, instead of a
 /// silently ignored field that looks like a UI bug. Types come from the
 /// re-exported `serde`, so this needs no extra dependency.
-#[derive(Debug, Default, kiln::serde::Deserialize)]
-#[serde(crate = "kiln::serde")]
+#[derive(Debug, Default, voussoir::serde::Deserialize)]
+#[serde(crate = "voussoir::serde")]
 struct SettingsArgs {
     /// Window title. Omitted by pages that just want the default.
     #[serde(default)]
@@ -27,7 +27,7 @@ struct SettingsArgs {
 
 fn main() -> Result<(), Error> {
     let mut app = App::new()
-        .config(include_str!("../../kiln.json"))
+        .config(include_str!("../../voussoir.json"))
         .assets(assets::ASSETS)
         // Shell-service commands stay in the shell: they take an
         // `&AppHandle`, and a handle type cannot cross the cdylib boundary
@@ -44,14 +44,14 @@ fn main() -> Result<(), Error> {
                 // renders untrusted content is kept away from the rest.
                 allowlist: None,
             })?;
-            app.emit_to(Some(&label), "settings:opened", kiln::serde_json::json!(null));
+            app.emit_to(Some(&label), "settings:opened", voussoir::serde_json::json!(null));
             Ok(())
         })
         // Keep devtools available in the build your users run (F12).
         .devtools(true);
 
     // Release: the table links in statically. Dev (`--features hot-reload`,
-    // set up by `kiln dev`): the table lives in the dylib instead, so a stale
+    // set up by `voussoir dev`): the table lives in the dylib instead, so a stale
     // copy in this binary can never shadow what you just edited.
     #[cfg(not(feature = "hot-reload"))]
     for command in commands() {
@@ -61,10 +61,10 @@ fn main() -> Result<(), Error> {
         // look like a registration whose name it cannot read.
         app = match command.kind {
             Kind::Sync => App::command(app, command.name, |_app, payload| {
-                (command.run)(&payload).map_err(kiln::Error::Handler)
+                (command.run)(&payload).map_err(voussoir::Error::Handler)
             }),
             Kind::Async => App::async_command(app, command.name, |_app, payload| {
-                (command.run)(&payload).map_err(kiln::Error::Handler)
+                (command.run)(&payload).map_err(voussoir::Error::Handler)
             }),
         };
     }

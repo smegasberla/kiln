@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="vs-title">
+  <title id="vs-title">Voussoir</title>
+  <defs>
+    <linearGradient id="stone" x1="0.12" y1="0.05" x2="0.72" y2="1">
+      <stop offset="0" stop-color="#9BA3B8"/>
+      <stop offset="0.24" stop-color="#78809A"/>
+      <stop offset="0.58" stop-color="#4F5569"/>
+      <stop offset="0.82" stop-color="#353A4A"/>
+      <stop offset="1" stop-color="#242935"/>
+    </linearGradient>
+    <linearGradient id="ember" x1="0.42" y1="0" x2="0.58" y2="1">
+      <stop offset="0" stop-color="#FFEDC6"/>
+      <stop offset="0.16" stop-color="#FFC86E"/>
+      <stop offset="0.5" stop-color="#FB8422"/>
+      <stop offset="0.8" stop-color="#C34C0C"/>
+      <stop offset="1" stop-color="#7B2305"/>
+    </linearGradient>
+    <radialGradient id="heat" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFB45C" stop-opacity="0.6"/>
+      <stop offset="0.42" stop-color="#EE7420" stop-opacity="0.22"/>
+      <stop offset="0.75" stop-color="#B23E09" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#8A2E06" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <circle cx="128" cy="72" r="52" fill="url(#heat)"/>
+
+  <g id="jambs">
+    <path d="M22.0 168 H234.0 V189.5 H22.0 Z" fill="url(#stone)"/>
+    <path d="M22.0 168 H234.0 V189.5 H22.0 Z" fill="#C7CFE0" opacity="0.05"/>
+    <path d="M22.0 189.5 H234.0 V210.5 H22.0 Z" fill="url(#stone)"/>
+    <path d="M22.0 210.5 H234.0 V232 H22.0 Z" fill="url(#stone)"/>
+    <path d="M22.0 210.5 H234.0 V232 H22.0 Z" fill="#C7CFE0" opacity="0.05"/>
+  </g>
+  <g id="arch">
+    <path d="M22 168 A106 106 0 0 1 28.39 131.75 L60.34 143.37 A72 72 0 0 0 56 168 Z" fill="url(#stone)"/>
+    <path d="M28.39 131.75 A106 106 0 0 1 46.8 99.86 L72.84 121.72 A72 72 0 0 0 60.34 143.37 Z" fill="url(#stone)"/>
+    <path d="M28.39 131.75 A106 106 0 0 1 46.8 99.86 L72.84 121.72 A72 72 0 0 0 60.34 143.37 Z" fill="#C7CFE0" opacity="0.055"/>
+    <path d="M46.8 99.86 A106 106 0 0 1 75 76.2 L92 105.65 A72 72 0 0 0 72.84 121.72 Z" fill="url(#stone)"/>
+    <path d="M75 76.2 A106 106 0 0 1 109.59 63.61 L115.5 97.09 A72 72 0 0 0 92 105.65 Z" fill="url(#stone)"/>
+    <path d="M75 76.2 A106 106 0 0 1 109.59 63.61 L115.5 97.09 A72 72 0 0 0 92 105.65 Z" fill="#C7CFE0" opacity="0.055"/>
+    <path d="M146.41 63.61 A106 106 0 0 1 181 76.2 L164 105.65 A72 72 0 0 0 140.5 97.09 Z" fill="url(#stone)"/>
+    <path d="M146.41 63.61 A106 106 0 0 1 181 76.2 L164 105.65 A72 72 0 0 0 140.5 97.09 Z" fill="#C7CFE0" opacity="0.055"/>
+    <path d="M181 76.2 A106 106 0 0 1 209.2 99.86 L183.16 121.72 A72 72 0 0 0 164 105.65 Z" fill="url(#stone)"/>
+    <path d="M209.2 99.86 A106 106 0 0 1 227.61 131.75 L195.66 143.37 A72 72 0 0 0 183.16 121.72 Z" fill="url(#stone)"/>
+    <path d="M209.2 99.86 A106 106 0 0 1 227.61 131.75 L195.66 143.37 A72 72 0 0 0 183.16 121.72 Z" fill="#C7CFE0" opacity="0.055"/>
+    <path d="M227.61 131.75 A106 106 0 0 1 234 168 L200 168 A72 72 0 0 0 195.66 143.37 Z" fill="url(#stone)"/>
+  </g>
+
+  <g stroke="#12151C" stroke-width="2.4" stroke-linecap="butt" fill="none">
+    
+    <path d="M60.81 143.55 L27.92 131.57"/>
+    <path d="M73.23 122.04 L46.42 99.54"/>
+    <path d="M92.25 106.08 L74.75 75.77"/>
+    <path d="M115.58 97.59 L109.51 63.12"/>
+    <path d="M140.42 97.59 L146.49 63.12"/>
+    <path d="M163.75 106.08 L181.25 75.77"/>
+    <path d="M182.77 122.04 L209.58 99.54"/>
+    <path d="M195.19 143.55 L228.08 131.57"/>
+    
+    <path d="M22.0 189.5 H234.0"/>
+    <path d="M22.0 210.5 H234.0"/>
+  </g>
+
+  <g id="keystone">
+    <path d="M109.59 63.61 A106 106 0 0 1 146.41 63.61 L140.5 97.09 A72 72 0 0 0 115.5 97.09 Z" fill="url(#ember)"/>
+    <path d="M109.59 63.61 A106 106 0 0 1 146.41 63.61 L140.5 97.09 A72 72 0 0 0 115.5 97.09 Z" fill="none" stroke="#FFEFD2" stroke-width="1.4" opacity="0.45"/>
+  </g>
+
+  <path d="M22 168 A106 106 0 0 1 234 168 L231.5 168 A103.5 103.5 0 0 0 24.5 168 Z" fill="#AEB7CC" opacity="0.5"/>
+  <path d="M50.5 168 A77.5 77.5 0 0 1 205.5 168 L200 168 A72 72 0 0 0 56 168 Z" fill="#0A0C10" opacity="0.45"/>
+  <path d="M22.0 168.0 H234.0" stroke="#12151C" stroke-width="2.4" fill="none"/>
+</svg>

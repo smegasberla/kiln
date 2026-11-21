@@ -1,14 +1,14 @@
 # Security model
 
 The page is untrusted. Not because you wrote it, but because it renders content
-you did not: markdown, remote images, an OAuth page, a link a user clicked. Kiln's
+you did not: markdown, remote images, an OAuth page, a link a user clicked. Voussoir's
 policy assumes the worst about what runs inside the webview and gives Rust the
 final say over what it can reach.
 
 Four rules, each enforced by the shell and each proved by a test:
 
 1. **The page is served from one origin, and only that origin.** Production serves
-   `kiln://localhost`; the security policy lists it and nothing else.
+   `voussoir://localhost`; the security policy lists it and nothing else.
 2. **Navigation leaves the app only where you allow it.** Anything else is refused
    by the shell and recorded, so a link does not silently become a full-page
    browser.
@@ -35,7 +35,7 @@ blocked, `eval` was blocked, and navigation did not leave the app.
 
 - It does not sandbox the Rust side. A command you wrote is trusted completely,
   which is why the interesting commands are the ones you register.
-- It does not stop a webview engine CVE. Keep the platform webview updated; Kiln
+- It does not stop a webview engine CVE. Keep the platform webview updated; Voussoir
   uses the OS one, so that is your OS update path.
 - It does not encrypt anything. `storage` is a JSON file in the platform data
   directory, readable by the user. Do not put secrets in it.

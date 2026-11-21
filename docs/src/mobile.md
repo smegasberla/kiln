@@ -2,21 +2,21 @@
 
 Both mobile platforms reuse the command contract, registry, allowlist and security
 policy. What differs is the transport and who owns the event loop, and therefore
-which `kiln` commands apply.
+which `voussoir` commands apply.
 
 ## Android
 
 ```bash
-kiln android build            # APK for arm64-v8a
-kiln android build --aab      # signed App Bundle for Play
-kiln android build --abi x86_64 --api 30
-kiln android run              # install and launch on a device or emulator
+voussoir android build            # APK for arm64-v8a
+voussoir android build --aab      # signed App Bundle for Play
+voussoir android build --abi x86_64 --api 30
+voussoir android run              # install and launch on a device or emulator
 ```
 
-`kiln init` scaffolds `android/` as a Gradle project, so nothing is generated at
+`voussoir init` scaffolds `android/` as a Gradle project, so nothing is generated at
 build time except the Kotlin that wry writes (which is git-ignored).
 
-The platform is different enough that it lives in its own crate, `kiln-android`:
+The platform is different enough that it lives in its own crate, `voussoir-android`:
 
 - **The activity owns the event loop.** Desktop creates one and runs it; Android is
   handed one from `onCreate` and drives it from the activity's callbacks.
@@ -34,14 +34,14 @@ a `FATAL EXCEPTION` or an `UnsatisfiedLinkError`.
 ## iOS
 
 ```bash
-kiln ios build                # simulator app
-kiln ios build --target device
-kiln ios run                  # install and launch on a booted simulator
-kiln ios verify               # build, install, launch, assert the Rust entry is reached
+voussoir ios build                # simulator app
+voussoir ios build --target device
+voussoir ios run                  # install and launch on a booted simulator
+voussoir ios verify               # build, install, launch, assert the Rust entry is reached
 ```
 
 iOS keeps the custom-scheme transport: `WKURLSchemeHandler` intercepts
-`kiln://localhost` exactly as the desktop does, so the origin and the security
+`voussoir://localhost` exactly as the desktop does, so the origin and the security
 policy are the desktop ones. This is deliberate and is the one mobile platform where
 the `http://` workaround is not needed.
 
@@ -53,7 +53,7 @@ Two differences matter in practice:
   the `on_ready` contract are identical.
 - **Some features report unsupported.** Menus, dialogs, tray and the updater's
   endpoint fetch say so in their error rather than silently doing nothing. A page
-  should branch on `kiln.platform` for the affordance, not on the error.
+  should branch on `voussoir.platform` for the affordance, not on the error.
 
 ## What is shared
 

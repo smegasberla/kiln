@@ -1,0 +1,25 @@
+[package]
+name = "voussoir-android"
+version = "0.1.0"
+edition = "2021"
+description = "Android bootstrap for Voussoir: JNI entry, activity glue, and an invoke bridge"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# The crate root is `#![cfg(target_os = "android")]`, so off Android this
+# library compiles to nothing — and its dependencies must not compile either:
+# `ndk` pulls `ndk-sys`, whose build script refuses to build on any other
+# target, which is exactly what used to break `cargo test --workspace` on a
+# desktop before a single test ran.
+[target.'cfg(target_os = "android")'.dependencies]
+voussoir = { path = "../voussoir" }
+jni = "0.21"
+# `ThreadLooper` is the type tao hands to its activity-create hook.
+ndk = "0.9"
+serde_json = "1"
+tao = { version = "0.37", default-features = false }
+wry = { version = "0.57" }
+
+[lib]
+name = "voussoir_android"
+crate-type = ["cdylib", "rlib"]

@@ -7,8 +7,8 @@
 //! inside a function because tao's macro expands to a block, which Rust rejects at
 //! module scope; `#[no_mangle]` still exports from within a function.
 
-use kiln::serde_json::{json, Value};
-use kiln::{App, AppHandle};
+use voussoir::serde_json::{json, Value};
+use voussoir::{App, AppHandle};
 
 mod assets;
 
@@ -22,14 +22,14 @@ pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_android_1main(
 }
 
 fn android_main() {
-    kiln_android::register_jni!({{DOMAIN}}, {{LEAF}}, Rust, android_main);
+    voussoir_android::register_jni!({{DOMAIN}}, {{LEAF}}, Rust, android_main);
 
     // The same command set as `native/src/main.rs`. The frontend is shared, so a
     // command registered on only one platform is a missing command at runtime;
-    // `kiln android build` warns when the two lists differ.
-    kiln_android::run(
+    // `voussoir android build` warns when the two lists differ.
+    voussoir_android::run(
         App::new()
-            .config(include_str!("../../kiln.json"))
+            .config(include_str!("../../voussoir.json"))
             .assets(assets::ASSETS)
             .command("greet", |_app, payload: Value| {
                 let name = payload
@@ -48,7 +48,7 @@ fn android_main() {
             // Android is one window by design, so this reports why rather than
             // silently doing nothing: a second window has nowhere to go.
             .command("open_settings", |_app: &AppHandle, _payload| {
-                Err(kiln::Error::Handler(
+                Err(voussoir::Error::Handler(
                     "second windows are desktop-only; use an in-page panel on Android"
                         .to_owned(),
                 ))
@@ -62,7 +62,7 @@ fn android_main() {
 // none of those method names contains an underscore, so no `_1` escaping shows
 // up here; the package half of the name is already escaped by `{{JNI_PACKAGE}}`.
 //
-// They live in the app rather than in `kiln-android` because the prefix names
+// They live in the app rather than in `voussoir-android` because the prefix names
 // the app's own package, which the library cannot know.
 
 /// A Java string as Rust text, or `None` when it was null or unreadable.
@@ -77,20 +77,20 @@ fn text_of(env: &mut jni::JNIEnv, value: &jni::objects::JString) -> Option<Strin
 }
 
 /// The picker answered. `json` is the desktop dialogs' reply shape, or null for
-/// a cancel, which `kilnCompleteDialog` passes through as such.
+/// a cancel, which `voussoirCompleteDialog` passes through as such.
 #[no_mangle]
-pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_kilnCompleteDialog(
+pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_voussoirCompleteDialog(
     mut env: jni::JNIEnv,
     _class: jni::objects::JClass,
     id: jni::sys::jlong,
     json: jni::objects::JString,
 ) {
-    kiln::complete_dialog(id as u64, text_of(&mut env, &json));
+    voussoir::complete_dialog(id as u64, text_of(&mut env, &json));
 }
 
 /// The picker could not be shown at all, which is not the same as a cancel.
 #[no_mangle]
-pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_kilnFailDialog(
+pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_voussoirFailDialog(
     mut env: jni::JNIEnv,
     _class: jni::objects::JClass,
     id: jni::sys::jlong,
@@ -98,17 +98,17 @@ pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_kilnFailDialog(
 ) {
     let message = text_of(&mut env, &message)
         .unwrap_or_else(|| "the file picker could not be shown".to_owned());
-    kiln::fail_dialog(id as u64, &message);
+    voussoir::fail_dialog(id as u64, &message);
 }
 
 #[no_mangle]
-pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_kilnMenuClicked(
+pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_voussoirMenuClicked(
     mut env: jni::JNIEnv,
     _class: jni::objects::JClass,
     id: jni::objects::JString,
 ) {
     if let Some(id) = text_of(&mut env, &id) {
-        kiln::menu_clicked(&id);
+        voussoir::menu_clicked(&id);
     }
 }
 
@@ -117,16 +117,16 @@ pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_kilnMenuClicked(
 ///
 /// Queued rather than answered, and never dropped. tao starts the event loop on
 /// its own thread, so the first `resume` arrives before `App::run` has published
-/// a handle and before the page can run a script; `kiln::lifecycle` keeps the
+/// a handle and before the page can run a script; `voussoir::lifecycle` keeps the
 /// states until the page has loaded.
 #[no_mangle]
-pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_kilnLifecycle(
+pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_voussoirLifecycle(
     mut env: jni::JNIEnv,
     _class: jni::objects::JClass,
     state: jni::objects::JString,
 ) {
     if let Some(state) = text_of(&mut env, &state) {
-        kiln::lifecycle(&state);
+        voussoir::lifecycle(&state);
     }
 }
 
@@ -137,7 +137,7 @@ pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_kilnLifecycle(
 /// has no loop to send to, so the answer here is whether that loop exists. The
 /// activity keeps the intent extra and tries again on the next resume.
 #[no_mangle]
-pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_kilnTrayClicked(
+pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_voussoirTrayClicked(
     mut env: jni::JNIEnv,
     _class: jni::objects::JClass,
     id: jni::objects::JString,
@@ -145,9 +145,9 @@ pub extern "C" fn Java_{{JNI_PACKAGE}}_MainActivity_kilnTrayClicked(
     let Some(id) = text_of(&mut env, &id) else {
         return jni::sys::JNI_FALSE;
     };
-    if kiln::runtime().is_none() {
+    if voussoir::runtime().is_none() {
         return jni::sys::JNI_FALSE;
     }
-    kiln::tray_clicked(&id);
+    voussoir::tray_clicked(&id);
     jni::sys::JNI_TRUE
 }

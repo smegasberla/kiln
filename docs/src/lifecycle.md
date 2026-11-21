@@ -28,8 +28,8 @@ window closing.
 ```rust
 App::new().on_window_close(|_app, label| {
     // Per-window state should be persisted here, not in a Drop impl.
-    if let Some(draft) = kiln::state::get(&format!("draft:{label}")) {
-        kiln::state::set(&format!("saved:{label}"), draft);
+    if let Some(draft) = voussoir::state::get(&format!("draft:{label}")) {
+        voussoir::state::set(&format!("saved:{label}"), draft);
     }
 })
 ```
@@ -58,7 +58,7 @@ same; only the timing differs.
 ## Why not window events
 
 Listening to raw window events would give you `Resized`, `Focused`, `Moved` and
-much more. Kiln does not expose them, because an app that needs to know about focus
+much more. Voussoir does not expose them, because an app that needs to know about focus
 usually needs to know about *content* focus, and that belongs in the page. The two
 hooks here are the ones with a correctness requirement: something must happen at
 the start, and something must be saved at the end.

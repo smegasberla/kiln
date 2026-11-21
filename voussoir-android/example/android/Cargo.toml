@@ -1,0 +1,18 @@
+[package]
+name = "counter-android"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "counter"
+crate-type = ["cdylib"]
+
+[dependencies]
+voussoir = { path = "/home/smegasberla/Documenti/_Games_and_Projects/Voussoir/voussoir", features = ["full", "tray"] }
+voussoir-android = { path = "/home/smegasberla/Documenti/_Games_and_Projects/Voussoir/voussoir-android" }
+# Required by tao's and wry's android_binding! macros, which expand to items here.
+tao = { version = "0.37", default-features = false }
+wry = { version = "0.57" }
+jni = "0.21"
+
+[workspace]

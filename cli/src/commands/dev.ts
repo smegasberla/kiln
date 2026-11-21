@@ -1,7 +1,7 @@
-/** `kiln dev`: Bun dev server with HMR + the Rust shell pointed at it.
+/** `voussoir dev`: Bun dev server with HMR + the Rust shell pointed at it.
  *
  *  The dev server runs in this process, not as a child. That matters twice:
- *  `kiln` is distributed as a compiled binary with no `.ts` files on disk, so
+ *  `voussoir` is distributed as a compiled binary with no `.ts` files on disk, so
  *  spawning `bun dev-server.ts` would break the installed CLI; and an
  *  in-process server means one Ctrl-C stops everything.
  *
@@ -13,7 +13,7 @@
  *  Rust commands hot-reload through a second loop: this process watches
  *  `native/commands/src`, rebuilds *only* that crate (`--manifest-path`, so a
  *  shell recompile never enters the loop), and publishes each successful build
- *  as `target/kiln-hot/commands-<n>.<ext>` plus a `latest.json` pointer. The
+ *  as `target/voussoir-hot/commands-<n>.<ext>` plus a `latest.json` pointer. The
  *  shell polls that pointer and swaps the library in without restarting. A
  *  failed build publishes nothing, so the running shell keeps the last good
  *  generation and the compiler error is the feedback.
@@ -32,11 +32,11 @@ export async function dev(args: Args): Promise<number> {
   const crate = crateDir(project);
   // The shell reads this itself; the CLI only has to hand it over. Turning it
   // off explicitly matters when a shell profile already exports it for every
-  // cargo invocation, which would otherwise make `kiln dev` verbose by accident.
+  // cargo invocation, which would otherwise make `voussoir dev` verbose by accident.
   const verbose = boolFlag(args, "verbose");
 
   if (!Bun.which("cargo")) {
-    console.error("kiln: `cargo` is not on PATH; install Rust first");
+    console.error("voussoir: `cargo` is not on PATH; install Rust first");
     return 1;
   }
 
@@ -49,7 +49,7 @@ export async function dev(args: Args): Promise<number> {
   // A scaffold from before hot reload has no `hot-reload` feature to enable;
   // running it the old way is correct, just without the command loop.
   const hotSupported = readFileSync(join(crate, "Cargo.toml"), "utf8").includes("hot-reload");
-  const hotDir = join(crate, "target", "kiln-hot");
+  const hotDir = join(crate, "target", "voussoir-hot");
   const artifact = join(crate, "target", "debug", dylibName());
 
   let initial: { gen: number } | null = null;
@@ -65,8 +65,8 @@ export async function dev(args: Args): Promise<number> {
     // Generation 1 exists before the shell starts, so its first load is
     // deterministic instead of racing this process's own build.
     initial = await rebuild(crate, hotDir, artifact, 1);
-    env.KILN_HOT_LIB = initial ? pointerPath(hotDir, initial.gen) : artifact;
-    env.KILN_HOT_DIR = hotDir;
+    env.VOUSSOIR_HOT_LIB = initial ? pointerPath(hotDir, initial.gen) : artifact;
+    env.VOUSSOIR_HOT_DIR = hotDir;
     stopWatching = watchCommands(crate, hotDir, artifact, initial?.gen ?? 0);
   } else {
     console.log("  (native/Cargo.toml has no hot-reload feature; Rust edits need a restart)");
@@ -93,16 +93,16 @@ export async function dev(args: Args): Promise<number> {
 
 /** The environment the shell is launched with.
  *
- *  Exported so a test can assert the two flags this decides: `KILN_DEV_URL` must
- *  point at this port, and `KILN_VERBOSE` must be set *either way*. Leaving it
+ *  Exported so a test can assert the two flags this decides: `VOUSSOIR_DEV_URL` must
+ *  point at this port, and `VOUSSOIR_VERBOSE` must be set *either way*. Leaving it
  *  unset when off would inherit a developer's shell export and silently turn
- *  diagnostics on for everybody's `kiln dev`.
+ *  diagnostics on for everybody's `voussoir dev`.
  */
 export function devEnv(port: number, verbose: boolean, base: Record<string, string | undefined> = process.env): Record<string, string> {
   return {
     ...base,
-    KILN_DEV_URL: `http://127.0.0.1:${port}`,
-    KILN_VERBOSE: verbose ? "1" : "0",
+    VOUSSOIR_DEV_URL: `http://127.0.0.1:${port}`,
+    VOUSSOIR_VERBOSE: verbose ? "1" : "0",
   } as Record<string, string>;
 }
 
@@ -133,11 +133,11 @@ async function rebuild(
   const build = spawn(["cargo", "build", "--manifest-path", "commands/Cargo.toml"], { cwd: crate });
   const code = await build.exited;
   if (code !== 0) {
-    console.error("kiln: commands failed to build — keeping the last good build");
+    console.error("voussoir: commands failed to build — keeping the last good build");
     return null;
   }
   if (!existsSync(artifact)) {
-    console.error(`kiln: build succeeded but produced no ${artifact}`);
+    console.error(`voussoir: build succeeded but produced no ${artifact}`);
     return null;
   }
 
@@ -218,11 +218,11 @@ async function startServer(root: string, entry: string, port: number) {
   try {
     page = (await import(join(root, entry))).default;
   } catch (error) {
-    console.error(`kiln: could not load ${entry}: ${(error as Error).message}`);
+    console.error(`voussoir: could not load ${entry}: ${(error as Error).message}`);
     process.exit(1);
   }
   if (page === undefined) {
-    console.error(`kiln: ${entry} has no default export after bundling`);
+    console.error(`voussoir: ${entry} has no default export after bundling`);
     process.exit(1);
   }
 

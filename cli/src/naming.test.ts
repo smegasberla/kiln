@@ -9,8 +9,8 @@ describe("crateName", () => {
   });
 
   test("never produces an empty or digit-leading crate", () => {
-    expect(crateName("")).toBe("kiln-app");
-    expect(crateName("!!!")).toBe("kiln-app");
+    expect(crateName("")).toBe("voussoir-app");
+    expect(crateName("!!!")).toBe("voussoir-app");
     expect(crateName("3d viewer")).toBe("app-3d-viewer");
   });
 });
@@ -29,19 +29,19 @@ describe("libName", () => {
 
 describe("jniPackage", () => {
   test("mangles dots and underscores the way JNI does", () => {
-    expect(jniPackage("com.kiln.app")).toBe("com_kiln_app");
+    expect(jniPackage("com.voussoir.app")).toBe("com_voussoir_app");
     // Underscores become _1, otherwise the JNI decoder reads them as dots.
-    expect(jniPackage("com.kiln.my_notes")).toBe("com_kiln_my_1notes");
+    expect(jniPackage("com.voussoir.my_notes")).toBe("com_voussoir_my_1notes");
   });
 });
 
 describe("identifiers", () => {
   test("splits the package for tao and wry", () => {
     const ids = identifiers("My Notes");
-    expect(ids.package).toBe("com.kiln.my_notes");
-    expect(ids.domain).toBe("com_kiln");
+    expect(ids.package).toBe("com.voussoir.my_notes");
+    expect(ids.domain).toBe("com_voussoir");
     expect(ids.leaf).toBe("my_notes");
-    expect(ids.jniPackage).toBe("com_kiln_my_1notes");
+    expect(ids.jniPackage).toBe("com_voussoir_my_1notes");
     expect(ids.lib).toBe("my_notes");
   });
 

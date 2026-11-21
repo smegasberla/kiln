@@ -1,10 +1,10 @@
 # Per-window allowlists
 
 A window that renders untrusted content should not be able to call the whole app.
-Kiln lets you narrow one window's command surface, at startup or when the window is
+Voussoir lets you narrow one window's command surface, at startup or when the window is
 opened, and the narrowing can only ever remove.
 
-## In `kiln.json`
+## In `voussoir.json`
 
 ```json
 {
@@ -32,7 +32,7 @@ The narrowing is registered before the window exists, so its page can never make
 call it will not be allowed to keep making. From the page, the same thing:
 
 ```ts
-await window.kiln.invoke("__kiln_open_window", {
+await window.voussoir.invoke("__voussoir_open_window", {
   label: "preview",
   title: "Preview",
   allowlist: ["greet"],

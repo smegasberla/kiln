@@ -10,24 +10,24 @@
 //! and `applicationWillEnterForeground` into window events the shell maps onto
 //! the same `lifecycle` events Android emits.
 
-use kiln::serde_json::{json, Value};
-use kiln::{App, AppHandle};
+use voussoir::serde_json::{json, Value};
+use voussoir::{App, AppHandle};
 
 mod assets;
 
 /// The process entry: `main.swift` calls exactly this, first thing.
 ///
-/// The marker line is what `kiln ios verify` waits for: it proves the static
+/// The marker line is what `voussoir ios verify` waits for: it proves the static
 /// library loaded and Rust is running, before anything else can be observed.
 #[no_mangle]
 pub extern "C" fn main_rs() {
-    println!("KILN_IOS_START");
+    println!("VOUSSOIR_IOS_START");
     // The same command set as the other shells. The frontend is shared, so a
     // command registered on only one platform is a missing command at runtime;
-    // `kiln ios build` warns when the lists differ.
-    kiln_ios::run(
+    // `voussoir ios build` warns when the lists differ.
+    voussoir_ios::run(
         App::new()
-            .config(include_str!("../../kiln.json"))
+            .config(include_str!("../../voussoir.json"))
             .assets(assets::ASSETS)
             .command("greet", |_app, payload: Value| {
                 let name = payload
@@ -37,8 +37,8 @@ pub extern "C" fn main_rs() {
                 // One line per completed round trip: the page called this, the
                 // envelope crossed the bridge, and the answer below goes back.
                 // On iOS there is no logcat, so this console line is what
-                // `kiln ios verify` waits for as its proof of the whole loop.
-                println!("KILN_IOS_ROUND_TRIP name={name}");
+                // `voussoir ios verify` waits for as its proof of the whole loop.
+                println!("VOUSSOIR_IOS_ROUND_TRIP name={name}");
                 Ok(json!(format!("Hello, {name}! (from Rust)")))
             })
             // Async work runs off the UI thread, so a slow job cannot freeze the
@@ -51,7 +51,7 @@ pub extern "C" fn main_rs() {
             // iOS is one window by design, so this reports why rather than
             // silently doing nothing: a second window has nowhere to go.
             .command("open_settings", |_app: &AppHandle, _payload| {
-                Err(kiln::Error::Handler(
+                Err(voussoir::Error::Handler(
                     "second windows are desktop-only; use an in-page panel on iOS"
                         .to_owned(),
                 ))

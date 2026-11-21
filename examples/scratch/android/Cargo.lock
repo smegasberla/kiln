@@ -1122,7 +1122,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kiln"
+name = "voussoir"
 version = "0.1.0"
 dependencies = [
  "gtk",
@@ -1137,11 +1137,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "kiln-android"
+name = "voussoir-android"
 version = "0.1.0"
 dependencies = [
  "jni",
- "kiln",
+ "voussoir",
  "ndk",
  "serde_json",
  "tao",
@@ -1949,8 +1949,8 @@ name = "scratch-android"
 version = "0.1.0"
 dependencies = [
  "jni",
- "kiln",
- "kiln-android",
+ "voussoir",
+ "voussoir-android",
  "tao",
  "wry",
 ]

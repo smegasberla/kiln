@@ -41,7 +41,7 @@ export function rustExports(source: string): Map<string, string> {
  * `register_jni!` expands to the activity-side hook that calls it.
  */
 export function declaredExports(source: string): Map<string, string> {
-  return new Map([...rustExports(source)].filter(([name]) => name.startsWith("kiln")));
+  return new Map([...rustExports(source)].filter(([name]) => name.startsWith("voussoir")));
 }
 
 describe("Java -> Rust entry points", () => {
@@ -56,20 +56,20 @@ describe("Java -> Rust entry points", () => {
   test("the five shell callbacks are the ones exported", () => {
     const rust = declaredExports(read("lib.rs.tmpl"));
     expect([...rust.keys()].sort()).toEqual([
-      "kilnCompleteDialog",
-      "kilnFailDialog",
-      "kilnLifecycle",
-      "kilnMenuClicked",
-      "kilnTrayClicked",
+      "voussoirCompleteDialog",
+      "voussoirFailDialog",
+      "voussoirLifecycle",
+      "voussoirMenuClicked",
+      "voussoirTrayClicked",
     ]);
   });
 
-  test("kilnTrayClicked reports whether the click landed", () => {
+  test("voussoirTrayClicked reports whether the click landed", () => {
     const rust = declaredExports(read("lib.rs.tmpl"));
-    expect(rust.get("kilnTrayClicked")).toBe("jni::sys::jboolean");
+    expect(rust.get("voussoirTrayClicked")).toBe("jni::sys::jboolean");
 
     const java = javaNatives(read("MainActivity.java.tmpl"));
-    expect(java.get("kilnTrayClicked")).toBe("boolean");
+    expect(java.get("voussoirTrayClicked")).toBe("boolean");
   });
 
   test("a boolean return on either side has one on the other", () => {
@@ -100,14 +100,14 @@ describe("Rust -> Java entry points", () => {
     // The other direction from the JNI exports: a renamed activity method is a
     // NoSuchMethodError at the moment the shell calls it, which on Android means
     // a silently dead picker or menu rather than a failed build.
-    const platform = readFileSync(join(import.meta.dir, "..", "..", "kiln", "src", "platform.rs"), "utf8");
+    const platform = readFileSync(join(import.meta.dir, "..", "..", "voussoir", "src", "platform.rs"), "utf8");
     const declared = new Set(
-      [...read("MainActivity.java.tmpl").matchAll(/public\s+[\w.$\[\]]+\s+(kiln\w+)\s*\(/g)].map(
+      [...read("MainActivity.java.tmpl").matchAll(/public\s+[\w.$\[\]]+\s+(voussoir\w+)\s*\(/g)].map(
         (match) => match[1]!,
       ),
     );
 
-    const called = [...calledMethods(platform)].filter((name) => name.startsWith("kiln"));
+    const called = [...calledMethods(platform)].filter((name) => name.startsWith("voussoir"));
     expect(called.length).toBeGreaterThan(0);
     for (const name of called) expect([name, declared.has(name)]).toEqual([name, true]);
   });
@@ -115,31 +115,31 @@ describe("Rust -> Java entry points", () => {
 
 describe("regeneration", () => {
   const fill = (template: string) =>
-    template.replace(/\{\{PACKAGE\}\}/g, "com.kiln.counter").replace(/\{\{LIB\}\}/g, "counter");
+    template.replace(/\{\{PACKAGE\}\}/g, "com.voussoir.counter").replace(/\{\{LIB\}\}/g, "counter");
 
   /** Every Java file the template ships, as [template path, example path]. */
   const javaFiles: [string, string][] = [
-    ["MainActivity.java.tmpl", "main/java/com/kiln/counter/MainActivity.java"],
-    ["KilnDialogs.java.tmpl", "main/java/com/kiln/counter/KilnDialogs.java"],
-    ["KilnMenu.java.tmpl", "main/java/com/kiln/counter/KilnMenu.java"],
-    ["KilnTray.java.tmpl", "main/java/com/kiln/counter/KilnTray.java"],
-    ["KilnHttp.java.tmpl", "main/java/com/kiln/counter/KilnHttp.java"],
-    ["androidTest/KilnMenuTest.java.tmpl", "androidTest/java/com/kiln/counter/KilnMenuTest.java"],
+    ["MainActivity.java.tmpl", "main/java/com/voussoir/counter/MainActivity.java"],
+    ["VoussoirDialogs.java.tmpl", "main/java/com/voussoir/counter/VoussoirDialogs.java"],
+    ["VoussoirMenu.java.tmpl", "main/java/com/voussoir/counter/VoussoirMenu.java"],
+    ["VoussoirTray.java.tmpl", "main/java/com/voussoir/counter/VoussoirTray.java"],
+    ["VoussoirHttp.java.tmpl", "main/java/com/voussoir/counter/VoussoirHttp.java"],
+    ["androidTest/VoussoirMenuTest.java.tmpl", "androidTest/java/com/voussoir/counter/VoussoirMenuTest.java"],
     [
-      "androidTest/KilnDialogsTest.java.tmpl",
-      "androidTest/java/com/kiln/counter/KilnDialogsTest.java",
+      "androidTest/VoussoirDialogsTest.java.tmpl",
+      "androidTest/java/com/voussoir/counter/VoussoirDialogsTest.java",
     ],
     [
-      "androidTest/KilnLifecycleTest.java.tmpl",
-      "androidTest/java/com/kiln/counter/KilnLifecycleTest.java",
+      "androidTest/VoussoirLifecycleTest.java.tmpl",
+      "androidTest/java/com/voussoir/counter/VoussoirLifecycleTest.java",
     ],
     [
-      "androidTest/KilnDeviceSupport.java.tmpl",
-      "androidTest/java/com/kiln/counter/KilnDeviceSupport.java",
+      "androidTest/VoussoirDeviceSupport.java.tmpl",
+      "androidTest/java/com/voussoir/counter/VoussoirDeviceSupport.java",
     ],
     [
-      "androidTest/KilnDeviceTest.java.tmpl",
-      "androidTest/java/com/kiln/counter/KilnDeviceTest.java",
+      "androidTest/VoussoirDeviceTest.java.tmpl",
+      "androidTest/java/com/voussoir/counter/VoussoirDeviceTest.java",
     ],
   ];
 
@@ -149,7 +149,7 @@ describe("regeneration", () => {
         import.meta.dir,
         "..",
         "..",
-        "kiln-android",
+        "voussoir-android",
         "example",
         "android",
         "app",
@@ -162,9 +162,9 @@ describe("regeneration", () => {
 
   test("the example crate keeps the same exports with the package spelled out", () => {
     const example = readFileSync(
-      join(import.meta.dir, "..", "..", "kiln-android", "example", "android", "src", "lib.rs"),
+      join(import.meta.dir, "..", "..", "voussoir-android", "example", "android", "src", "lib.rs"),
       "utf8",
-    ).replace(/Java_com_kiln_counter_MainActivity_/g, "Java_{{JNI_PACKAGE}}_MainActivity_");
+    ).replace(/Java_com_voussoir_counter_MainActivity_/g, "Java_{{JNI_PACKAGE}}_MainActivity_");
 
     expect([...declaredExports(example).keys()].sort()).toEqual(
       [...declaredExports(read("lib.rs.tmpl")).keys()].sort(),

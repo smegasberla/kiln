@@ -1,8 +1,8 @@
 #!/bin/sh
-# Kiln installer for Linux, macOS, and the BSDs.
+# Voussoir installer for Linux, macOS, and the BSDs.
 #
 # Installs the toolchain dependencies (system webview, Git, Bun, Rust), builds
-# the CLI from source, and puts `kiln` on PATH. Run it from a checkout, or
+# the CLI from source, and puts `voussoir` on PATH. Run it from a checkout, or
 # pipe it to sh from anywhere:
 #
 #   sh install.sh [--prefix DIR] [--repo URL] [--no-deps]
@@ -12,13 +12,13 @@
 
 set -eu
 
-PREFIX="${KILN_PREFIX:-$HOME/.local}"
-REPO="${KILN_REPO:-https://github.com/smegasberla/kiln.git}"
+PREFIX="${VOUSSOIR_PREFIX:-$HOME/.local}"
+REPO="${VOUSSOIR_REPO:-https://github.com/smegasberla/voussoir.git}"
 WITH_DEPS=1
 
-log() { printf 'kiln-install: %s\n' "$*"; }
-warn() { printf 'kiln-install: warning: %s\n' "$*" >&2; }
-die() { printf 'kiln-install: error: %s\n' "$*" >&2; exit 1; }
+log() { printf 'voussoir-install: %s\n' "$*"; }
+warn() { printf 'voussoir-install: warning: %s\n' "$*" >&2; }
+die() { printf 'voussoir-install: error: %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 usage() {
@@ -26,12 +26,12 @@ usage() {
 usage: install.sh [--prefix DIR] [--repo URL] [--no-deps] [--help]
 
   --prefix DIR   install location (default: $HOME/.local; the binary lands in
-                 DIR/bin/kiln)
+                 DIR/bin/voussoir)
   --repo URL     git URL to clone when not run from a checkout
   --no-deps      skip system package installation
   --help         this text
 
-  Environment: KILN_PREFIX, KILN_REPO do the same as the flags.
+  Environment: VOUSSOIR_PREFIX, VOUSSOIR_REPO do the same as the flags.
 EOF
 }
 
@@ -175,7 +175,7 @@ install_deps() {
         # The port's name moved across releases; CI tries the same chain.
         try_pkgs webkit2-gtk_41 || try_pkgs webkit2-gtk41 ||
           try_pkgs webkit2-gtk || try_pkgs webkit2-gtk4 ||
-          warn "no webkit2gtk package found; install it with pkg before kiln build"
+          warn "no webkit2gtk package found; install it with pkg before voussoir build"
       fi
       ;;
     NetBSD|OpenBSD)
@@ -205,8 +205,8 @@ install_bun() {
     if have curl; then
       curl -fsSL https://bun.sh/install | bash || warn "the bun.sh installer failed"
     elif have fetch; then
-      fetch -o "${TMPDIR:-/tmp}/kiln-bun-install.sh" https://bun.sh/install &&
-        sh "${TMPDIR:-/tmp}/kiln-bun-install.sh" || warn "the bun.sh installer failed"
+      fetch -o "${TMPDIR:-/tmp}/voussoir-bun-install.sh" https://bun.sh/install &&
+        sh "${TMPDIR:-/tmp}/voussoir-bun-install.sh" || warn "the bun.sh installer failed"
     else
       warn "no curl/fetch to reach bun.sh"
     fi
@@ -250,7 +250,7 @@ else
 fi
 
 if gtk_platform && ! webkit_present; then
-  warn "webkit2gtk not found via pkg-config; 'kiln build' needs it (kiln doctor names the package for this OS)"
+  warn "webkit2gtk not found via pkg-config; 'voussoir build' needs it (voussoir doctor names the package for this OS)"
 fi
 
 have bun || install_bun || die "Bun is required (CLI build and dev server); install it from bun.sh and re-run"
@@ -269,7 +269,7 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/cli/package.json" ] && [ -f "$SCRIP
   SRC=$SCRIPT_DIR
   log "building from the checkout at $SRC"
 else
-  SRC=${XDG_DATA_HOME:-$HOME/.local/share}/kiln/src
+  SRC=${XDG_DATA_HOME:-$HOME/.local/share}/voussoir/src
   if [ -d "$SRC/.git" ]; then
     log "updating $SRC"
     git -C "$SRC" pull --ff-only || warn "could not update; building what is there"
@@ -287,14 +287,14 @@ log "building the CLI"
 cd "$SRC/cli"
 bun install
 bun run build
-[ -f dist/kiln ] || die "build finished but dist/kiln is missing"
+[ -f dist/voussoir ] || die "build finished but dist/voussoir is missing"
 
 # --- install ----------------------------------------------------------------
 
 mkdir -p "$PREFIX/bin"
-cp dist/kiln "$PREFIX/bin/kiln"
-chmod 755 "$PREFIX/bin/kiln"
-log "installed $PREFIX/bin/kiln"
+cp dist/voussoir "$PREFIX/bin/voussoir"
+chmod 755 "$PREFIX/bin/voussoir"
+log "installed $PREFIX/bin/voussoir"
 
 case ":$PATH:" in
   *":$PREFIX/bin:"*) ;;
@@ -304,6 +304,6 @@ esac
 # --- verify -----------------------------------------------------------------
 
 log "verifying the installed binary"
-"$PREFIX/bin/kiln" help >/dev/null || die "the installed kiln failed to run"
+"$PREFIX/bin/voussoir" help >/dev/null || die "the installed voussoir failed to run"
 
-log "done. next: kiln init myapp && cd myapp && kiln dev   (kiln doctor checks a project)"
+log "done. next: voussoir init myapp && cd myapp && voussoir dev   (voussoir doctor checks a project)"

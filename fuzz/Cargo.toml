@@ -1,5 +1,5 @@
 [package]
-name = "kiln-fuzz"
+name = "voussoir-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
@@ -14,7 +14,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-kiln = { path = "../kiln", features = ["full", "rt", "storage"] }
+voussoir = { path = "../voussoir", features = ["full", "rt", "storage"] }
 
 [[bin]]
 name = "envelope"

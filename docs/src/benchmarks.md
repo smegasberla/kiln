@@ -47,6 +47,6 @@ would mean the runtime is misconfigured.
 - Startup on Windows and macOS. The binary is built and tested there, but the
   cold-start number in the README is Linux, and says so.
 - Render performance. That is the webview's job, and measuring it here would measure
-  the platform rather than Kiln.
+  the platform rather than Voussoir.
 - Binary size over time. `verify.ts` checks the size bound; it is a gate, not a
   trend.

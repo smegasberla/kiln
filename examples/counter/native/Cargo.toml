@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-kiln = { path = "../../../kiln", features = ["full"] }
+voussoir = { path = "../../../voussoir", features = ["full"] }
 
 [workspace]
 

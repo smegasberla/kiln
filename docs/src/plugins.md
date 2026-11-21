@@ -4,8 +4,8 @@ A plugin is a crate that implements one trait. There is no plugin system beyond
 that: no manifest, no capability file, no discovery at runtime, and no macro.
 
 ```rust
-use kiln::{App, Error, Plugin};
-use kiln::serde_json::Value;
+use voussoir::{App, Error, Plugin};
+use voussoir::serde_json::Value;
 
 pub struct Sqlite {
     pub path: std::path::PathBuf,
@@ -72,5 +72,5 @@ is still registered, otherwise the answer would depend on which window asked.
 ## The allowlist still applies
 
 A plugin's commands share the registry, the envelope and the allowlist with
-everything else. Naming them in `kiln.json` keeps them; leaving them out removes
+everything else. Naming them in `voussoir.json` keeps them; leaving them out removes
 them from every page.

@@ -1141,54 +1141,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kiln"
-version = "0.2.0"
-dependencies = [
- "futures-util",
- "gtk",
- "jni",
- "libloading 0.8.9",
- "muda",
- "ndk-context",
- "rfd",
- "serde",
- "serde_json",
- "tao",
- "tokio",
- "tray-icon",
- "ureq",
- "wry",
-]
-
-[[package]]
-name = "kiln-android"
-version = "0.1.0"
-dependencies = [
- "jni",
- "kiln",
- "ndk",
- "serde_json",
- "tao",
- "wry",
-]
-
-[[package]]
-name = "kiln-ios"
-version = "0.1.0"
-dependencies = [
- "kiln",
- "tao",
- "wry",
-]
-
-[[package]]
-name = "kiln-probe"
-version = "0.1.0"
-dependencies = [
- "kiln",
-]
-
-[[package]]
 name = "libappindicator"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2629,6 +2581,54 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "voussoir"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "gtk",
+ "jni",
+ "libloading 0.8.9",
+ "muda",
+ "ndk-context",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tao",
+ "tokio",
+ "tray-icon",
+ "ureq",
+ "wry",
+]
+
+[[package]]
+name = "voussoir-android"
+version = "0.1.0"
+dependencies = [
+ "jni",
+ "ndk",
+ "serde_json",
+ "tao",
+ "voussoir",
+ "wry",
+]
+
+[[package]]
+name = "voussoir-ios"
+version = "0.1.0"
+dependencies = [
+ "tao",
+ "voussoir",
+ "wry",
+]
+
+[[package]]
+name = "voussoir-probe"
+version = "0.1.0"
+dependencies = [
+ "voussoir",
+]
 
 [[package]]
 name = "walkdir"

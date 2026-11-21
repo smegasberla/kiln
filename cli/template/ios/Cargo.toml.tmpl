@@ -8,8 +8,8 @@ name = "{{LIB}}"
 crate-type = ["staticlib"]
 
 [dependencies]
-kiln = { {{KILN_PATH_INNER}}, features = ["full"] }
-kiln-ios = { {{KILN_IOS_PATH_INNER}} }
+voussoir = { {{VOUSSOIR_PATH_INNER}}, features = ["full"] }
+voussoir-ios = { {{VOUSSOIR_IOS_PATH_INNER}} }
 # The iOS half of tao and wry: the window and webview come from their UIKit glue,
 # which needs both crates on the link line.
 tao = { version = "0.37", default-features = false }

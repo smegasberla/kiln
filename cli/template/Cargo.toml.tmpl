@@ -8,15 +8,15 @@ edition = "2021"
 # in release builds. `storage` adds the JSON-file key/value store the page
 # reaches as `storage.get|set|delete|keys|path`. Drop either to slim the shell;
 # add `rt` when you want `async fn` commands on a shared runtime.
-kiln = { {{KILN_PATH_INNER}}, features = ["full", "storage"] }
-# The command table. Release links it statically; `kiln dev` additionally
+voussoir = { {{VOUSSOIR_PATH_INNER}}, features = ["full", "storage"] }
+# The command table. Release links it statically; `voussoir dev` additionally
 # builds it as a cdylib and hot-swaps it into the running shell.
 commands = { path = "commands", package = "{{CRATE}}-commands" }
 
 [features]
-# Enabled only by `kiln dev`. Release builds never enable it, which is what
+# Enabled only by `voussoir dev`. Release builds never enable it, which is what
 # keeps libloading (the hot-reload loader) out of every shipped binary.
-hot-reload = ["kiln/hot-reload"]
+hot-reload = ["voussoir/hot-reload"]
 
 [workspace]
 members = ["commands"]

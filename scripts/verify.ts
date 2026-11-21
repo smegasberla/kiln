@@ -16,14 +16,14 @@ const repo = resolve(import.meta.dir, "..");
 const cli = join(repo, "cli", "src", "index.ts");
 // Windows suffixes cargo binaries with .exe; every spawned path below needs it.
 const EXE = process.platform === "win32" ? ".exe" : "";
-// WebView2 cannot intercept a custom scheme, so wry rewrites `kiln://localhost`
-// to `http://kiln.localhost` and intercepts that. The pages below call the same
+// WebView2 cannot intercept a custom scheme, so wry rewrites `voussoir://localhost`
+// to `http://voussoir.localhost` and intercepts that. The pages below call the same
 // endpoint the shell's shim does, so they need the same spelling or the request
 // never reaches the handler.
 const INVOKE =
   process.platform === "win32"
-    ? "http://kiln.localhost/__kiln/"
-    : "kiln://localhost/__kiln/";
+    ? "http://voussoir.localhost/__voussoir/"
+    : "voussoir://localhost/__voussoir/";
 const results: { name: string; ok: boolean; detail: string }[] = [];
 
 function record(name: string, ok: boolean, detail: string) {
@@ -82,7 +82,7 @@ const PAGE = `<!doctype html><html><body><script>
 
 /** Serve PAGE on `port`, point the shell at it, and return what the page
  *  reported. The page origin differs from the shell's origin, which is exactly
- *  the cross-origin path `kiln dev` depends on. */
+ *  the cross-origin path `voussoir dev` depends on. */
 async function probe(binary: string, app: string, port: number): Promise<string | null> {
   let resolveReply: (value: string) => void = () => {};
   const reply = new Promise<string>((r) => (resolveReply = r));
@@ -104,7 +104,7 @@ async function probe(binary: string, app: string, port: number): Promise<string 
 
   const proc = Bun.spawn([binary], {
     cwd: app,
-    env: { ...process.env, KILN_DEV_URL: `http://127.0.0.1:${port}` },
+    env: { ...process.env, VOUSSOIR_DEV_URL: `http://127.0.0.1:${port}` },
     stdout: "ignore",
     stderr: "ignore",
   });
@@ -129,7 +129,7 @@ async function probe(binary: string, app: string, port: number): Promise<string 
 }
 
 /** The page a *narrowed* second window loads. It calls `greet` — a command the
- *  window's `kiln.json` entry withholds — and reports the envelope with a
+ *  window's `voussoir.json` entry withholds — and reports the envelope with a
  *  `narrow` marker so the harness can tell which window replied. */
 const NARROW_PAGE = `<!doctype html><html><body><script>
 (async () => {
@@ -149,7 +149,7 @@ const NARROW_PAGE = `<!doctype html><html><body><script>
 </script></body></html>`;
 
 /** Like `probe`, but the first window's page opens a second window labelled
- *  `untrusted` (whose `kiln.json` entry withholds every command) before doing
+ *  `untrusted` (whose `voussoir.json` entry withholds every command) before doing
  *  its own round-trip. Resolves with both envelopes once each window has
  *  reported, or null on timeout. */
 async function probeSecondWindow(
@@ -165,7 +165,7 @@ async function probeSecondWindow(
   const opener = `<!doctype html><html><body><script>
 (async () => {
   try {
-    await fetch('${INVOKE}__kiln_open_window', {
+    await fetch('${INVOKE}__voussoir_open_window', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ label: 'untrusted', entry: 'untrusted.html' }),
@@ -209,7 +209,7 @@ async function probeSecondWindow(
 
   const proc = Bun.spawn([binary], {
     cwd: app,
-    env: { ...process.env, KILN_DEV_URL: `http://127.0.0.1:${port}` },
+    env: { ...process.env, VOUSSOIR_DEV_URL: `http://127.0.0.1:${port}` },
     stdout: "ignore",
     stderr: "ignore",
   });
@@ -249,7 +249,7 @@ async function probeGuarantees(binary: string, app: string, hostilePort: number)
 
   const proc = Bun.spawn([binary], {
     cwd: app,
-    env: { ...process.env, KILN_HOSTILE: `http://127.0.0.1:${hostilePort}` },
+    env: { ...process.env, VOUSSOIR_HOSTILE: `http://127.0.0.1:${hostilePort}` },
     stdout: "pipe",
     stderr: "ignore",
   });
@@ -282,20 +282,20 @@ async function probeGuarantees(binary: string, app: string, hostilePort: number)
 async function main() {
   // 1. Shell unit tests (dispatch, assets, config, protocol handling).
   {
-    const { out, code } = await sh(["cargo", "test", "-p", "kiln", "--quiet"]);
+    const { out, code } = await sh(["cargo", "test", "-p", "voussoir", "--quiet"]);
     const passed = /test result: ok\. (\d+) passed/.exec(out.replace(/\s+/g, " "))?.[1] ?? "0";
     record("shell unit tests", code === 0, `${passed} tests`);
   }
 
   // 2. Embedded-asset path: the framework example boots, round-trips a command
-  //    over kiln://, and receives a Rust -> JS event. It exits 0 only when both
+  //    over voussoir://, and receives a Rust -> JS event. It exits 0 only when both
   //    arrive, so the exit code is the assertion.
   //
   //    Built here rather than assumed: the verifier has to work from a clean
   //    checkout (CI has no prior build), and the baseline binary is needed too.
   {
     const build = await sh(
-      ["cargo", "build", "--release", "-p", "kiln", "--example", "hello"],
+      ["cargo", "build", "--release", "-p", "voussoir", "--example", "hello"],
       repo,
     );
     if (build.code !== 0) {
@@ -312,7 +312,7 @@ async function main() {
       const { out, err, code } = await shWithTimeout(
         [join(repo, "target", "release", "examples", `hello${EXE}`)],
         repo,
-        { KILN_SELFTEST: "1" },
+        { VOUSSOIR_SELFTEST: "1" },
         30_000,
       );
       record(
@@ -326,11 +326,11 @@ async function main() {
   }
 
   // 3. Scaffold a fresh app with the CLI and build it with the CLI.
-  const work = mkdtempSync(join(tmpdir(), "kiln-verify-"));
+  const work = mkdtempSync(join(tmpdir(), "voussoir-verify-"));
   const app = join(work, "app");
   {
     const { code, err } = await sh(["bun", cli, "init", app]);
-    record("kiln init", code === 0, code === 0 ? app : err.slice(-120));
+    record("voussoir init", code === 0, code === 0 ? app : err.slice(-120));
   }
   {
     const { out, err, code } = await shWithTimeout(
@@ -340,7 +340,7 @@ async function main() {
       600_000,
     );
     record(
-      "kiln build",
+      "voussoir build",
       code === 0,
       code === 0 ? out.trim().split("\n").slice(-2).join(" ") : err.slice(-160),
     );
@@ -406,7 +406,7 @@ async function main() {
     );
   }
 
-  // 6. Dev mode on the same binary: page from http, IPC still over kiln://.
+  // 6. Dev mode on the same binary: page from http, IPC still over voussoir://.
   {
     const debug = await sh(["bun", cli, "build", "--debug"], app);
     if (debug.code !== 0) {
@@ -422,25 +422,25 @@ async function main() {
   }
 
   // 6b. A second window can be given a strict subset of the main window's
-  //     commands. The scaffold's kiln.json lists every command for the main
+  //     commands. The scaffold's voussoir.json lists every command for the main
   //     window and *no* commands for the window labelled `untrusted`; the
   //     narrowed window's page must still round-trip on the main window while
   //     its own call comes back as an unknown command.
   {
-    const cfgPath = join(app, "kiln.json");
+    const cfgPath = join(app, "voussoir.json");
     const cfg = await Bun.file(cfgPath).json();
-    cfg.commands = ["greet", "__kiln_open_window"];
+    cfg.commands = ["greet", "__voussoir_open_window"];
     cfg.windows = { untrusted: { commands: [] } };
     await Bun.write(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
 
     const rebuilt = await sh(["bun", cli, "build", "--debug"], app);
     if (rebuilt.code !== 0) {
-      record("second window narrowed by kiln.json", false, "debug rebuild failed");
+      record("second window narrowed by voussoir.json", false, "debug rebuild failed");
     } else {
       const bin = join(app, "native", "target", "debug", "app");
       const result = await probeSecondWindow(bin, app, 5193);
       record(
-        "second window narrowed by kiln.json",
+        "second window narrowed by voussoir.json",
         result !== null &&
           result.main.includes("from Rust") &&
           result.narrow.includes('"kind":"unknown"'),
@@ -454,7 +454,7 @@ async function main() {
   // 7. The distributed CLI is a compiled binary: it must work with no Bun or
   //    Node on PATH, and produce the same app a `bun run` CLI does.
   {
-    const out = join(work, "kiln-bin");
+    const out = join(work, "voussoir-bin");
     const compiled = await sh(["bun", "build", "--compile", "--minify", cli, "--outfile", out]);
     if (compiled.code !== 0) {
       record("compiled CLI", false, compiled.err.slice(-140));
@@ -478,8 +478,8 @@ async function main() {
   //    IPC path. The harness page reports over IPC so no human has to look.
   {
     // Built once, then reused for the hostile-page probe.
-    const probeBin = join(repo, "target", "debug", `kiln-probe${EXE}`);
-    const build = await sh(["cargo", "build", "-p", "kiln-probe"], repo);
+    const probeBin = join(repo, "target", "debug", `voussoir-probe${EXE}`);
+    const build = await sh(["cargo", "build", "-p", "voussoir-probe"], repo);
     const reported = build.code === 0 ? await probeGuarantees(probeBin, repo, 5202) : null;
     const parsed = reported ? JSON.parse(reported) : null;
     record(
@@ -538,7 +538,7 @@ async function main() {
       parsed?.unnamedLabel ?? "no reply",
     );
     // T2: shell-side state is shared between handlers and survives the library
-    // being swapped, which is what `kiln dev` cannot do with a static.
+    // being swapped, which is what `voussoir dev` cannot do with a static.
     record(
       "shell state round-trips",
       parsed?.state?.round === 2,
@@ -547,8 +547,8 @@ async function main() {
     // T2: the shell reports a version the page can feature-detect on.
     record(
       "shell reports a version",
-      typeof parsed?.kilnVersion === "string" && parsed.kilnVersion.length > 0,
-      parsed?.kilnVersion ?? "no reply",
+      typeof parsed?.voussoirVersion === "string" && parsed.voussoirVersion.length > 0,
+      parsed?.voussoirVersion ?? "no reply",
     );
   }
 
@@ -562,16 +562,16 @@ async function main() {
     if (!Bun.which("appimagetool") && !exists) {
       // Without the tool there is no AppImage to inspect. The AppDir it still
       // produces is a portable app, so this is an environment gap, not a defect.
-      record("kiln package", pkg.code === 0, "AppDir built (appimagetool not installed)");
+      record("voussoir package", pkg.code === 0, "AppDir built (appimagetool not installed)");
     } else {
       record(
-        "kiln package (AppImage)",
+        "voussoir package (AppImage)",
         pkg.code === 0 && exists,
         exists ? `${(statSync(artifact!).size / 1048576).toFixed(1)} MB` : pkg.err.slice(-140),
       );
     }
   } else {
-    record("kiln package", true, `skipped: not Linux (${process.platform})`);
+    record("voussoir package", true, `skipped: not Linux (${process.platform})`);
   }
 
   const failed = results.filter((r) => !r.ok);
@@ -580,7 +580,7 @@ async function main() {
   // Each run builds a full cargo tree in the scratch directory. Left behind,
   // a handful of runs fills a small tmpfs and later runs fail for reasons that
   // look like build errors, so remove it unless asked to keep it.
-  if (!process.env.KILN_KEEP_SCRATCH) {
+  if (!process.env.VOUSSOIR_KEEP_SCRATCH) {
     rmSync(work, { recursive: true, force: true });
   } else {
     console.log(`scratch kept: ${work}`);

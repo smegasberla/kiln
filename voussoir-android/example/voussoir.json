@@ -1,0 +1,6 @@
+{
+  "name": "Counter",
+  "width": 900,
+  "height": 680,
+  "update": { "url": "https://raw.githubusercontent.com/smegasberla/voussoir/master/voussoir-android/example/releases.json" }
+}

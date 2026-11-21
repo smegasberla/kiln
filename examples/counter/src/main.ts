@@ -1,4 +1,4 @@
-/// <reference path="./kiln.d.ts" />
+/// <reference path="./voussoir.d.ts" />
 
 type Count = { value: number; history: number[] };
 
@@ -15,7 +15,7 @@ function render(count: Count, note: string) {
 
 async function shift(delta: number) {
   try {
-    const count = await window.kiln.invoke<Count>("shift", { delta });
+    const count = await window.voussoir.invoke<Count>("shift", { delta });
     render(count, `shift(${delta > 0 ? "+" : ""}${delta}) ok`);
   } catch (error) {
     status.textContent = "error: " + (error as Error).message;
@@ -25,11 +25,11 @@ async function shift(delta: number) {
 inc.addEventListener("click", () => shift(1));
 dec.addEventListener("click", () => shift(-1));
 reset.addEventListener("click", async () => {
-  const count = await window.kiln.invoke<Count>("reset");
+  const count = await window.voussoir.invoke<Count>("reset");
   render(count, "reset");
 });
 
-window.kiln.listen<Count>("count", (count) => render(count, "event from Rust"));
+window.voussoir.listen<Count>("count", (count) => render(count, "event from Rust"));
 
-const initial = await window.kiln.invoke<Count>("current");
+const initial = await window.voussoir.invoke<Count>("current");
 render(initial, "ready");

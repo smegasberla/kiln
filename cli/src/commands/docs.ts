@@ -1,8 +1,8 @@
-/** `kiln docs`: build the documentation book, and check it without mdbook.
+/** `voussoir docs`: build the documentation book, and check it without mdbook.
  *
  *  The check half exists because a book rots silently. A chapter that is not in
  *  `SUMMARY.md` is unreachable, and a `SUMMARY.md` link to a missing file renders
- *  an empty page rather than an error. Both are cheap to detect, so `kiln docs
+ *  an empty page rather than an error. Both are cheap to detect, so `voussoir docs
  *  --check` detects them and CI runs it without needing mdbook installed.
  *
  *  The build half is a thin wrapper: mdbook owns rendering, and reimplementing it
@@ -17,12 +17,12 @@ import { run, which, fail } from "../proc.ts";
 import { boolFlag, type Args } from "../args.ts";
 
 /** Where the book lives, resolved from this file rather than the working
- *  directory: `kiln docs` must work from inside an app project too. */
+ *  directory: `voussoir docs` must work from inside an app project too. */
 export function bookDir(): string {
   return resolve(import.meta.dir, "../../../docs");
 }
 
-/** The mdBook release `kiln docs` reports as the one to install.
+/** The mdBook release `voussoir docs` reports as the one to install.
  *
  *  Pinned rather than "latest" so the instructions a user sees are reproducible;
  *  mdBook has not changed its config format across the 0.5 line, so any 0.5.x
@@ -151,7 +151,7 @@ export async function docs(args: Args): Promise<number> {
   }
 
   const problems = checkBook(join(dir, "src"));
-  for (const problem of problems) console.error(`kiln: docs: ${problem}`);
+  for (const problem of problems) console.error(`voussoir: docs: ${problem}`);
   if (problems.length > 0) return 1;
   console.log(`  book structure ok (${parseSummary(readFileSync(join(dir, "src/SUMMARY.md"), "utf8")).length} chapters)`);
 
@@ -161,7 +161,7 @@ export async function docs(args: Args): Promise<number> {
     // Not a failure: the structure is valid, and installing a renderer is a
     // separate decision. Say how rather than exiting with a spawn error.
     console.error(
-      "kiln: docs: `mdbook` is not on PATH, so the HTML was not rendered.\n" +
+      "voussoir: docs: `mdbook` is not on PATH, so the HTML was not rendered.\n" +
         "  Install it with `cargo install mdbook`, or download the release:\n" +
         `  https://github.com/rust-lang/mdBook/releases/tag/v${MDBOOK_VERSION}` +
         (mdbookAsset(hostTriple()) ? `\n  asset: ${mdbookAsset(hostTriple())}` : ""),
@@ -172,7 +172,7 @@ export async function docs(args: Args): Promise<number> {
   try {
     await run(["mdbook", "build"], { cwd: dir });
   } catch (error) {
-    console.error(`kiln: docs: ${(error as Error).message}`);
+    console.error(`voussoir: docs: ${(error as Error).message}`);
     return 1;
   }
   console.log(`  html book: ${join(dir, "book", "index.html")}`);

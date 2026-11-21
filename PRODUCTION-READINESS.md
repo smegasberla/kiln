@@ -1,13 +1,13 @@
-# Kiln — Production-Readiness Findings
+# Voussoir — Production-Readiness Findings
 
-Review of the full source tree: `kiln/` (shell runtime), `kiln-android/`, `cli/`, `probe/`,
+Review of the full source tree: `voussoir/` (shell runtime), `voussoir-android/`, `cli/`, `probe/`,
 `baseline/`, `scripts/verify.ts`, and both GitHub workflows.
 
 **Verified on this machine at review time**
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Rust unit tests (all features) | `cargo test -p kiln --features full --lib` | 71 passed, 0 failed |
+| Rust unit tests (all features) | `cargo test -p voussoir --features full --lib` | 71 passed, 0 failed |
 | CLI typecheck | `cd cli && bun run typecheck` | clean |
 | CLI unit tests | `cd cli && bun test` | 44 passed, 0 failed |
 | e2e guarantee harness | `bun scripts/verify.ts` | **not run** — needs a display; CI runs it under Xvfb on Linux only |
@@ -22,7 +22,7 @@ closed findings 1, 2, 4, 5, 6 and 7, f0d893e added finding 3's per-window allowl
 
 ## 1. HIGH — Android release CSP allows inline scripts
 
-**Where:** `kiln/src/security.rs:54-55`
+**Where:** `voussoir/src/security.rs:54-55`
 
 The desktop release CSP is `script-src 'self'` with `frame-ancestors 'none'`. The Android
 policy as shipped is `script-src 'self' 'unsafe-inline'`.
@@ -33,7 +33,7 @@ disagree.
 
 **Impact.** Any XSS in an Android app's own page can execute inline in a context that holds the
 IPC bridge, i.e. it can call every command in the allowlist. The origin lockdown (only
-`http://kiln.localhost`) limits how the payload gets in, and the Android webview may not honour
+`http://voussoir.localhost`) limits how the payload gets in, and the Android webview may not honour
 `frame-ancestors` the same way desktop engines do — but this is a genuine weakening of the
 module's own stated principle.
 
@@ -76,16 +76,16 @@ per-check skip line naming the platform limitation.
 
 ## 3. MEDIUM — the allowlist can only narrow, never restrict by caller
 
-**Where:** `kiln/src/config.rs:20-22`, `kiln/src/ipc.rs`
+**Where:** `voussoir/src/config.rs:20-22`, `voussoir/src/ipc.rs`
 
-`kiln.json`'s `commands` array narrows the compiled-in handler set, and built-ins
-(`__kiln_open_window`, `__kiln_close_window`, `__kiln_devtools`, `__kiln_reports`, …) are
+`voussoir.json`'s `commands` array narrows the compiled-in handler set, and built-ins
+(`__voussoir_open_window`, `__voussoir_close_window`, `__voussoir_devtools`, `__voussoir_reports`, …) are
 subject to the same flat list. Once the page can call a command, **any** script running in that
 page can call it. There is no capability or ACL layer of the kind Tauri provides (per-window or
 per-origin scopes).
 
 This is defensible for the declared scope: the CSP makes remote script the only vector, and
-there is no untrusted-content story in the docs. It becomes the wall Kiln hits first for apps
+there is no untrusted-content story in the docs. It becomes the wall Voussoir hits first for apps
 that render untrusted content — a markdown preview, a viewer of user-supplied HTML, an embedded
 OAuth page — because those inherit the full command surface.
 
@@ -101,7 +101,7 @@ the commands the main window has.
 
 ## 4. MEDIUM — crash reporting is in-memory + optional local file, nothing else
 
-**Where:** `kiln/src/reporting.rs:1-10` (philosophy), `:53-57` (file write), `:111-116`
+**Where:** `voussoir/src/reporting.rs:1-10` (philosophy), `:53-57` (file write), `:111-116`
 (bounded ring buffer)
 
 "Do not phone home" is the right default for a framework, and the in-memory ring buffer is
@@ -117,7 +117,7 @@ trait object) on the builder, keep the default as the current no-op-plus-local-f
 apps opt into Sentry/OTLP/whatever themselves. That preserves the philosophy while removing the
 fork.
 
-**Acceptance:** an app can forward crash entries to its own sink without modifying `kiln`.
+**Acceptance:** an app can forward crash entries to its own sink without modifying `voussoir`.
 
 ---
 
@@ -134,7 +134,7 @@ follows `include!` one level deep (and says so). Consequences:
 - it is a tripwire, not a parser, and will eventually miss something real.
 
 It exists because a real bug shipped (`parity.test.ts:33-39` documents the `slow_task`
-incident), and it already runs before `kiln android build`, so the value is proven — the risk is
+incident), and it already runs before `voussoir android build`, so the value is proven — the risk is
 a future maintainer treating it as a guarantee.
 
 **Fix direction.** At minimum, add a `// KNOWN LIMITATION:` note naming the dynamic-name case and
@@ -149,7 +149,7 @@ produces a warning rather than silence.
 
 ## 6. LOW — the crash-log file is opened per entry, append-only, forever
 
-**Where:** `kiln/src/reporting.rs:53-57`
+**Where:** `voussoir/src/reporting.rs:53-57`
 
 Every `record()` re-opens the crash file and appends, with no size cap and no rotation. The
 in-memory buffer is bounded (`:111-116`); the file is not. An app that panics in a loop grows
@@ -165,15 +165,15 @@ and/or only write the file when the in-memory buffer flushes. Cheap, local, no A
 
 ## 7. LOW — API stability is unversioned
 
-**Where:** `kiln/Cargo.toml`, no `CHANGELOG.md` in the repo
+**Where:** `voussoir/Cargo.toml`, no `CHANGELOG.md` in the repo
 
 The crate is `0.1.0` with no changelog and no stated semver policy. App authors pinning
-`kiln = "0.1"` have no documented promise about what `0.2` may break — and in Cargo's 0.x
+`voussoir = "0.1"` have no documented promise about what `0.2` may break — and in Cargo's 0.x
 rules, `0.2` is allowed to break anything.
 
 **Fix direction.** Add `CHANGELOG.md` (Keep a Changelog format is fine) and a short
 compatibility paragraph in the README: what counts as a breaking change (command names,
-`App`/`AppHandle` signatures, the `kiln.json` schema, the `window.kiln` shim surface) and what
+`App`/`AppHandle` signatures, the `voussoir.json` schema, the `window.voussoir` shim surface) and what
 does not (internal modules, feature names).
 
 **Acceptance:** a contributor can answer "is this breaking?" from the docs alone.
@@ -188,8 +188,8 @@ them:
 - **Panic containment** is real, not decorative: `catch_unwind(AssertUnwindSafe)` wraps handlers,
   the release profile deliberately avoids `panic = "abort"`, and the probe fixture exercises a
   panicking command end-to-end through the real IPC path.
-- **Navigation allowlist** has tests for the actual prefix-match traps (`kiln://localhost.evil.com/`,
-  `kiln://localhost@evil.com/`), and asset lookup cannot traverse (`assets.rs:70-73`).
+- **Navigation allowlist** has tests for the actual prefix-match traps (`voussoir://localhost.evil.com/`,
+  `voussoir://localhost@evil.com/`), and asset lookup cannot traverse (`assets.rs:70-73`).
 - **The updater refuses to download or install** by design, and never claims an update on
   unparseable input (`updater.rs:155-159`). Correct scope for a framework.
 - **CI hygiene** is above average: `RUSTFLAGS: -D warnings`, clippy `-D warnings`, a real FreeBSD
@@ -221,12 +221,12 @@ addressed; finding 3 is now fixed by the per-window allowlist (2026-11-19).
 
 | # | Severity | Status | Where |
 | --- | --- | --- | --- |
-| 1 | HIGH | **fixed** — the Android exception was removed rather than documented: the release policy ships `script-src 'self'` after the emulator measurement under C2 showed the bridge survives it. The policy is a named const (`ANDROID_RELEASE_CSP`) pinned by `the_android_release_string_is_pinned_where_every_target_runs` on every target, not only where the Android branch compiles, and the contradicting module comment is gone | `kiln/src/security.rs` |
-| 2 | MEDIUM-HIGH | **fixed and proven on all three engines** — Windows and macOS jobs run `bun scripts/verify.ts`, green on WebKitGTK, WKWebView (run 44788618663) and WebView2 (run 44901970031). WebView2 needed a real fix first: it rewrites the page origin like Android, which `f5b70d0` made the page origin follow. The harness gained a `win32` `.exe` suffix, a loud Linux-only skip for the `ldd` composition check, and per-platform skip reporting | `scripts/verify.ts`, `kiln/src/security.rs`, `kiln/src/lib.rs`, `.github/workflows/ci.yml` |
-| 3 | MEDIUM | **fixed** — `kiln.json` gains a `windows` map keyed by window label; a listed window's surface is the intersection of its list and the global allowlist, resolved from the calling webview, never from anything the page sends. Unit tests cover narrowing and the no-widening rule; `verify.ts` opens a second window with an empty list and asserts the denied envelope | `kiln/src/config.rs`, `kiln/src/ipc.rs`, `kiln/src/lib.rs`, `scripts/verify.ts` |
-| 4 | MEDIUM | **fixed** — `reporting::set_reporter` installs an application sink that receives every record, so telemetry no longer requires forking the module; philosophy (nothing phones home by default) unchanged | `kiln/src/reporting.rs` |
+| 1 | HIGH | **fixed** — the Android exception was removed rather than documented: the release policy ships `script-src 'self'` after the emulator measurement under C2 showed the bridge survives it. The policy is a named const (`ANDROID_RELEASE_CSP`) pinned by `the_android_release_string_is_pinned_where_every_target_runs` on every target, not only where the Android branch compiles, and the contradicting module comment is gone | `voussoir/src/security.rs` |
+| 2 | MEDIUM-HIGH | **fixed and proven on all three engines** — Windows and macOS jobs run `bun scripts/verify.ts`, green on WebKitGTK, WKWebView (run 44788618663) and WebView2 (run 44901970031). WebView2 needed a real fix first: it rewrites the page origin like Android, which `f5b70d0` made the page origin follow. The harness gained a `win32` `.exe` suffix, a loud Linux-only skip for the `ldd` composition check, and per-platform skip reporting | `scripts/verify.ts`, `voussoir/src/security.rs`, `voussoir/src/lib.rs`, `.github/workflows/ci.yml` |
+| 3 | MEDIUM | **fixed** — `voussoir.json` gains a `windows` map keyed by window label; a listed window's surface is the intersection of its list and the global allowlist, resolved from the calling webview, never from anything the page sends. Unit tests cover narrowing and the no-widening rule; `verify.ts` opens a second window with an empty list and asserts the denied envelope | `voussoir/src/config.rs`, `voussoir/src/ipc.rs`, `voussoir/src/lib.rs`, `scripts/verify.ts` |
+| 4 | MEDIUM | **fixed** — `reporting::set_reporter` installs an application sink that receives every record, so telemetry no longer requires forking the module; philosophy (nothing phones home by default) unchanged | `voussoir/src/reporting.rs` |
 | 5 | LOW-MEDIUM | **fixed** — `unreadableRegistrations()` surfaces dynamic-name registrations in the parity result message, and the parser's known limitations are documented in-file | `cli/src/parity.ts` |
-| 6 | LOW | **fixed** — the crash log rotates at 512 KiB to `<name>.old` (the previous file survives); tested by `the_log_file_stays_bounded`, which drives more entries than the cap and asserts the bound and the rotation | `kiln/src/reporting.rs` |
+| 6 | LOW | **fixed** — the crash log rotates at 512 KiB to `<name>.old` (the previous file survives); tested by `the_log_file_stays_bounded`, which drives more entries than the cap and asserts the bound and the rotation | `voussoir/src/reporting.rs` |
 | 7 | LOW | **fixed** — `CHANGELOG.md` added (Keep a Changelog), README gained a "Compatibility policy" section naming what is and is not breaking | `CHANGELOG.md`, `README.md` |
 
 Caveats kept honest: finding 2's fix is CI-only, and it has now proved itself on
@@ -234,7 +234,7 @@ both engines. WKWebView passed in run 44788618663; WebView2 passed in run
 44901970031 after `f5b70d0`, which is the run where all eight jobs went green.
 That first Windows run was not noise: it exposed a real bug — WebView2 cannot
 intercept a custom scheme, so wry rewrites the page origin there the way it does
-on Android, and Kiln had only taught Android about it, so no command was
+on Android, and Voussoir had only taught Android about it, so no command was
 reachable at all on Windows until `f5b70d0` made the page origin follow the
 target. No `runtime behaviour on Windows is unverified` caveat remains, and the
 guarantees (panic containment, remote script/fetch/eval blocked, navigation
@@ -256,7 +256,7 @@ taken before code.
 the workflow pins appimagetool 1.9.1 by SHA-256, the benchmark table carries
 its date and framing, `cargo test --workspace` is green on Linux and runs in
 CI, the table's numbers come from a fresh `bun scripts/bench.ts`, and a second
-window can be given a strict command subset from `kiln.json` (tested and
+window can be given a strict command subset from `voussoir.json` (tested and
 documented). C2 is also landed: the Android release CSP now ships
 `script-src 'self'`, verified against a scaffold probe on the android-36
 emulator, and the guard test pins it.
@@ -286,13 +286,13 @@ emulator, and the guard test pins it.
 ### Phase B — workspace correctness (Medium)
 
 - **B1: make `cargo test --workspace` work on a clean host.** Root cause
-  confirmed by reading `kiln-android/Cargo.toml`: `jni`, `ndk` and `tao` are
+  confirmed by reading `voussoir-android/Cargo.toml`: `jni`, `ndk` and `tao` are
   unconditional dependencies, and `ndk` pulls `ndk-sys`, whose lib.rs
   `compile_error!`s on anything but Android — so the documented, natural
   contributor command fails before running a single test, while CI silently
-  tests only `-p kiln`. Fix by target-gating the Android crate's deps
+  tests only `-p voussoir`. Fix by target-gating the Android crate's deps
   (`[target.'cfg(target_os = "android")'.dependencies]`) or excluding
-  `kiln-android` from default workspace members with a comment saying why.
+  `voussoir-android` from default workspace members with a comment saying why.
   *Acceptance:* `cargo test --workspace` is green on a Linux host, and a CI
   step runs exactly that command so the claim stays proven.
 
@@ -300,7 +300,7 @@ emulator, and the guard test pins it.
 
 - **C1: per-window command allowlisting** (this document's open finding 3,
   re-raised by the second review). The direction stands: key the allowlist by
-  window label in `kiln.json`, resolve the caller's window at dispatch (wry's
+  window label in `voussoir.json`, resolve the caller's window at dispatch (wry's
   protocol callback identifies the webview), and narrow `permitted()` — note
   that the hot-reload path added since then goes through the same
   `permitted()` gate, so it inherits the scoping for free.
@@ -310,9 +310,9 @@ emulator, and the guard test pins it.
   android-36 emulator (system WebView 133.0.6943.137): a scaffolded app whose
   page calls a command on load round-tripped with `'unsafe-inline'` removed
   from `script-src`, and nothing it needs was blocked. The tightening is in
-  `kiln/src/security.rs` and the guard test now asserts the Android
+  `voussoir/src/security.rs` and the guard test now asserts the Android
   `script-src 'self'`. Honest caveat: one emulator image, one WebView version;
-  if an older WebView regressed this, the symptom is a dead `window.kiln` on
+  if an older WebView regressed this, the symptom is a dead `window.voussoir` on
   first load, which the scaffold page makes loud.
 
 ### Phase D — measurement refresh
@@ -334,12 +334,12 @@ marker could ever match, and tao's `create_window` aborts before
 `UIApplicationMain` has run — and both are fixed. What follows is now a
 measurement, not a description:
 
-- a fresh `kiln init` builds for the simulator: frontend bundled and embedded
+- a fresh `voussoir init` builds for the simulator: frontend bundled and embedded
   in the staticlib, staged, linked through the XcodeGen-generated project, and
   an unsigned `.app` produced;
-- `kiln ios verify` installs and launches that app on a booted simulator and
-  observes both console markers — `KILN_IOS_START` (the staticlib reached its
-  Rust entry) and `KILN_IOS_ROUND_TRIP` (the page loaded from the app's own
+- `voussoir ios verify` installs and launches that app on a booted simulator and
+  observes both console markers — `VOUSSOIR_IOS_START` (the staticlib reached its
+  Rust entry) and `VOUSSOIR_IOS_ROUND_TRIP` (the page loaded from the app's own
   scheme, called a command, and was answered) — the full transport;
 - command parity is checked three-way on the fresh scaffold, and a
   `#[cfg(test)]` command table no longer counts as a registration;

@@ -1,4 +1,4 @@
-/** End-to-end verification for hot-reloaded commands (`kiln dev`).
+/** End-to-end verification for hot-reloaded commands (`voussoir dev`).
  *
  *  What it proves, in one headless run:
  *
@@ -6,7 +6,7 @@
  *    envelope shape, junk input);
  *  - `libloading` is absent from the release dependency tree and present only
  *    behind the `hot-reload` feature;
- *  - a real `kiln dev` session answers `greet`, and editing the command swaps
+ *  - a real `voussoir dev` session answers `greet`, and editing the command swaps
  *    a new library into the *same* running process — the page's own report
  *    counter never resets and its start timestamp never changes, which is
  *    what "no restart" means from the inside;
@@ -20,7 +20,7 @@
  *  Headless: xvfb-run -a bun scripts/verify-hot.ts
  *
  *  Linux-only by design (the CI job that runs it is the Linux one); the unit
- *  tests for the same logic in kiln/src/hot.rs are platform-neutral.
+ *  tests for the same logic in voussoir/src/hot.rs are platform-neutral.
  */
 
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -88,7 +88,7 @@ const send = async (payload) => {
     runs += 1;
     let reply;
     try {
-      const res = await (window as any).kiln.invoke("greet", { name: "hot" });
+      const res = await (window as any).voussoir.invoke("greet", { name: "hot" });
       reply = typeof res === "string" ? res : JSON.stringify(res);
     } catch (e) {
       reply = e instanceof Error ? e.message : String(e);
@@ -100,7 +100,7 @@ const send = async (payload) => {
 `;
 }
 
-const app = mkdtempSync(join(tmpdir(), "kiln-hot-"));
+const app = mkdtempSync(join(tmpdir(), "voussoir-hot-"));
 const commandsFile = join(app, "native", "commands", "src", "lib.rs");
 let dev: ReturnType<typeof Bun.spawn> | null = null;
 let reportServer: { stop: (force?: boolean) => void; port: number } | null = null;
@@ -118,7 +118,7 @@ async function finish(code: number): Promise<never> {
 try {
   // --- Scaffold -----------------------------------------------------------
   const init = await sh([process.execPath, cli, "init", app], repo);
-  record("kiln init scaffolds the test app", init.code === 0, init.code === 0 ? app : (init.err || init.out).slice(-400));
+  record("voussoir init scaffolds the test app", init.code === 0, init.code === 0 ? app : (init.err || init.out).slice(-400));
   if (init.code !== 0) await finish(1);
 
   // --- The scaffolded crate's own contract tests --------------------------
@@ -135,8 +135,8 @@ try {
   // `libloading` already reaches the release tree transitively (rfd →
   // wayland-sys → dlib), before this feature existed. What must hold is that
   // the *shell itself* does not depend on it unless the feature asks: a
-  // `--depth 1` tree shows exactly kiln's own edges.
-  const releaseTree = await sh(["cargo", "tree", "-p", "kiln", "--features", "full", "--depth", "1"], repo);
+  // `--depth 1` tree shows exactly voussoir's own edges.
+  const releaseTree = await sh(["cargo", "tree", "-p", "voussoir", "--features", "full", "--depth", "1"], repo);
   record(
     "release shell has no direct libloading edge",
     releaseTree.code === 0 && !releaseTree.out.includes("libloading"),
@@ -146,7 +146,7 @@ try {
         : "absent (transitive rfd/wayland edge unchanged)"
       : "cargo tree failed",
   );
-  const hotTree = await sh(["cargo", "tree", "-p", "kiln", "--features", "full,hot-reload", "--depth", "1"], repo);
+  const hotTree = await sh(["cargo", "tree", "-p", "voussoir", "--features", "full,hot-reload", "--depth", "1"], repo);
   record(
     "hot-reload feature pulls libloading",
     hotTree.code === 0 && hotTree.out.includes("libloading"),

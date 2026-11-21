@@ -46,14 +46,14 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Unit tests
-        run: cargo test -p kiln --features full --lib
+        run: cargo test -p voussoir --features full --lib
 
       # The `rt` feature carries its own tests (async dispatch, panics inside a
       # future, allowlist gating, 64 concurrent requests). `full` does not enable
       # it, so without this step those tests only ever ran on a contributor's
       # machine.
       - name: Unit tests (async runtime)
-        run: cargo test -p kiln --features full,rt --lib
+        run: cargo test -p voussoir --features full,rt --lib
 
       # The documented contributor command. It used to die inside ndk-sys
       # before running a single test (the android crate's deps were
@@ -63,7 +63,7 @@ jobs:
         run: cargo test --workspace
 
       - name: Clippy
-        run: cargo clippy -p kiln --features full,rt,storage --all-targets -- -D warnings
+        run: cargo clippy -p voussoir --features full,rt,storage --all-targets -- -D warnings
 
       # A gate, not a report: the baseline is published in the script, and the
       # floor sits just under it so an honest change cannot fail the build while
@@ -88,13 +88,13 @@ jobs:
       - name: Install script (checkout build)
         run: |
           sh -n install.sh
-          sh install.sh --no-deps --prefix "$RUNNER_TEMP/kiln-prefix"
+          sh install.sh --no-deps --prefix "$RUNNER_TEMP/voussoir-prefix"
 
       - name: Install Xvfb and appimagetool
         run: |
           sudo apt-get install -y xvfb
           # appimagetool is not in the Ubuntu archive; take the official static
-          # build so `kiln package` produces a real AppImage instead of a bare
+          # build so `voussoir package` produces a real AppImage instead of a bare
           # AppDir.
           mkdir -p ~/.local/bin
           # Pinned to a tagged release with its SHA-256: the `continuous` tag
@@ -126,19 +126,19 @@ jobs:
       # WebView2 is preinstalled on windows-latest, which is what the shell uses
       # at runtime; the development headers come with the same runtime package.
       - name: Unit tests
-        run: cargo test -p kiln --features full --lib
+        run: cargo test -p voussoir --features full --lib
 
       - name: Unit tests (async runtime)
-        run: cargo test -p kiln --features full,rt --lib
+        run: cargo test -p voussoir --features full,rt --lib
 
       - name: Build the full-feature shell
-        run: cargo build -p kiln --features full --examples
+        run: cargo build -p voussoir --features full --examples
 
       - name: Build the minimal shell
-        run: cargo build -p kiln --examples
+        run: cargo build -p voussoir --examples
 
       - name: Install script (checkout build)
-        run: ./install.ps1 -NoDeps -Prefix "$env:RUNNER_TEMP\kiln-prefix"
+        run: ./install.ps1 -NoDeps -Prefix "$env:RUNNER_TEMP\voussoir-prefix"
 
       # The security guarantees — panic containment, remote-script blocking,
       # navigation lockdown — are per-webview-engine facts, and Windows ships
@@ -162,23 +162,23 @@ jobs:
             pkg install -y rust gtk3 pkgconf
             pkg install -y webkit2-gtk_41 || pkg install -y webkit2-gtk41 || pkg install -y webkit2-gtk || pkg install -y webkit2-gtk4 || (pkg search -q webkit; exit 1)
           run: |
-            cargo test -p kiln --features full --lib
-            cargo test -p kiln --features full,rt --lib
-            cargo build -p kiln --features full --examples
-            cargo build -p kiln --examples
+            cargo test -p voussoir --features full --lib
+            cargo test -p voussoir --features full,rt --lib
+            cargo build -p voussoir --features full --examples
+            cargo build -p voussoir --examples
 
   netbsd:
     name: NetBSD (build)
     runs-on: ubuntu-latest
     # NetBSD is pkgsrc-based and has no public webkit2gtk package in this shape,
-    # so this job only proves the crate graph resolves and Kiln's own code
+    # so this job only proves the crate graph resolves and Voussoir's own code
     # compiles. It is labelled that way rather than passing silently.
     steps:
       - uses: actions/checkout@v5
       - name: Cross-check NetBSD
         run: |
           rustup target add x86_64-unknown-netbsd
-          cargo check -p kiln --target x86_64-unknown-netbsd 2>&1 | tail -20 || \
+          cargo check -p voussoir --target x86_64-unknown-netbsd 2>&1 | tail -20 || \
             echo "::warning::NetBSD native libs unavailable; the runtime is unverified on NetBSD"
 
   android:
@@ -254,9 +254,9 @@ jobs:
             (cd /tmp/app/android/app && gradle connectedDebugAndroidTest --no-daemon)
             adb install -r /tmp/app/android/app/build/outputs/apk/debug/*.apk
             adb shell pm list packages | grep ci_app || true
-            adb shell am start -n com.kiln.ci_app/.MainActivity
+            adb shell am start -n com.voussoir.ci_app/.MainActivity
             sleep 15
-            adb logcat -d -s Kiln:* || true
+            adb logcat -d -s Voussoir:* || true
             adb logcat -d > /tmp/logcat.txt
             grep -A 40 -B 5 "FATAL EXCEPTION" /tmp/logcat.txt || true
             grep -q "FATAL EXCEPTION" /tmp/logcat.txt && exit 1 || exit 0
@@ -267,7 +267,7 @@ jobs:
 
   # Phase I-1 of IOS-PLAN.md. The bootstrap crate compiles to nothing off iOS,
   # so only an Apple target proves its code type-checks; this is a check rather
-  # than a build, because the SDK-linking build scripts belong to the `kiln ios
+  # than a build, because the SDK-linking build scripts belong to the `voussoir ios
   # build` work in Phase I-3.
   ios-check:
     name: iOS (cross-check)
@@ -278,7 +278,7 @@ jobs:
         with:
           targets: aarch64-apple-ios
       - name: Check the iOS bootstrap for the device target
-        run: cargo check -p kiln-ios --target aarch64-apple-ios
+        run: cargo check -p voussoir-ios --target aarch64-apple-ios
 
   # Phase I-4 of IOS-PLAN.md: the counterpart of the Android emulator job.
   # The runner image ships Xcode and its simulators, so the only installs are
@@ -333,19 +333,19 @@ jobs:
       # No extra system packages: WKWebView and the Apple frameworks are part of
       # the OS SDK.
       - name: Unit tests
-        run: cargo test -p kiln --features full --lib
+        run: cargo test -p voussoir --features full --lib
 
       - name: Unit tests (async runtime)
-        run: cargo test -p kiln --features full,rt --lib
+        run: cargo test -p voussoir --features full,rt --lib
 
       - name: Build the full-feature shell
-        run: cargo build -p kiln --features full --examples
+        run: cargo build -p voussoir --features full --examples
 
       - name: Build the minimal shell
-        run: cargo build -p kiln --examples
+        run: cargo build -p voussoir --examples
 
       - name: Install script (checkout build)
-        run: sh install.sh --no-deps --prefix "$RUNNER_TEMP/kiln-prefix"
+        run: sh install.sh --no-deps --prefix "$RUNNER_TEMP/voussoir-prefix"
 
       # Same harness as Linux and Windows: WKWebView honours custom-protocol
       # headers and the navigation veto differently from WebKitGTK, so the

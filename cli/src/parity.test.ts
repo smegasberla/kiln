@@ -98,7 +98,7 @@ describe("diffCommands", () => {
 
 /** A throwaway project tree, so these cases touch no real app. */
 function scaffold(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), "kiln-parity-"));
+  const root = mkdtempSync(join(tmpdir(), "voussoir-parity-"));
   for (const [path, contents] of Object.entries(files)) {
     const full = join(root, path);
     mkdirSync(join(full, ".."), { recursive: true });
@@ -109,8 +109,8 @@ function scaffold(files: Record<string, string>): string {
 
 describe("checkParity", () => {
   test("a mobile-only project has nothing to compare", () => {
-    // `kiln init --mobile` writes no desktop crate. Reporting a missing
-    // `native/src/main.rs` would fail every `kiln android build` in that shape.
+    // `voussoir init --mobile` writes no desktop crate. Reporting a missing
+    // `native/src/main.rs` would fail every `voussoir android build` in that shape.
     const root = scaffold({
       "android/src/lib.rs": `.command("greet", |_a, p| Ok(p))`,
     });
@@ -120,8 +120,8 @@ describe("checkParity", () => {
   });
 
   test("a mobile-only project with no android crate is still an error", () => {
-    // Neither shell exists: the tree is not a Kiln project at all.
-    const root = scaffold({ "kiln.json": "{}" });
+    // Neither shell exists: the tree is not a Voussoir project at all.
+    const root = scaffold({ "voussoir.json": "{}" });
     expect(checkParity(root).ok).toBe(false);
   });
 

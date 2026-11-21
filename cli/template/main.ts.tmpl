@@ -1,4 +1,4 @@
-/// <reference path="./kiln.d.ts" />
+/// <reference path="./voussoir.d.ts" />
 
 const result = document.getElementById("result")!;
 const form = document.getElementById("greet") as HTMLFormElement;
@@ -14,7 +14,7 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   show("invoking...");
   try {
-    show(await window.kiln.invoke<string>("greet", { name: nameInput.value }));
+    show(await window.voussoir.invoke<string>("greet", { name: nameInput.value }));
   } catch (error) {
     show("error: " + (error as Error).message);
   }
@@ -25,7 +25,7 @@ slowButton.addEventListener("click", async () => {
   slowButton.disabled = true;
   show("working off the UI thread...");
   try {
-    const reply = await window.kiln.invoke<{ slept_ms: number }>("slow_task", { ms: 800 });
+    const reply = await window.voussoir.invoke<{ slept_ms: number }>("slow_task", { ms: 800 });
     show(`async command finished after ${reply.slept_ms} ms`);
   } catch (error) {
     show("error: " + (error as Error).message);
@@ -36,30 +36,30 @@ slowButton.addEventListener("click", async () => {
 
 // A second window is a desktop capability. Rather than offer a button that errors
 // on Android, hide it: the page is shared, the affordances are not.
-if (window.kiln.platform === "android" || window.kiln.platform === "ios") {
+if (window.voussoir.platform === "android" || window.voussoir.platform === "ios") {
   settingsButton.hidden = true;
 } else {
   settingsButton.addEventListener("click", () => {
-    window.kiln.invoke("open_settings").catch((error) => show("error: " + error.message));
+    window.voussoir.invoke("open_settings").catch((error) => show("error: " + error.message));
   });
 }
 
 // Settings survive a restart because `storage.set` writes a JSON file in the
 // platform data directory. No crate, no path handling: the shell owns both.
 settingsButton.addEventListener("dblclick", async () => {
-  await window.kiln.invoke("storage.set", { key: "settings.opened", value: Date.now() });
-  const saved = await window.kiln.invoke<number | null>("storage.get", { key: "settings.opened" });
+  await window.voussoir.invoke("storage.set", { key: "settings.opened", value: Date.now() });
+  const saved = await window.voussoir.invoke<number | null>("storage.get", { key: "settings.opened" });
   show(`settings last opened at ${saved ?? "never"}`);
 });
 
 // Menu clicks arrive as events, so a native menu needs no extra wiring here.
-window.kiln.listen<{ id: string }>("menu", (event) => show(`menu: ${event.id}`));
+window.voussoir.listen<{ id: string }>("menu", (event) => show(`menu: ${event.id}`));
 
 // Lifecycle is reported, not interpreted: a web page has no state machine to
 // run, but knowing it was paused is what tells it to stop a timer. On Android
 // this is the only signal that the activity left the foreground; on desktop the
 // same event fires for a window that loses or regains focus.
-window.kiln.listen<{ state: string }>("lifecycle", ({ state }) => {
+window.voussoir.listen<{ state: string }>("lifecycle", ({ state }) => {
   if (state === "resume") return;
   show(`lifecycle: ${state}`);
 });

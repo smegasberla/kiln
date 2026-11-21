@@ -1,8 +1,8 @@
 /** A generated fallback icon.
  *
  *  appimagetool refuses to package without an icon, and a new project has none,
- *  so the packager draws one: a rounded square in the Kiln accent color with a
- *  simple kiln-arch glyph. Pure PNG encoding, no image library.
+ *  so the packager draws one: a rounded square in the Voussoir accent color with a
+ *  simple voussoir-arch glyph. Pure PNG encoding, no image library.
  */
 
 /** PNG signature + a minimal RGBA encoder (filter type 0, zlib store). */
@@ -109,7 +109,7 @@ function concat(parts: Uint8Array[]): Uint8Array {
 export function defaultIcon(size = 256): Uint8Array {
   const px = new Uint8Array(size * size * 4);
   const radius = size * 0.22;
-  const accent = [168, 85, 43]; // #a8552b, the Kiln accent
+  const accent = [168, 85, 43]; // #a8552b, the Voussoir accent
   const cream = [246, 235, 222];
 
   for (let y = 0; y < size; y++) {

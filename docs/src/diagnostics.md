@@ -1,11 +1,11 @@
 # Diagnostics
 
-`kiln dev` normally prints only what you would read: the dev server URL, a
-successful rebuild, a failed compile. `kiln dev --verbose` adds four things that
+`voussoir dev` normally prints only what you would read: the dev server URL, a
+successful rebuild, a failed compile. `voussoir dev --verbose` adds four things that
 are otherwise invisible, and records them all so a snapshot survives the terminal.
 
 ```bash
-kiln dev --verbose
+voussoir dev --verbose
 ```
 
 ## What it records
@@ -23,9 +23,9 @@ the message, and a JSON object of fields. Printing is one line per entry, so a l
 can be grepped:
 
 ```
-kiln: [hot] t+8124ms hot commands gen 3 active gen=3 path=/…/commands-3.so rebuild_to_reload_ms=1533
-kiln: [dispatch] t+9010ms slow command method=read_file ms=412
-kiln: [security] t+10233ms navigation refused dev_origin=null url=https://example.com/
+voussoir: [hot] t+8124ms hot commands gen 3 active gen=3 path=/…/commands-3.so rebuild_to_reload_ms=1533
+voussoir: [dispatch] t+9010ms slow command method=read_file ms=412
+voussoir: [security] t+10233ms navigation refused dev_origin=null url=https://example.com/
 ```
 
 ## Reading it from the app
@@ -34,7 +34,7 @@ The buffer is also reachable from the page, which is what makes it useful on a
 platform with no terminal (Android, iOS):
 
 ```ts
-const { verbose, entries } = await window.kiln.invoke("__kiln_diagnostics", { tail: 20 });
+const { verbose, entries } = await window.voussoir.invoke("__voussoir_diagnostics", { tail: 20 });
 console.table(entries);
 ```
 
@@ -42,7 +42,7 @@ console.table(entries);
 256 entries and drops the oldest, so a dev session that runs for hours does not
 grow the process.
 
-`__kiln_diagnostics_enabled` answers only the flag, for a diagnostics screen that
+`__voussoir_diagnostics_enabled` answers only the flag, for a diagnostics screen that
 wants to show the state without fetching the entries.
 
 ## Latency on exit
@@ -51,7 +51,7 @@ When the app closes, `--verbose` prints a per-command latency table, slowest mea
 first:
 
 ```
-kiln: command latency, slowest first:
+voussoir: command latency, slowest first:
   read_file                    p50 410 ms  p95 512 ms  max 610 ms  n 12
   greet                        p50   0 ms  p95   1 ms  max   3 ms  n 48
 ```
@@ -70,7 +70,7 @@ twelve times".
 
 ## Enabling it without the CLI
 
-`kiln dev --verbose` sets `KILN_VERBOSE=1` for the shell it launches. The shell
+`voussoir dev --verbose` sets `VOUSSOIR_VERBOSE=1` for the shell it launches. The shell
 honours the variable directly, so a `cargo run` in a debug build gets the same
-output. `KILN_VERBOSE=0` forces it off even if the variable is inherited from a
+output. `VOUSSOIR_VERBOSE=0` forces it off even if the variable is inherited from a
 shell profile.

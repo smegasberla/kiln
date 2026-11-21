@@ -1,5 +1,5 @@
-// Baseline: the bare wry + tao hello world that Kiln is measured against.
-// No IPC, no framework code. `KILN_BENCH=1` prints time-to-first-paint and exits.
+// Baseline: the bare wry + tao hello world that Voussoir is measured against.
+// No IPC, no framework code. `VOUSSOIR_BENCH=1` prints time-to-first-paint and exits.
 
 use std::io::Write;
 use std::time::Instant;
@@ -16,7 +16,7 @@ const HTML: &str = r#"<!doctype html><html><body style="margin:0;display:grid;pl
 
 fn main() -> wry::Result<()> {
     let t0 = Instant::now();
-    let bench = std::env::var_os("KILN_BENCH").is_some();
+    let bench = std::env::var_os("VOUSSOIR_BENCH").is_some();
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()

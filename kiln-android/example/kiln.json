@@ -1,6 +1,0 @@
-{
-  "name": "Counter",
-  "width": 900,
-  "height": 680,
-  "update": { "url": "https://raw.githubusercontent.com/smegasberla/kiln/master/kiln-android/example/releases.json" }
-}

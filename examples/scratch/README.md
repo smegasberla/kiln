@@ -1,13 +1,13 @@
 # Scratch
 
 A notebook that keeps each note as a plain `.md` file, built to exercise the parts
-of Kiln that only a real app does.
+of Voussoir that only a real app does.
 
 ```sh
-kiln dev                  # desktop, hot reload
-kiln build --size         # desktop release binary
-kiln android build --abi x86_64   # emulators on x86 hosts
-kiln android run
+voussoir dev                  # desktop, hot reload
+voussoir build --size         # desktop release binary
+voussoir android build --abi x86_64   # emulators on x86 hosts
+voussoir android run
 ```
 
 ## Why this app
@@ -34,12 +34,12 @@ the Android crate includes that file rather than keeping a second copy.
 #[path = "../../native/src/app.rs"]
 mod app;
 
-kiln_android::run(app::build("Scratch"))
+voussoir_android::run(app::build("Scratch"))
 ```
 
-Kiln can check command parity between the two crates, and it does, but a check
+Voussoir can check command parity between the two crates, and it does, but a check
 that can pass while the lists differ is worth less than a single list that cannot
-drift. `kiln android build` still reports `8 commands on both platforms`, which is
+drift. `voussoir android build` still reports `8 commands on both platforms`, which is
 now a proof rather than a coincidence.
 
 What stays platform-specific is what is genuinely different: `native/src/main.rs`

@@ -1,13 +1,13 @@
 [package]
-name = "kiln-probe"
+name = "voussoir-probe"
 version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Test fixture: an app whose commands exist to prove the shell's guarantees"
 
 [dependencies]
-kiln = { path = "../kiln", features = ["storage", "rt"] }
+voussoir = { path = "../voussoir", features = ["storage", "rt"] }
 
 [[bin]]
-name = "kiln-probe"
+name = "voussoir-probe"
 path = "src/main.rs"

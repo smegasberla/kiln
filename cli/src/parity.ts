@@ -1,6 +1,6 @@
 /** Command parity between the desktop and Android crates.
  *
- *  A Kiln app has one frontend and two shells. If the frontend calls a command
+ *  A Voussoir app has one frontend and two shells. If the frontend calls a command
  *  that only one shell registers, the other platform fails at runtime with
  *  "unknown command" — which is exactly the kind of bug that ships, because both
  *  apps build cleanly and only the platform nobody tested complains.
@@ -182,7 +182,7 @@ export function effectiveCommands(source: string, crateDir: string): string[] {
  *
  *  The iOS crate is only included in the comparison when it exists, so a
  *  desktop+Android project behaves exactly as it did before Phase I-3; the iOS
- *  shell joins the parity set the moment `kiln init` writes one. */
+ *  shell joins the parity set the moment `voussoir init` writes one. */
 export function checkParity(root: string): { ok: boolean; message: string } {
   const desktopFile = join(root, "native", "src", "main.rs");
   // The commands crate is where the scaffolded desktop shell keeps its
@@ -193,7 +193,7 @@ export function checkParity(root: string): { ok: boolean; message: string } {
 
   if (!existsSync(desktopFile)) {
     if (existsSync(androidFile)) {
-      // `kiln init --mobile` writes no desktop crate: there is no second command
+      // `voussoir init --mobile` writes no desktop crate: there is no second command
       // list to disagree with, so parity is trivially satisfied.
       return { ok: true, message: "mobile only; skipping parity" };
     }

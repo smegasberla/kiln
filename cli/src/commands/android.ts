@@ -1,6 +1,6 @@
-/** `kiln android <build|run|verify>`: the Android half of a Kiln project.
+/** `voussoir android <build|run|verify>`: the Android half of a Voussoir project.
  *
- *  Kept separate from `kiln build` because the toolchain is entirely different:
+ *  Kept separate from `voussoir build` because the toolchain is entirely different:
  *  cross-compile with the NDK, stage the `.so`, then let Gradle package it. The
  *  project already contains its Gradle files, so nothing here generates
  *  configuration at build time.
@@ -14,7 +14,7 @@ import { requireProject, type Project } from "../project.ts";
 import { checkParity } from "../parity.ts";
 import { run } from "../proc.ts";
 
-/** ABIs Kiln builds, and the Rust target + NDK compiler prefix for each. */
+/** ABIs Voussoir builds, and the Rust target + NDK compiler prefix for each. */
 const ABIS: Record<string, { target: string; clang: string }> = {
   "arm64-v8a": { target: "aarch64-linux-android", clang: "aarch64-linux-android" },
   "x86_64": { target: "x86_64-linux-android", clang: "x86_64-linux-android" },
@@ -46,7 +46,7 @@ export function ndkToolchain(ndk: string | undefined): string {
 export function androidLibName(project: Project): string {
   const manifest = join(androidDir(project), "Cargo.toml");
   if (!existsSync(manifest)) {
-    throw new Error(`no Android crate at ${manifest}; run kiln init in this project`);
+    throw new Error(`no Android crate at ${manifest}; run voussoir init in this project`);
   }
   const text = require("node:fs").readFileSync(manifest, "utf8") as string;
   const match = /\[lib\][\s\S]*?name\s*=\s*"([^"]+)"/.exec(text);
@@ -78,13 +78,13 @@ export async function build(args: Args): Promise<number> {
   // "unknown command". Catch it at build time instead.
   const parity = checkParity(project.root);
   if (!parity.ok) {
-    console.error(`kiln: command parity problem between desktop and android\n  ${parity.message}`);
+    console.error(`voussoir: command parity problem between desktop and android\n  ${parity.message}`);
     return 1;
   }
   console.log(`  ${parity.message}`);
 
   // The frontend must be bundled before it can be embedded.
-  console.log(`kiln android build: ${project.config.name} (${abi})`);
+  console.log(`voussoir android build: ${project.config.name} (${abi})`);
   await bundle(project, true);
   writeAssetTable(project, android);
 
@@ -154,16 +154,16 @@ export async function runOnDevice(args: Args): Promise<number> {
   const adb = adbPath();
 
   // Prefer the debug build, but launch a release APK too when that is what was
-  // built last: `kiln android build --release` followed by `run` is the obvious
+  // built last: `voussoir android build --release` followed by `run` is the obvious
   // pairing, and refusing it would be an artificial restriction.
   const apk = findApk(project) ?? findApk(project, true);
   if (!apk) {
-    console.error("kiln: no APK yet; run `kiln android build` first");
+    console.error("voussoir: no APK yet; run `voussoir android build` first");
     return 1;
   }
 
   const pkg = readPackage(project);
-  console.log(`kiln android run: ${pkg}`);
+  console.log(`voussoir android run: ${pkg}`);
   await run([adb, "install", "-r", apk], { silent: true });
   await run([adb, "shell", "am", "force-stop", pkg], { silent: true });
   await run([adb, "logcat", "-c"], { silent: true });
@@ -177,7 +177,7 @@ export async function runOnDevice(args: Args): Promise<number> {
   ], { silent: true });
 
   console.log("  launched. logs:\n");
-  const logs = Bun.spawn([adb, "logcat", "-s", "Kiln:*", "RustStdoutStderr:*"], {
+  const logs = Bun.spawn([adb, "logcat", "-s", "Voussoir:*", "RustStdoutStderr:*"], {
     stdout: "inherit",
     stderr: "inherit",
   });
@@ -270,7 +270,7 @@ export function androidGitignore(): string {
   ].join("\n");
 }
 
-/** Used by `kiln init`; exported so a test can assert the shape. */
+/** Used by `voussoir init`; exported so a test can assert the shape. */
 export function writeAndroidGitignore(project: Project): void {
   writeFileSync(join(androidDir(project), ".gitignore"), androidGitignore());
 }

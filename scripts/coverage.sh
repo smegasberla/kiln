@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Line coverage for the `kiln` library's own tests, and the floor that gates it.
+# Line coverage for the `voussoir` library's own tests, and the floor that gates it.
 #
 # Uses the LLVM tools the toolchain already links against (`llvm-profdata`,
 # `llvm-cov`) instead of `cargo llvm-cov`, so it needs no extra install and the
@@ -17,13 +17,13 @@
 #
 # Usage:
 #   scripts/coverage.sh              # report, fail under the floor
-#   KILN_COV_FLOOR=0 scripts/coverage.sh   # report only
+#   VOUSSOIR_COV_FLOOR=0 scripts/coverage.sh   # report only
 set -euo pipefail
 
-FEATURES="${KILN_COV_FEATURES:-full,rt,storage}"
-FLOOR="${KILN_COV_FLOOR:-65}"
-WORK="${KILN_COV_DIR:-target/coverage}"
-CRATE="${KILN_COV_CRATE:-kiln}"
+FEATURES="${VOUSSOIR_COV_FEATURES:-full,rt,storage}"
+FLOOR="${VOUSSOIR_COV_FLOOR:-65}"
+WORK="${VOUSSOIR_COV_DIR:-target/coverage}"
+CRATE="${VOUSSOIR_COV_CRATE:-voussoir}"
 
 command -v llvm-profdata >/dev/null || { echo "coverage: llvm-profdata not found" >&2; exit 2; }
 command -v llvm-cov >/dev/null || { echo "coverage: llvm-cov not found" >&2; exit 2; }
@@ -75,7 +75,7 @@ print(" ".join("-object=" + b for b in open(sys.argv[1]).read().split()))
 ' "$BINARIES") \
   -instr-profile="$WORK/merged.profdata" \
   -ignore-filename-regex='(^|/)(tests|fuzz)\.rs$|/rustc/|\.cargo' \
-  -sources kiln/src \
+  -sources voussoir/src \
   > "$REPORT"
 
 # The TOTAL row's line-coverage column is the number this gate is about.

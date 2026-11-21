@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-/** kiln - build tooling for Kiln desktop apps.
+/** voussoir - build tooling for Voussoir desktop apps.
  *
- *  Bun is development-time only. Nothing here ships to end users: `kiln build`
+ *  Bun is development-time only. Nothing here ships to end users: `voussoir build`
  *  produces a Rust binary with no JS runtime inside.
  */
 
@@ -15,10 +15,10 @@ import { runPackage } from "./commands/package.ts";
 import * as android from "./commands/android.ts";
 import * as ios from "./commands/ios.ts";
 
-const HELP = `kiln - minimal desktop apps with a Rust shell and a Bun toolchain
+const HELP = `voussoir - minimal desktop apps with a Rust shell and a Bun toolchain
 
 Usage
-  kiln <command> [options]
+  voussoir <command> [options]
 
 Commands
   init [dir]     scaffold a new app (default: current directory)
@@ -43,7 +43,7 @@ Options
   --out <path>   build: copy the binary somewhere
   --icon <path>  package: application icon (256x256 PNG or .icns)
   --identifier   package: reverse-DNS id (default: derived from the app name)
-  --package      init: Android package name (default: com.kiln.<app>)
+  --package      init: Android package name (default: com.voussoir.<app>)
   --mobile       init: Android shell only, no desktop crate
   --abi          android build: arm64-v8a (default), x86_64, armeabi-v7a
   --release      android build: signed release APK instead of debug
@@ -89,7 +89,7 @@ switch (args.command) {
     code = await runPackage(args);
     break;
   case "android": {
-    // `kiln android <subcommand>`: the second positional names the action.
+    // `voussoir android <subcommand>`: the second positional names the action.
     const sub = args.positionals[0];
     const rest: Args = { ...args, command: sub ?? "help", positionals: args.positionals.slice(1) };
     switch (sub) {
@@ -100,14 +100,14 @@ switch (args.command) {
         code = await android.runOnDevice(rest);
         break;
       default:
-        console.error("kiln android: expected `build` or `run`\n");
+        console.error("voussoir android: expected `build` or `run`\n");
         console.log(HELP);
         code = 1;
     }
     break;
   }
   case "ios": {
-    // `kiln ios <subcommand>`: same shape as the android one.
+    // `voussoir ios <subcommand>`: same shape as the android one.
     const sub = args.positionals[0];
     const rest: Args = { ...args, command: sub ?? "help", positionals: args.positionals.slice(1) };
     switch (sub) {
@@ -121,14 +121,14 @@ switch (args.command) {
         code = await ios.verify(rest);
         break;
       default:
-        console.error("kiln ios: expected `build`, `run` or `verify`\n");
+        console.error("voussoir ios: expected `build`, `run` or `verify`\n");
         console.log(HELP);
         code = 1;
     }
     break;
   }
   default:
-    console.error(`kiln: unknown command \`${args.command}\`\n`);
+    console.error(`voussoir: unknown command \`${args.command}\`\n`);
     console.log(HELP);
     code = 1;
 }

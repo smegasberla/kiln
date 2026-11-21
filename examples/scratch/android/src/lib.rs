@@ -10,7 +10,7 @@
 mod assets;
 
 // The app lives in the desktop crate and is included here rather than copied, so
-// the two shells cannot disagree about which commands exist. `kiln android build`
+// the two shells cannot disagree about which commands exist. `voussoir android build`
 // checks that too, but a check that can pass while the lists differ is worth less
 // than a single list that cannot.
 #[path = "../../native/src/app.rs"]
@@ -18,7 +18,7 @@ mod app;
 
 /// The activity's native entry point, named as JNI expects.
 #[no_mangle]
-pub extern "C" fn Java_com_kiln_scratch_MainActivity_android_1main(
+pub extern "C" fn Java_com_voussoir_scratch_MainActivity_android_1main(
     _env: jni::JNIEnv,
     _class: jni::objects::JClass,
 ) {
@@ -26,19 +26,19 @@ pub extern "C" fn Java_com_kiln_scratch_MainActivity_android_1main(
 }
 
 fn android_main() {
-    kiln_android::register_jni!(com_kiln, scratch, Rust, android_main);
+    voussoir_android::register_jni!(com_voussoir, scratch, Rust, android_main);
 
     // The same `App` the desktop binary runs, so every command exists on both.
-    kiln_android::run(app::build("Scratch"))
+    voussoir_android::run(app::build("Scratch"))
 }
 
 // Java -> Rust. `MainActivity` calls these when a picker returns, when a popup
 // menu item is tapped, and when a notification action is tapped. Their names are
 // the activity's method names behind JNI's `Java_<package>_<class>_` prefix, and
 // none of those method names contains an underscore, so no `_1` escaping shows
-// up here; the package half of the name is already escaped by `com_kiln_scratch`.
+// up here; the package half of the name is already escaped by `com_voussoir_scratch`.
 //
-// They live in the app rather than in `kiln-android` because the prefix names
+// They live in the app rather than in `voussoir-android` because the prefix names
 // the app's own package, which the library cannot know.
 
 /// A Java string as Rust text, or `None` when it was null or unreadable.
@@ -53,20 +53,20 @@ fn text_of(env: &mut jni::JNIEnv, value: &jni::objects::JString) -> Option<Strin
 }
 
 /// The picker answered. `json` is the desktop dialogs' reply shape, or null for
-/// a cancel, which `kilnCompleteDialog` passes through as such.
+/// a cancel, which `voussoirCompleteDialog` passes through as such.
 #[no_mangle]
-pub extern "C" fn Java_com_kiln_scratch_MainActivity_kilnCompleteDialog(
+pub extern "C" fn Java_com_voussoir_scratch_MainActivity_voussoirCompleteDialog(
     mut env: jni::JNIEnv,
     _class: jni::objects::JClass,
     id: jni::sys::jlong,
     json: jni::objects::JString,
 ) {
-    kiln::complete_dialog(id as u64, text_of(&mut env, &json));
+    voussoir::complete_dialog(id as u64, text_of(&mut env, &json));
 }
 
 /// The picker could not be shown at all, which is not the same as a cancel.
 #[no_mangle]
-pub extern "C" fn Java_com_kiln_scratch_MainActivity_kilnFailDialog(
+pub extern "C" fn Java_com_voussoir_scratch_MainActivity_voussoirFailDialog(
     mut env: jni::JNIEnv,
     _class: jni::objects::JClass,
     id: jni::sys::jlong,
@@ -74,17 +74,17 @@ pub extern "C" fn Java_com_kiln_scratch_MainActivity_kilnFailDialog(
 ) {
     let message = text_of(&mut env, &message)
         .unwrap_or_else(|| "the file picker could not be shown".to_owned());
-    kiln::fail_dialog(id as u64, &message);
+    voussoir::fail_dialog(id as u64, &message);
 }
 
 #[no_mangle]
-pub extern "C" fn Java_com_kiln_scratch_MainActivity_kilnMenuClicked(
+pub extern "C" fn Java_com_voussoir_scratch_MainActivity_voussoirMenuClicked(
     mut env: jni::JNIEnv,
     _class: jni::objects::JClass,
     id: jni::objects::JString,
 ) {
     if let Some(id) = text_of(&mut env, &id) {
-        kiln::menu_clicked(&id);
+        voussoir::menu_clicked(&id);
     }
 }
 
@@ -93,16 +93,16 @@ pub extern "C" fn Java_com_kiln_scratch_MainActivity_kilnMenuClicked(
 ///
 /// Queued rather than answered, and never dropped. tao starts the event loop on
 /// its own thread, so the first `resume` arrives before `App::run` has published
-/// a handle and before the page can run a script; `kiln::lifecycle` keeps the
+/// a handle and before the page can run a script; `voussoir::lifecycle` keeps the
 /// states until the page has loaded.
 #[no_mangle]
-pub extern "C" fn Java_com_kiln_scratch_MainActivity_kilnLifecycle(
+pub extern "C" fn Java_com_voussoir_scratch_MainActivity_voussoirLifecycle(
     mut env: jni::JNIEnv,
     _class: jni::objects::JClass,
     state: jni::objects::JString,
 ) {
     if let Some(state) = text_of(&mut env, &state) {
-        kiln::lifecycle(&state);
+        voussoir::lifecycle(&state);
     }
 }
 
@@ -113,7 +113,7 @@ pub extern "C" fn Java_com_kiln_scratch_MainActivity_kilnLifecycle(
 /// has no loop to send to, so the answer here is whether that loop exists. The
 /// activity keeps the intent extra and tries again on the next resume.
 #[no_mangle]
-pub extern "C" fn Java_com_kiln_scratch_MainActivity_kilnTrayClicked(
+pub extern "C" fn Java_com_voussoir_scratch_MainActivity_voussoirTrayClicked(
     mut env: jni::JNIEnv,
     _class: jni::objects::JClass,
     id: jni::objects::JString,
@@ -121,9 +121,9 @@ pub extern "C" fn Java_com_kiln_scratch_MainActivity_kilnTrayClicked(
     let Some(id) = text_of(&mut env, &id) else {
         return jni::sys::JNI_FALSE;
     };
-    if kiln::runtime().is_none() {
+    if voussoir::runtime().is_none() {
         return jni::sys::JNI_FALSE;
     }
-    kiln::tray_clicked(&id);
+    voussoir::tray_clicked(&id);
     jni::sys::JNI_TRUE
 }

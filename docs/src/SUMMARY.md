@@ -1,6 +1,6 @@
 # Summary
 
-A Kiln app is a Rust shell around a webview, with the frontend built by Bun. The
+A Voussoir app is a Rust shell around a webview, with the frontend built by Bun. The
 book goes from an empty directory to a signed installer, and spends its time on
 the three things that decide whether an app feels finished: the command
 contract, the security policy, and what happens when there is more than one

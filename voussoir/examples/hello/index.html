@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hello Voussoir</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Hello, Voussoir</h1>
+      <p class="hint">Native command round-trip: JS to Rust and back.</p>
+      <form id="greet">
+        <input id="name" value="world" autocomplete="off" spellcheck="false" />
+        <button type="submit">Invoke</button>
+      </form>
+      <p id="result" aria-live="polite">waiting</p>
+      <p id="tick" class="hint">no event yet</p>
+    </main>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

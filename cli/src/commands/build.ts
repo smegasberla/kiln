@@ -1,4 +1,4 @@
-/** `kiln build`: bundle the frontend, embed it, compile the shell. */
+/** `voussoir build`: bundle the frontend, embed it, compile the shell. */
 
 import { join } from "node:path";
 import {
@@ -16,7 +16,7 @@ export async function build(args: Args): Promise<number> {
   const p = project();
   const release = !boolFlag(args, "debug");
 
-  console.log(`kiln build: ${p.config.name}`);
+  console.log(`voussoir build: ${p.config.name}`);
 
   // The frontend is shared across platforms, so a command registered on only one
   // shell is a runtime failure on the other. Report it here rather than at launch.

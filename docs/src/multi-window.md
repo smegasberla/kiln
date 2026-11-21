@@ -28,7 +28,7 @@ practical:
 - An unnamed window must not collide with another unnamed window. The shell
   generates `index.html`, `index.html-2`, and so on, and hands you the result.
 
-From the page, `__kiln_open_window` answers `{"label": "..."}` for the same
+From the page, `__voussoir_open_window` answers `{"label": "..."}` for the same
 reason.
 
 ## Listing and closing
@@ -39,8 +39,8 @@ app.close_window("settings");
 ```
 
 ```ts
-await window.kiln.windows();                    // same list
-await window.kiln.invoke("__kiln_close_window", { label: "settings" });
+await window.voussoir.windows();                    // same list
+await window.voussoir.invoke("__voussoir_close_window", { label: "settings" });
 ```
 
 The list is maintained by the shell, not by the page, so it stays true when a

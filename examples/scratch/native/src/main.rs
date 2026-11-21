@@ -7,10 +7,10 @@
 mod app;
 mod assets;
 
-use kiln::menu::{MenuGroup, MenuItem};
-use kiln::serde_json::json;
-use kiln::tray::{TrayConfig, TrayItem};
-use kiln::Error;
+use voussoir::menu::{MenuGroup, MenuItem};
+use voussoir::serde_json::json;
+use voussoir::tray::{TrayConfig, TrayItem};
+use voussoir::Error;
 
 fn main() -> Result<(), Error> {
     app::build("Scratch")
@@ -33,7 +33,7 @@ fn main() -> Result<(), Error> {
         .on_ready(|app, _window| {
             // The directory is what a user actually needs from a notebook app, so
             // it is reported once the page can display it.
-            if let Some(dir) = kiln::data_dir("Scratch") {
+            if let Some(dir) = voussoir::data_dir("Scratch") {
                 app.emit("location", json!(dir.display().to_string()));
             }
         })

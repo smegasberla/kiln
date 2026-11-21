@@ -1,4 +1,4 @@
-/** Minimal argv parsing: `kiln <command> [flags] [positional]`. */
+/** Minimal argv parsing: `voussoir <command> [flags] [positional]`. */
 
 export type Args = {
   command: string;
