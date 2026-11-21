@@ -756,3 +756,46 @@ fn a_command_registered_twice_is_recorded() {
         r#"{"ok":"second"}"#
     );
 }
+
+#[test]
+fn an_allowlist_typo_is_recorded_instead_of_silently_removing_the_command() {
+    // `{"commands": ["gret"]}` currently withholds "greet" and says nothing, so
+    // the app looks broken rather than misconfigured. The audit runs once, after
+    // every handler exists, and names the command the author probably meant.
+    crate::diagnostics::clear();
+    let mut reg = Registry::new();
+    reg.add("greet", |_h, _p| Ok(serde_json::json!("hi")));
+    reg.set_allowlist(Some(vec!["greet".to_owned(), "gret".to_owned()]));
+    reg.audit_allowlist();
+
+    let entries = crate::diagnostics::entries();
+    let text = entries
+        .iter()
+        .map(|entry| entry.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("unknown command"), "no audit event: {text}");
+    assert!(text.contains("gret"), "the typo should be named: {text}");
+    // A name that does exist is not reported, so the signal stays worth reading.
+    assert!(!text.contains(r#""command":"greet""#), "false positive: {text}");
+}
+
+#[test]
+fn a_window_allowlist_typo_is_recorded() {
+    crate::diagnostics::clear();
+    let mut reg = Registry::new();
+    reg.add("greet", |_h, _p| Ok(serde_json::json!("hi")));
+    reg.set_window_allowlist(HashMap::from([(
+        "preview".to_owned(),
+        vec!["greet".to_owned(), "nope".to_owned()],
+    )]));
+    reg.audit_allowlist();
+
+    let text = crate::diagnostics::entries()
+        .iter()
+        .map(|entry| entry.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("window allowlist names an unknown command"), "{text}");
+    assert!(text.contains("nope") && text.contains("preview"), "{text}");
+}

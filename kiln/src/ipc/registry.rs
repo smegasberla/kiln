@@ -137,6 +137,55 @@ impl Registry {
         labels
     }
 
+    /// Report allowlist names that no handler can ever answer.
+    ///
+    /// A typo in `kiln.json` (`{"commands": ["gret"]}`) currently removes the
+    /// command the author meant to keep and says nothing, so the app looks
+    /// broken rather than misconfigured. Only a name that is neither a static
+    /// handler nor answerable by the hot library is reported: with `hot-reload`
+    /// the library's exports are resolved at call time, so it cannot be asked
+    /// what it contains, and guessing would produce false alarms on every dev
+    /// build.
+    ///
+    /// Called once from `App::run`, after the builtins are registered, because
+    /// that is the first moment the full table exists.
+    pub(crate) fn audit_allowlist(&self) {
+        // A typo is only actionable when the name is unknown to everything that
+        // could answer it. Under hot-reload, any name might be the library's,
+        // which cannot be asked what it exports.
+        #[cfg(feature = "hot-reload")]
+        if self.hot.is_some() {
+            return;
+        }
+        for name in self.allow.iter().flatten() {
+            if !self.handlers.contains_key(name) {
+                crate::diagnostics::record(
+                    crate::diagnostics::Kind::App,
+                    "allowlist names an unknown command",
+                    serde_json::json!({ "command": name }),
+                );
+            }
+        }
+        // The global list and the window lists are independent: an app with no
+        // `commands` key can still narrow one window, and that is exactly the
+        // case a stray early return would have skipped.
+        let allow = self
+            .window_allow
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for (label, list) in allow.iter() {
+            for name in list {
+                if !self.handlers.contains_key(name) {
+                    crate::diagnostics::record(
+                        crate::diagnostics::Kind::App,
+                        "window allowlist names an unknown command",
+                        serde_json::json!({ "window": label, "command": name }),
+                    );
+                }
+            }
+        }
+    }
+
     /// Whether any handler is registered under `method`, regardless of the
     /// allowlist.
     ///

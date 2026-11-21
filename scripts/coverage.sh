@@ -11,7 +11,7 @@
 # at the current number fails on unrelated honest changes and gets deleted; one
 # set just under it catches a real regression and nothing else.
 #
-# Baseline: 67.06% lines measured on 2026-11-21 with the default features
+# Baseline: 67.32% lines measured on 2026-11-21 with the default features
 # (`full,rt,storage`), tests and fuzz modules excluded. Re-measure and raise the
 # floor when a release closes a real gap; never lower it to make a build pass.
 #

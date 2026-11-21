@@ -323,6 +323,8 @@ impl App {
         register_builtins(&mut registry, &config);
         registry.set_allowlist(config.commands.clone());
         registry.set_window_allowlist(config.window_commands.clone());
+        // Now that every handler exists, say so if a config name matches none.
+        registry.audit_allowlist();
 
         // Reloads must be running before the first window can call in.
         #[cfg(feature = "hot-reload")]

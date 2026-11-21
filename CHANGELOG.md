@@ -214,6 +214,13 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Added
 
+- An allowlist entry that names no registered command is recorded at startup,
+  for `commands` and for each window's list independently. A typo
+  (`{"commands": ["gret"]}`) used to withhold the command the author meant to
+  keep and say nothing, so the app looked broken rather than misconfigured. The
+  check is skipped under `hot-reload`, where any name may be the library's and
+  the library cannot be asked what it exports.
+
 - A second registration of the same command name is now recorded as a
   diagnostics event. Registration stays last-wins, but silent replacement is
   data loss: the first handler's command stops existing and the second answers
