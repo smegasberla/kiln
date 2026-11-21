@@ -3,7 +3,7 @@ name = "voussoir-ios"
 version = "0.1.0"
 edition = "2021"
 description = "iOS bootstrap for Voussoir: the UIKit entry point and the app lifetime glue"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 publish = false
 
 # The crate root is `#![cfg(target_os = "ios")]`, so off iOS this library

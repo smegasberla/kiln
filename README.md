@@ -9,7 +9,7 @@ One window, the operating system's own webview, and a single JSON bridge between
 Rust and the page.
 
 [![CI](https://github.com/smegasberla/voussoir/actions/workflows/ci.yml/badge.svg)](https://github.com/smegasberla/voussoir/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Android%20%7C%20iOS-lightgrey.svg)](#platform-support)
 
 </div>
@@ -80,24 +80,53 @@ voussoir package --icon icon.png  # AppImage / .app / .zip
 voussoir doctor                   # toolchain and project checks
 ```
 
-Getting the CLI onto a machine, dependencies included:
+## Install
+
+One script installs the system webview, Git, Bun and Rust, builds the CLI, and
+puts `voussoir` on `PATH`. Pick the tab for the machine.
+
+<table>
+<tr><th>Linux, macOS, BSD</th><th>Windows</th></tr>
+<tr>
+<td>
 
 ```sh
-# Linux, macOS, FreeBSD, NetBSD, OpenBSD
-./install.sh                          # from a checkout, builds your tree
 curl -fsSL https://raw.githubusercontent.com/smegasberla/voussoir/master/install.sh | sh
 ```
 
+</td>
+<td>
+
 ```powershell
-# Windows
-powershell -ExecutionPolicy Bypass -File install.ps1
 irm https://raw.githubusercontent.com/smegasberla/voussoir/master/install.ps1 | iex
 ```
 
-Flags: `--prefix` / `-Prefix`, `--no-deps` / `-NoDeps`, `--repo` / `-Repo`. Every
-dependency step is skipped when the tool is already present, and a failed package
-install warns instead of aborting, so `voussoir doctor` can report the gap by
-name.
+</td>
+</tr>
+</table>
+
+Both read the script straight from the default branch, so there is no download
+step and nothing to keep up to date. They are the same for a first install and
+for an upgrade: re-running skips every dependency that is already present, and
+builds whatever is on the branch.
+
+From an existing checkout, run the script in place — it notices the tree you are
+in and builds that instead of cloning:
+
+```sh
+./install.sh                                  # Linux, macOS, BSD
+powershell -ExecutionPolicy Bypass -File install.ps1   # Windows
+```
+
+| Flag | Both | Effect |
+| --- | --- | --- |
+| `--prefix` / `-Prefix` | yes | install location, default `$HOME/.local` (`%LOCALAPPDATA%\voussoir`) |
+| `--no-deps` / `-NoDeps` | yes | skip system package installation |
+| `--repo` / `-Repo` | yes | git URL to clone when not run from a checkout |
+
+`VOUSSOIR_PREFIX` and `VOUSSOIR_REPO` do the same as the Unix flags. A failed
+package install warns instead of aborting, so `voussoir doctor` can report the
+remaining gap by name rather than the installer dying halfway through.
 
 The compiled CLI needs neither Bun nor Node on `PATH`: `bun build --compile`
 embeds the runtime it was built with. Voussoir is not on crates.io yet, so these
@@ -319,12 +348,10 @@ project says no to features on purpose.
 
 ## License
 
-Dual-licensed, at your option:
+[MIT](LICENSE). Do what you want with it: use it, modify it, sell it, ship it
+closed. The only obligation is keeping the copyright notice and the permission
+text in copies you redistribute, which is the whole of the license.
 
-- [Apache License, Version 2.0](LICENSE-APACHE)
-- [MIT license](LICENSE-MIT)
-
-The crate declares `MIT OR Apache-2.0`, so a downstream app can depend on it
-under either without asking. Unless you state otherwise, any contribution you
-intentionally submit for inclusion is dual-licensed as above, with no additional
-terms.
+There is no separate contributor agreement. Unless you state otherwise, anything
+you intentionally submit for inclusion is licensed the same way, with no
+additional terms.

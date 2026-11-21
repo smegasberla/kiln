@@ -3,7 +3,7 @@ name = "voussoir-android"
 version = "0.1.0"
 edition = "2021"
 description = "Android bootstrap for Voussoir: JNI entry, activity glue, and an invoke bridge"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 publish = false
 
 # The crate root is `#![cfg(target_os = "android")]`, so off Android this
