@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { checkBook, hostTriple, markdownFiles, mdbookAsset, parseSummary } from "./docs.ts";
+import { checkBook, danglingLinks, markdownFiles, parseSummary } from "./docs.ts";
 
 /** A book on disk, so the checks run against real files rather than mocks. */
 function book(files: Record<string, string>): string {
@@ -40,12 +40,10 @@ describe("parseSummary", () => {
 });
 
 describe("markdownFiles", () => {
-  test("finds nested chapters and skips build output", () => {
+  test("finds nested chapters and ignores non-markdown", () => {
     const root = book({
       "a.md": "# a",
       "sub/b.md": "# b",
-      "book/generated.md": "# no",
-      "theme/x.md": "# no",
       "note.txt": "no",
     });
     expect(markdownFiles(root)).toEqual(["a.md", "sub/b.md"]);
@@ -116,43 +114,40 @@ describe("checkBook", () => {
   });
 });
 
-describe("hostTriple", () => {
-  test("names the three desktop targets the way mdBook does", () => {
-    expect(hostTriple("linux", "x64")).toBe("x86_64-unknown-linux-gnu");
-    expect(hostTriple("win32", "x64")).toBe("x86_64-pc-windows-msvc");
-    expect(hostTriple("darwin", "arm64")).toBe("aarch64-apple-darwin");
+describe("danglingLinks", () => {
+  test("accepts a chapter link the summary lists", () => {
+    const root = book({
+      "SUMMARY.md": "- [Intro](intro.md)\n- [Next](next.md)\n",
+      "intro.md": "# Intro\n\nSee [next](next.md).",
+      "next.md": "# Next",
+    });
+    expect(danglingLinks(root, parseSummary("- [Intro](intro.md)\n- [Next](next.md)\n"))).toEqual([]);
   });
 
-  test("maps every architecture it claims to support", () => {
-    expect(hostTriple("darwin", "x64")).toBe("x86_64-apple-darwin");
-    expect(hostTriple("linux", "arm64")).toBe("aarch64-unknown-linux-gnu");
-  });
-});
-
-describe("mdbookAsset", () => {
-  test("uses tar.gz on Unix and zip on Windows", () => {
-    expect(mdbookAsset("x86_64-unknown-linux-gnu")).toBe("mdbook-v0.5.4-x86_64-unknown-linux-gnu.tar.gz");
-    expect(mdbookAsset("x86_64-pc-windows-msvc")).toBe("mdbook-v0.5.4-x86_64-pc-windows-msvc.zip");
-    expect(mdbookAsset("aarch64-apple-darwin")).toBe("mdbook-v0.5.4-aarch64-apple-darwin.tar.gz");
-    expect(mdbookAsset("x86_64-apple-darwin")).toBe("mdbook-v0.5.4-x86_64-apple-darwin.tar.gz");
-  });
-
-  test("returns null where mdBook publishes no asset", () => {
-    expect(mdbookAsset("x86_64-unknown-freebsd")).toBeNull();
-    expect(mdbookAsset("i686-unknown-linux-gnu")).toBeNull();
+  test("reports a relative chapter link the summary does not list", () => {
+    // The site rewrites `x.md` to `x.html`; an unlisted file has no page, so the
+    // link would 404. This is the failure mdBook used to catch at build time.
+    const root = book({
+      "SUMMARY.md": "- [Intro](intro.md)\n",
+      "intro.md": "# Intro\n\nSee [gone](gone.md).",
+      "gone.md": "# Gone",
+    });
+    const problems = danglingLinks(root, parseSummary("- [Intro](intro.md)\n"));
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("gone.md");
   });
 
-  test("every platform this project targets has an asset", () => {
-    // The hint exists for the machine that cannot `cargo install`; if it printed
-    // nothing there, it would be worse than the plain releases URL.
-    for (const [platform, arch] of [
-      ["linux", "x64"],
-      ["linux", "arm64"],
-      ["darwin", "x64"],
-      ["darwin", "arm64"],
-      ["win32", "x64"],
-    ] as const) {
-      expect(mdbookAsset(hostTriple(platform, arch))).not.toBeNull();
-    }
+  test("ignores external links, fragments and non-markdown targets", () => {
+    const root = book({
+      "SUMMARY.md": "- [Intro](intro.md)\n",
+      "intro.md": [
+        "# Intro",
+        "[site](https://example.com/x.md)",
+        "[jump](#section)",
+        "[mail](mailto:a@b.c)",
+        "[asset](../brand/voussoir.png)",
+      ].join("\n"),
+    });
+    expect(danglingLinks(root, parseSummary("- [Intro](intro.md)\n"))).toEqual([]);
   });
 });

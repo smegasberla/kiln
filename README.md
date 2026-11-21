@@ -340,14 +340,15 @@ cli/                   Bun CLI, dev tooling only, never in the artifact
   template/            scaffold files, inlined into the CLI at compile time
   src/icon.ts          PNG encoder and default icon, no image dependency
 brand/                 the mark: voussoir.svg plus PNG renders
-docs/                  the mdBook, built by `voussoir docs`
+docs/                  the documentation, plain Markdown in docs/src
+website/               the site: renders docs/src, no mdBook and no deps
 scripts/verify.ts      end-to-end checks, and the source of the numbers above
 ```
 
-The book in `docs/` is the narrative version: "Your first app", "Commands &
-payloads", "Security model", "Multi-window", "Packaging", "Diagnostics".
-`voussoir docs --check` validates its structure and every link in CI without
-mdBook installed; `voussoir docs` renders it when mdBook is on `PATH`.
+The book in `docs/src` is the narrative version: installing, your first app,
+"Commands & payloads", "Security model", "Multi-window", "Packaging".
+`voussoir docs --check` validates its structure and every cross-chapter link in
+CI, and `voussoir docs` renders the same files into `website/dist`.
 
 ## Contributing
 

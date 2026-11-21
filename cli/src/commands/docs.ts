@@ -1,60 +1,32 @@
-/** `voussoir docs`: build the documentation book, and check it without mdbook.
+/** `voussoir docs`: validate the docs, then build the site that renders them.
  *
- *  The check half exists because a book rots silently. A chapter that is not in
- *  `SUMMARY.md` is unreachable, and a `SUMMARY.md` link to a missing file renders
- *  an empty page rather than an error. Both are cheap to detect, so `voussoir docs
- *  --check` detects them and CI runs it without needing mdbook installed.
+ *  There is no mdBook here and no second Markdown parser. `docs/src/*.md` is the
+ *  only source, and the website renders those files directly with `Bun.markdown`,
+ *  so what a reader sees on GitHub and what the site shows cannot drift apart.
  *
- *  The build half is a thin wrapper: mdbook owns rendering, and reimplementing it
- *  would be a second Markdown parser to keep in sync. When mdbook is missing the
- *  command still validates and says exactly how to install it, instead of failing
- *  with a spawn error.
+ *  The check half exists because a docs tree rots silently. A chapter missing from
+ *  `SUMMARY.md` is unreachable from the sidebar, and a `SUMMARY.md` link to a file
+ *  that does not exist renders an empty page rather than an error. Both are cheap
+ *  to detect, so `--check` detects them and CI runs it without building anything.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { run, which, fail } from "../proc.ts";
+import { run, fail } from "../proc.ts";
 import { boolFlag, type Args } from "../args.ts";
 
-/** Where the book lives, resolved from this file rather than the working
+/** Where the docs live, resolved from this file rather than the working
  *  directory: `voussoir docs` must work from inside an app project too. */
 export function bookDir(): string {
   return resolve(import.meta.dir, "../../../docs");
 }
 
-/** The mdBook release `voussoir docs` reports as the one to install.
- *
- *  Pinned rather than "latest" so the instructions a user sees are reproducible;
- *  mdBook has not changed its config format across the 0.5 line, so any 0.5.x
- *  works. */
-export const MDBOOK_VERSION = "0.5.4";
-
-/** The mdBook release asset for a target triple, or `null` where there is none.
- *
- *  Exported and tested per platform because "make it work on all OSes" is exactly
- *  the claim that rots: a `.zip` extension, an `aarch64` triple and a missing
- *  Windows build are three separate mistakes, and each is one line here.
- */
-export function mdbookAsset(triple: string): string | null {
-  const os = triple.includes("windows")
-    ? "pc-windows-msvc"
-    : triple.includes("apple-darwin")
-      ? "apple-darwin"
-      : triple.includes("linux")
-        ? "unknown-linux-gnu"
-        : null;
-  if (os === null) return null;
-  const arch = triple.startsWith("aarch64")
-    ? "aarch64"
-    : triple.startsWith("x86_64")
-      ? "x86_64"
-      : null;
-  if (arch === null) return null;
-  const ext = os === "pc-windows-msvc" ? "zip" : "tar.gz";
-  return `mdbook-v${MDBOOK_VERSION}-${arch}-${os}.${ext}`;
+/** Where the website generator lives. */
+export function websiteDir(): string {
+  return resolve(import.meta.dir, "../../../website");
 }
 
-type Link = { title: string; path: string; line: number };
+export type Link = { title: string; path: string; line: number };
 
 /** Every chapter reference in a SUMMARY, in order. */
 export function parseSummary(text: string): Link[] {
@@ -76,8 +48,6 @@ export function markdownFiles(dir: string, prefix = ""): string[] {
   for (const entry of readdirSync(join(dir, prefix), { withFileTypes: true })) {
     const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
-      // `book/` is build output; a generated page is not a chapter.
-      if (relative === "book" || relative === "theme") continue;
       found.push(...markdownFiles(dir, relative));
     } else if (entry.name.endsWith(".md")) {
       found.push(relative);
@@ -86,16 +56,16 @@ export function markdownFiles(dir: string, prefix = ""): string[] {
   return found.sort();
 }
 
-/** Everything wrong with the book at `src`, as human-readable problems.
+/** Everything wrong with the docs at `src`, as human-readable problems.
  *
  *  Pure apart from reading files, so the tests can build a directory in a temp
- *  path and assert on the result without running mdbook.
+ *  path and assert on the result without running the site build.
  */
 export function checkBook(src: string): string[] {
   const problems: string[] = [];
   const summaryPath = join(src, "SUMMARY.md");
   if (!existsSync(summaryPath)) {
-    return [`${summaryPath} is missing; a book needs a SUMMARY.md`];
+    return [`${summaryPath} is missing; the site reads its navigation from it`];
   }
 
   const links = parseSummary(readFileSync(summaryPath, "utf8"));
@@ -129,52 +99,58 @@ export function checkBook(src: string): string[] {
   return problems;
 }
 
-/** The Rust target triple of this machine, as mdBook names it.
+/** Relative `.md` links that point at a chapter the summary does not list.
  *
- *  Derived from `process.platform`/`arch` rather than shelling out to `rustc`,
- *  so the hint works on a machine without a Rust toolchain: that machine is
- *  exactly the one that cannot `cargo install mdbook` and needs the download.
+ *  The site rewrites `x.md` to `x.html`, so a link to a file outside the summary
+ *  becomes a link to a page that was never generated. mdBook failed these at build
+ *  time; this is the replacement, because the failure mode is the same.
  */
-export function hostTriple(platform = process.platform, arch = process.arch): string {
-  const os = platform === "win32" ? "pc-windows-msvc" : platform === "darwin" ? "apple-darwin" : "unknown-linux-gnu";
-  const cpu = arch === "arm64" ? "aarch64" : "x86_64";
-  return `${cpu}-${os}`;
+export function danglingLinks(src: string, links: Link[]): string[] {
+  const known = new Set(links.map((link) => link.path));
+  const problems: string[] = [];
+  for (const file of markdownFiles(src)) {
+    if (file === "SUMMARY.md") continue;
+    const text = readFileSync(join(src, file), "utf8");
+    for (const match of text.matchAll(/\]\(([^)\s]+)\)/g)) {
+      const target = match[1]!;
+      if (target.startsWith("http") || target.startsWith("#") || target.startsWith("mailto:")) {
+        continue;
+      }
+      const path = target.split("#")[0]!;
+      if (!path.endsWith(".md")) continue;
+      if (!known.has(path)) {
+        problems.push(`${join(src, file)}: links to ${path}, which SUMMARY.md does not list`);
+      }
+    }
+  }
+  return problems;
 }
 
-/** Validate the book, then build it when mdbook is available. */
+/** Validate the docs, then build the website when asked to. */
 export async function docs(args: Args): Promise<number> {
   const dir = bookDir();
   const checkOnly = boolFlag(args, "check");
 
-  if (!existsSync(join(dir, "book.toml"))) {
-    fail(`no book.toml at ${dir}; the CLI and the docs have drifted apart`);
-  }
-
-  const problems = checkBook(join(dir, "src"));
+  const src = join(dir, "src");
+  const links = parseSummary(readFileSync(join(src, "SUMMARY.md"), "utf8"));
+  const problems = [...checkBook(src), ...danglingLinks(src, links)];
   for (const problem of problems) console.error(`voussoir: docs: ${problem}`);
   if (problems.length > 0) return 1;
-  console.log(`  book structure ok (${parseSummary(readFileSync(join(dir, "src/SUMMARY.md"), "utf8")).length} chapters)`);
+  console.log(`  docs ok (${links.length} chapters, ${markdownFiles(src).length - 1} files)`);
 
   if (checkOnly) return 0;
 
-  if (!which("mdbook")) {
-    // Not a failure: the structure is valid, and installing a renderer is a
-    // separate decision. Say how rather than exiting with a spawn error.
-    console.error(
-      "voussoir: docs: `mdbook` is not on PATH, so the HTML was not rendered.\n" +
-        "  Install it with `cargo install mdbook`, or download the release:\n" +
-        `  https://github.com/rust-lang/mdBook/releases/tag/v${MDBOOK_VERSION}` +
-        (mdbookAsset(hostTriple()) ? `\n  asset: ${mdbookAsset(hostTriple())}` : ""),
-    );
-    return 1;
+  const site = websiteDir();
+  if (!existsSync(join(site, "build.ts"))) {
+    fail(`no website/build.ts at ${site}; the CLI and the site have drifted apart`);
   }
 
   try {
-    await run(["mdbook", "build"], { cwd: dir });
+    await run(["bun", "run", "build"], { cwd: site });
   } catch (error) {
     console.error(`voussoir: docs: ${(error as Error).message}`);
     return 1;
   }
-  console.log(`  html book: ${join(dir, "book", "index.html")}`);
+  console.log(`  site: ${join(site, "dist", "index.html")}`);
   return 0;
 }

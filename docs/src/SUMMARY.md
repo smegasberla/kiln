@@ -9,6 +9,7 @@ window.
 If you only read one chapter, read "Commands & payloads". Everything else follows
 from it.
 
+- [Installing Voussoir](install.md)
 - [Your first app](first-app.md)
   - [How a project is laid out](layout.md)
 - [Commands & payloads](ipc-contract.md)

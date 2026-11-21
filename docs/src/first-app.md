@@ -7,9 +7,9 @@ shipping requires Node, Bun or a bundler at runtime: `voussoir build` produces a
 single native binary with the frontend embedded.
 
 ```bash
-bun x voussoir init notes
+voussoir init notes
 cd notes
-bun x voussoir dev
+voussoir dev
 ```
 
 That is the whole setup. `init` writes a working app, `dev` starts the frontend

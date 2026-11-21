@@ -30,7 +30,7 @@ Commands
   ios build      cross-compile and build the simulator app (or --target device)
   ios run        install and launch on a booted iOS simulator
   ios verify     build, install, launch and assert the Rust entry is reached
-  docs           validate the documentation book, then build it (needs mdbook)
+  docs           validate docs/src, then build the website
   doctor         check the toolchain and report what is missing
 
 Options
@@ -50,7 +50,7 @@ Options
   --aab          android build: signed Android App Bundle for Play upload
   --target       ios build: sim (default) or device (unsigned build)
   --json         doctor: machine-readable output
-  --check        docs: validate SUMMARY.md and the chapters, build nothing
+  --check        docs: validate SUMMARY.md and the links, build nothing
   -h, --help     show this help
 
 Docs
