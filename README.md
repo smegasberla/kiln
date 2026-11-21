@@ -164,7 +164,8 @@ command was not registered in Rust, no page can reach it — there is no
 capability file, no permissions directory, and no runtime permission surface
 to misconfigure. A `commands` array in `kiln.json` can narrow that set
 further, which is useful for a strict production build; it can never widen
-it.
+it. The `windows` map narrows it per window label, for windows that render
+content you would not trust with the whole surface.
 
 ## Hot reload (dev only)
 
