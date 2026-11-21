@@ -20,7 +20,13 @@ response: {"ok": <json>}
 | `payload` | the request did not match the handler's argument type |
 | `handler` | the handler returned `Err` |
 | `panic` | the handler panicked; the app kept running and the page was told |
+| `busy` | too many worker-thread commands in flight; retry shortly |
+| `timeout` | the shim gave up waiting; the command may still be running |
 | `runtime` | the webview or event loop failed |
+
+`busy` and `runtime` come from the shell. `timeout` is produced by the shim
+itself, so it is the one kind that can arrive from a command that never reached
+Rust at all.
 
 `method` names the command that failed, even when the call came from a nested
 helper. Branch on `kind`; never match `message` text, which is for humans.
@@ -51,12 +57,13 @@ on `protocol`, not on `platform`: a page that needs `windows()` asks
 
 ## The Rust side
 
-A command that needs no app handle lives in the commands crate, in one table:
+A command that needs no app handle lives in the commands crate, in one table. The
+`Command` struct and `Kind` enum are generated into *your* crate by `voussoir
+init`, not exported by the framework, because this code has to compile as a
+`cdylib` that the dev shell loads at runtime:
 
 ```rust
-use voussoir::{Command, Kind};
-use voussoir::serde_json::{json, Value};
-
+// In native/commands/src/lib.rs, alongside the generated Command and Kind.
 pub static COMMANDS: &[Command] = &[
     Command { name: "greet", kind: Kind::Sync, run: greet },
 ];
@@ -66,6 +73,10 @@ fn greet(payload: &Value) -> Result<Value, String> {
     Ok(json!(format!("Hello, {name}!")))
 }
 ```
+
+The payload arrives as `serde_json::Value` and the reply is `Result<Value,
+String>`. `Kind` is `Sync` or `Async`, which is how the release shell decides
+whether to run the command on the UI thread or a worker.
 
 A command that needs the app itself is registered on `App` in `main.rs`, because a
 handle cannot cross the `cdylib` boundary soundly:
@@ -104,7 +115,9 @@ performance decision the contract asks you to make.
 
 // A real async fn on the shared runtime. Requires the `rt` feature.
 .async_fn("fetch", |_app, _payload: FetchArgs| async move {
-    let body = voussoir::rt::http_get("https://example.com").await?;
+    // `rt` provides the scheduler only: no HTTP client, no TLS. Take the
+    // network stack you already depend on and await it here.
+    let body = fetch_with_your_client("https://example.com").await?;
     Ok(json!(body))
 })
 ```
@@ -124,7 +137,7 @@ when the handler awaits; use `async_command` when it merely blocks.
 
 ```rust
 app.emit_to(Some("main"), "document:changed", json!({ "dirty": true }));
-app.emit_to_all("theme", json!({ "dark": true }));
+app.emit_to(None, "theme", json!({ "dark": true }));   // every window
 ```
 
 Emitting goes through the event loop proxy and `evaluate_script`, so it is
