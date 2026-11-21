@@ -17,7 +17,8 @@ use crate::dispatch::{serve_async, serve_bridge};
 use crate::hooks::ReadyHook;
 use crate::security::{self, APP_ORIGIN, PAGE_ORIGIN};
 use crate::{
-    diagnostics, platform, platform_name, AppHandle, AssetTable, BuilderFactory, Error, Fired,
+    diagnostics, platform, platform_name, AppHandle, AssetTable, BuilderFactory,
+    Error, Fired,
     Registry, SCHEME, SHIM_PROTOCOL,
 };
 #[cfg(feature = "menu")]
@@ -95,11 +96,12 @@ pub(crate) fn build_factory(
     dev_origin: Option<String>,
     ready: Option<Arc<ReadyHook>>,
     devtools: bool,
+    command_timeout_ms: u64,
 ) -> BuilderFactory {
     // Shared by every window this factory builds: a window's page can finish
     // loading more than once (a reload), and the hook is once per window.
     let fired = Arc::new(Fired::default());
-    let shim = build_shim(dev_origin.as_deref());
+    let shim = build_shim_with(dev_origin.as_deref(), command_timeout_ms);
     Arc::new(move |target: String, label: Option<String>| {
         // Taken before the protocol handler moves `label` into its own closure:
         // the ready hook needs the same name and the two cannot share it.
@@ -312,7 +314,7 @@ pub(crate) fn build_webview(builder: WebViewBuilder<'_>, window: &Window) -> Res
 ///
 /// The allowlist is computed in Rust and injected as JSON, so the page side never
 /// guesses which origins are legitimate.
-pub(crate) fn build_shim(dev_origin: Option<&str>) -> String {
+pub(crate) fn build_shim_with(dev_origin: Option<&str>, timeout_ms: u64) -> String {
     // Android's WebResourceRequest carries no body, so a protocol POST cannot
     // deliver a payload there; wry's IPC handler is the only option.
     let bridge = cfg!(target_os = "android");
@@ -332,5 +334,6 @@ pub(crate) fn build_shim(dev_origin: Option<&str>) -> String {
         .replace("__PAGE_ORIGIN__", PAGE_ORIGIN)
         .replace("__PLATFORM__", platform_name())
         .replace("__SHIM_PROTOCOL__", &SHIM_PROTOCOL.to_string())
+        .replace("__TIMEOUT__", &timeout_ms.to_string())
 }
 

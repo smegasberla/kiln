@@ -214,6 +214,21 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Added
 
+- `command_timeout_ms` in `kiln.json` (default 30 s, `0` disables) and a
+  per-call `invoke(method, payload, { timeout })` override. The shim's `fetch`
+  had no deadline, so a handler that deadlocked left the page awaiting a promise
+  that never settled, and a hang was indistinguishable from slowness. The
+  deadline aborts the request rather than only rejecting, so the socket is freed
+  too, and rejects with `kind: "timeout"` so a page branches on the class. The
+  value is exposed as `kiln.timeout` so frontend code does not have to guess it.
+
+- `set_max_pending` / `max_pending` / `pending` bound how many async requests
+  the shell will hold at once, separately from the worker limit. The worker
+  limit bounds thread stacks, not load: a page looping on a command that
+  finishes quickly kept every slot saturated indefinitely, one blocked `fetch`
+  and promise per request. The default matches the worker limit, so no existing
+  app behaves differently; the knob exists so a deployment can be stricter.
+
 - An allowlist entry that names no registered command is recorded at startup,
   for `commands` and for each window's list independently. A typo
   (`{"commands": ["gret"]}`) used to withhold the command the author meant to

@@ -124,13 +124,28 @@ fn a_plugin_can_stack_typed_and_async_commands() {
 fn the_trait_is_usable_as_a_bound() {
     // Someone will want `fn add_all<P: Plugin>(app: App, plugins: Vec<P>)`. That
     // only compiles if the trait is public with no sealed-module surprise.
-    fn install_all(app: App, plugins: Vec<Counter>) -> App {
-        plugins.into_iter().fold(app, |app, plugin| app.plugin(plugin))
+    //
+    // The plugins must be distinct types: two `Counter`s both claim
+    // `counter.next`, and since registration is strict in a test build that is
+    // a panic. It is the collision the check exists for, so the test installs
+    // one of each rather than working around it.
+    fn install_all(app: App) -> App {
+        app.plugin(Counter { start: 1 }).plugin(Marker)
     }
 
-    let app = install_all(
-        App::new(),
-        vec![Counter { start: 1 }, Counter { start: 2 }],
-    );
+    struct Marker;
+
+    impl Plugin for Marker {
+        fn name(&self) -> &'static str {
+            "marker"
+        }
+
+        fn install(self, app: App) -> App {
+            app.command("marker.ping", |_app, _payload| Ok(Value::Null))
+        }
+    }
+
+    let app = install_all(App::new());
     assert!(app.has_command("counter.next"));
+    assert!(app.has_command("marker.ping"));
 }

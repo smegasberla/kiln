@@ -42,6 +42,11 @@ redirect it.
 - `entry` is the page the first window loads. A `/` prefix is stripped.
 - `commands` is the global allowlist. Absent means "everything registered".
 - `windows` narrows one label's surface; see [Per-window allowlists](allowlists.md).
+- `command_timeout_ms` is how long the page waits for a command before rejecting.
+  Defaults to 30000; `0` disables the deadline for commands that legitimately run
+  for minutes. A page can override it per call with
+  `kiln.invoke("slow", payload, { timeout: 300000 })`, and read the default as
+  `kiln.timeout`.
 
 ## `native/src/assets.rs`
 

@@ -28,7 +28,19 @@ pub struct Config {
     pub window_commands: HashMap<String, Vec<String>>,
     /// Update endpoint, read by the `updater` feature. `None` disables checks.
     pub update_url: Option<String>,
+    /// How long the page waits for a command before rejecting the promise.
+    ///
+    /// A fetch with no deadline waits forever, so a handler that deadlocks made
+    /// a hang indistinguishable from slowness: the page kept spinning and the
+    /// developer had no signal. `0` disables the deadline for apps whose commands
+    /// legitimately run for minutes; [`crate::Config::command_timeout_ms`] is
+    /// the whole-file default, and a page can override it per command.
+    pub command_timeout_ms: u64,
 }
+
+/// The default command deadline: long enough for real I/O, short enough that a
+/// deadlock is reported while someone is still watching.
+pub const DEFAULT_COMMAND_TIMEOUT_MS: u64 = 30_000;
 
 impl Default for Config {
     fn default() -> Self {
@@ -41,6 +53,7 @@ impl Default for Config {
             commands: None,
             window_commands: HashMap::new(),
             update_url: None,
+            command_timeout_ms: DEFAULT_COMMAND_TIMEOUT_MS,
         }
     }
 }
@@ -81,6 +94,9 @@ impl Config {
             .and_then(Value::as_str)
         {
             config.update_url = Some(url.to_owned());
+        }
+        if let Some(ms) = map.get("command_timeout_ms").and_then(Value::as_u64) {
+            config.command_timeout_ms = ms;
         }
         if let Some(list) = map.get("commands").and_then(Value::as_array) {
             let names = list

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::handler::Handler;
-use super::worker::default_worker_limit;
+use super::worker::{default_max_pending, default_worker_limit};
 
 /// Name -> handler table plus the optional config allowlist.
 pub struct Registry {
@@ -44,6 +44,16 @@ pub struct Registry {
     /// How many are running now. Behind an `Arc` so the permit a worker holds can
     /// release itself on drop, including when the handler panics.
     pub(super) worker_inflight: std::sync::Arc<AtomicUsize>,
+    /// How many async requests may be outstanding at once, threads or not.
+    ///
+    /// The worker limit bounds stacks, which is not a bound on load: a page that
+    /// loops `invoke` on a fast command keeps every slot busy indefinitely, and
+    /// each request still holds a socket and a promise until it is answered.
+    /// This is the number the shell refuses at, so the rate a page can impose is
+    /// set by the app rather than by the page.
+    pub(super) max_pending: usize,
+    /// How many async requests are outstanding now, queued or running.
+    pub(super) pending: std::sync::Arc<AtomicUsize>,
 }
 impl Default for Registry {
     fn default() -> Self {
@@ -59,6 +69,8 @@ impl Registry {
             window_allow: std::sync::Arc::new(std::sync::RwLock::new(HashMap::new())),
             worker_limit: default_worker_limit(),
             worker_inflight: std::sync::Arc::new(AtomicUsize::new(0)),
+            max_pending: default_max_pending(default_worker_limit()),
+            pending: std::sync::Arc::new(AtomicUsize::new(0)),
             #[cfg(feature = "hot-reload")]
             hot: None,
         }
@@ -82,6 +94,27 @@ impl Registry {
     /// How many worker-thread commands are running right now.
     pub fn async_inflight(&self) -> usize {
         self.worker_inflight.load(Ordering::SeqCst)
+    }
+
+    /// Cap how many async requests may be outstanding at once.
+    ///
+    /// Separate from [`Self::set_async_limit`] because the two bound different
+    /// things: that one is how many threads may run, this one is how many
+    /// requests the shell will hold at all. Lower this when the threat is a page
+    /// that loops on a fast command and never lets the queue drain. A value of 0
+    /// is treated as 1 for the same reason the worker limit is.
+    pub fn set_max_pending(&mut self, limit: usize) {
+        self.max_pending = limit.max(1);
+    }
+
+    /// The current cap on outstanding async requests.
+    pub fn max_pending(&self) -> usize {
+        self.max_pending
+    }
+
+    /// How many async requests are outstanding right now.
+    pub fn pending(&self) -> usize {
+        self.pending.load(Ordering::SeqCst)
     }
 
     /// Attach the hot-reloaded commands library (`kiln dev`). Static handlers

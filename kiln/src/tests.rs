@@ -11,7 +11,14 @@ use serde_json::{json, Value};
 use tao::keyboard::{KeyCode, ModifiersState};
 
 use crate::handle::parse_envelope;
-use crate::shell::{build_shim, invoke_base};
+use crate::shell::{build_shim_with, invoke_base};
+use crate::DEFAULT_COMMAND_TIMEOUT_MS;
+
+/// The shim at the default deadline, which is what nearly every assertion here
+/// is about; `build_shim_with` is used directly where the deadline is the point.
+fn build_shim(dev_origin: Option<&str>) -> String {
+    build_shim_with(dev_origin, DEFAULT_COMMAND_TIMEOUT_MS)
+}
 use crate::{
     content_type, lookup, register_builtins, transport, AppHandle, AssetTable, Config, Error,
     Fired, Registry, WindowOptions, APP_ORIGIN, PAGE_ORIGIN, SHIM_PROTOCOL,
@@ -388,4 +395,45 @@ fn empty_responses_are_never_served_as_success() {
     // A 404 must not carry an empty body that the page could parse as JSON.
     assert!(parse_envelope(r#"{"ok":null}"#).is_ok());
     assert!(parse_envelope("").is_err());
+}
+
+#[test]
+fn the_shim_carries_the_configured_deadline() {
+    // A fetch with no deadline waits forever, so a hung handler was
+    // indistinguishable from a slow one. The number comes from `kiln.json`,
+    // which is why it must be injected rather than hardcoded in the shim.
+    let shim = build_shim_with(None, 1234);
+    assert!(
+        shim.contains("const defaultTimeout = 1234;"),
+        "the configured deadline must reach the page"
+    );
+    assert!(!shim.contains("__TIMEOUT__"), "the token must be replaced");
+
+    // 0 is the documented escape hatch for commands that legitimately run long.
+    assert!(build_shim_with(None, 0).contains("const defaultTimeout = 0;"));
+}
+
+#[test]
+fn the_shim_frees_the_request_when_the_deadline_passes() {
+    // Rejecting alone would leave the socket open for as long as the handler
+    // blocked, which is the leak the deadline is meant to stop.
+    let shim = build_shim(None);
+    assert!(shim.contains("AbortController"), "the fetch must be abortable");
+    assert!(shim.contains("controller.abort()"), "and aborted on timeout");
+    assert!(
+        shim.contains(r#"kind: "timeout""#),
+        "a page must be able to branch on the deadline rather than on message text"
+    );
+    // The bridge has no abort: it has to drop the pending entry instead, or a
+    // late reply would settle a promise that already rejected.
+    assert!(shim.contains("pending.delete(id)"));
+}
+
+#[test]
+fn the_page_can_read_the_deadline_it_is_subject_to() {
+    let shim = build_shim_with(None, 5000);
+    assert!(
+        shim.contains("timeout: defaultTimeout"),
+        "exposing it lets a page show or adapt to the value instead of guessing"
+    );
 }

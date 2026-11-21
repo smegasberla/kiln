@@ -10,7 +10,7 @@ use serde_json::Value;
 use super::envelope::{error_envelope, error_envelope_for, ok_or_error};
 use super::handler::{run_isolated, run_isolated_async, Handler};
 use super::metrics::record_latency;
-use super::worker::claim_worker_slot;
+use super::worker::{claim_admission, claim_worker_slot};
 use crate::{AppHandle, Error};
 
 impl super::registry::Registry {
@@ -93,10 +93,21 @@ impl super::registry::Registry {
                 done(ok_or_error(method, outcome))
             }
             Some(Handler::Async(handler)) => {
-                // Refused rather than queued: a queued request still holds the
-                // page's promise open and still costs a thread once a slot frees,
-                // so under a flood the honest answer is "busy, retry" and the
-                // bound stays a bound.
+                // Two bounds, because they answer different floods. `pending`
+                // caps how much the shell will hold at all, so a page looping on
+                // a fast command cannot keep every slot saturated forever; the
+                // worker slot then caps how many stacks exist at once.
+                //
+                // Both are refusals rather than queues: a queued request still
+                // holds the page's promise open and still costs a thread once a
+                // slot frees, so under a flood the honest answer is "busy,
+                // retry" and the bound stays a bound.
+                let Some(admission) = claim_admission(&self.pending, self.max_pending) else {
+                    return done(error_envelope_for(
+                        method,
+                        &Error::Busy(self.max_pending),
+                    ));
+                };
                 let Some(permit) = claim_worker_slot(&self.worker_inflight, self.worker_limit)
                 else {
                     return done(error_envelope_for(method, &Error::Busy(self.worker_limit)));
@@ -120,6 +131,7 @@ impl super::registry::Registry {
                         // Held for the whole handler: dropped on return or unwind,
                         // so a panic cannot leak a slot.
                         let _permit = permit;
+                        let _admission = admission;
                         let started = timed.then(std::time::Instant::now);
                         let outcome = run_isolated_async(&handler, handle, payload);
                         if let Some(started) = started {
@@ -132,6 +144,10 @@ impl super::registry::Registry {
                         {
                             answer(ok_or_error(&method, outcome));
                         }
+                        // Both guards release here, after the reply is sent, so
+                        // a request counts as outstanding until the page could
+                        // actually have received its answer.
+                        drop(_admission);
                     });
                 // A thread that cannot be created is the same failure as
                 // saturation, and answering keeps the page's promise resolvable.

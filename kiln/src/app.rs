@@ -379,6 +379,8 @@ impl App {
         });
 
         let show_devtools = self.want_devtools || cfg!(debug_assertions);
+        // Read before `config` is consumed below; the page's default deadline.
+        let registry_timeout = config.command_timeout_ms;
         let factory = build_factory(
             Arc::clone(&registry),
             handle.clone(),
@@ -386,6 +388,7 @@ impl App {
             self.dev_url.clone(),
             self.ready.map(Arc::new),
             show_devtools,
+            registry_timeout,
         );
         let closed = self.closed.map(Arc::new);
 

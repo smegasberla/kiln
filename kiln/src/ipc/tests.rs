@@ -735,26 +735,79 @@ fn a_path_that_decodes_to_invalid_utf8_is_refused() {
 }
 
 #[test]
-fn a_command_registered_twice_is_recorded() {
-    // Last-wins is the behaviour, but silent replacement is data loss: the first
-    // handler's command stops existing and the second answers calls meant for it.
-    // A plugin claiming a name the app already uses is the realistic case, and
-    // the map alone cannot report it afterwards, only the survivor is left.
-    crate::diagnostics::clear();
+#[should_panic(expected = "was registered twice")]
+fn a_duplicate_registration_fails_in_a_test() {
+    // Last-wins is the behaviour, but a silent replacement is data loss: the
+    // first handler's command stops existing and the second answers calls meant
+    // for it. A test that registers one is reporting a bug in the app, so it
+    // fails there rather than shipping.
     let mut reg = Registry::new();
-    reg.add("dup", |_h, _p| Ok(serde_json::json!("first")));
-    reg.add("dup", |_h, _p| Ok(serde_json::json!("second")));
+    reg.add("dup", |_h, _p| Ok(json!("first")));
+    reg.add("dup", |_h, _p| Ok(json!("second")));
+}
 
-    let recorded = crate::diagnostics::entries()
-        .iter()
-        .any(|entry| entry.to_string().contains("command registered twice"));
-    assert!(recorded, "a duplicate registration must leave a trace");
-
-    // Still last-wins, so the fix is a warning and not a behaviour change.
+#[test]
+fn replacing_a_builtin_is_allowed_because_it_is_deliberate() {
+    // `__kiln_*` belongs to the shell, so an app claiming one is overriding it
+    // on purpose. That is not the collision the strict check is for, and it must
+    // stay possible: `register_builtins` runs after the app's commands.
+    let mut reg = Registry::new();
+    reg.add("__kiln_version", |_h, _p| Ok(json!("mine")));
+    reg.add("__kiln_version", |_h, _p| Ok(json!("shell")));
     assert_eq!(
-        crate::transport::respond(&reg, &empty_handle(), "dup", Value::Null),
-        r#"{"ok":"second"}"#
+        crate::transport::respond(&reg, &empty_handle(), "__kiln_version", Value::Null),
+        r#"{"ok":"shell"}"#
     );
+}
+
+#[test]
+fn an_outstanding_request_beyond_the_cap_is_refused() {
+    // The worker limit bounds threads, not load: a page that loops on a fast
+    // command keeps every slot busy forever. `pending` is the count the shell
+    // refuses at, so the rate is set by the app rather than by the page.
+    let mut reg = Registry::new();
+    reg.set_async_limit(1);
+    reg.set_max_pending(1);
+    let (release, blocked) = std::sync::mpsc::channel::<()>();
+    let blocked = std::sync::Mutex::new(blocked);
+    reg.add_async("slow", move |_h, _p| {
+        let _ = blocked.lock().unwrap().recv();
+        Ok(json!("done"))
+    });
+
+    let (tx, rx) = mpsc::channel();
+    reg.dispatch_deferred(&empty_handle(), "slow", Value::Null, move |body| {
+        let _ = tx.send(body);
+    });
+    // Wait until the first request is genuinely inside the handler.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while reg.pending() == 0 && std::time::Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+
+    // A second request while the first is held is refused, not queued.
+    let (tx2, rx2) = mpsc::channel();
+    reg.dispatch_deferred(&empty_handle(), "slow", Value::Null, move |body| {
+        let _ = tx2.send(body);
+    });
+    let body = rx2.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    let parsed: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(parsed["error"]["kind"], "busy", "{body}");
+
+    release.send(()).unwrap();
+    assert_eq!(
+        rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+        r#"{"ok":"done"}"#
+    );
+    assert_eq!(reg.pending(), 0, "the admission is released with the reply");
+    assert_eq!(reg.async_inflight(), 0, "and so is the worker slot");
+}
+
+#[test]
+fn a_pending_cap_of_zero_is_treated_as_one() {
+    let mut reg = Registry::new();
+    reg.set_max_pending(0);
+    assert_eq!(reg.max_pending(), 1, "zero would make async commands uncallable");
 }
 
 #[test]

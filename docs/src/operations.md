@@ -29,7 +29,7 @@ runtime coverage.
 ## Coverage
 
 `./scripts/coverage.sh` reports line coverage for the library's own tests and
-fails under a floor. The baseline is **67.32%**, measured with the default
+fails under a floor. The baseline is **67.58%**, measured with the default
 features and with test and fuzz modules excluded, so the number describes the
 shell rather than its assertions. The floor sits just under it: a gate set at the
 exact current number fails on honest changes and gets deleted, while one a point

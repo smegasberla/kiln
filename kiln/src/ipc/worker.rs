@@ -40,20 +40,72 @@ impl Drop for WorkerSlot {
 /// the start of a command and once at the end, and a contended atomic is far
 /// cheaper than a contended lock on a path that is meant to be spawned hundreds
 /// of times at once.
-pub(super) fn claim_worker_slot(inflight: &std::sync::Arc<AtomicUsize>, limit: usize) -> Option<WorkerSlot> {
-    let mut current = inflight.load(Ordering::SeqCst);
+pub(super) fn claim_worker_slot(
+    inflight: &std::sync::Arc<AtomicUsize>,
+    limit: usize,
+) -> Option<WorkerSlot> {
+    if reserve(inflight, limit) {
+        Some(WorkerSlot(std::sync::Arc::clone(inflight)))
+    } else {
+        None
+    }
+}
+
+/// Take one of `limit` places in `counter`, or report that none is free.
+///
+/// Shared by both guards below so the admission check and the thread check
+/// cannot drift into disagreeing about what "full" means.
+pub(super) fn reserve(counter: &AtomicUsize, limit: usize) -> bool {
+    let mut current = counter.load(Ordering::SeqCst);
     loop {
         if current >= limit {
-            return None;
+            return false;
         }
-        match inflight.compare_exchange_weak(
+        match counter.compare_exchange_weak(
             current,
             current + 1,
             Ordering::SeqCst,
             Ordering::SeqCst,
         ) {
-            Ok(_) => return Some(WorkerSlot(std::sync::Arc::clone(inflight))),
+            Ok(_) => return true,
             Err(observed) => current = observed,
         }
+    }
+}
+
+/// How many async requests an app may have outstanding at once.
+///
+/// The worker limit bounds threads, which is not a bound on *load*: a page that
+/// loops `invoke` on a command that finishes quickly keeps every slot busy for
+/// as long as it likes, so the count of requests the shell will accept is set by
+/// the caller and not by the shell. This counter bounds the total, so the shell
+/// refuses at a number it chose rather than at the rate the page asks.
+///
+/// It is checked before a thread is claimed, so a refusal past this line costs
+/// an envelope and no stack. The default matches the worker limit because that
+/// is the behaviour every existing app has; the point of the knob is that a
+/// deployment can set it lower and be strict about it.
+pub(super) fn default_max_pending(limit: usize) -> usize {
+    limit.max(1)
+}
+
+/// Admission to the async path, released when the reply is sent.
+pub(super) struct Admission(std::sync::Arc<AtomicUsize>);
+
+impl Drop for Admission {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Count one outstanding async request, or `None` when the cap is reached.
+pub(super) fn claim_admission(
+    pending: &std::sync::Arc<AtomicUsize>,
+    max: usize,
+) -> Option<Admission> {
+    if reserve(pending, max) {
+        Some(Admission(std::sync::Arc::clone(pending)))
+    } else {
+        None
     }
 }

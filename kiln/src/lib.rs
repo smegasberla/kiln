@@ -81,7 +81,7 @@ pub mod tray;
 pub mod updater;
 
 pub use assets::{content_type, lookup, AssetTable};
-pub use config::Config;
+pub use config::{Config, DEFAULT_COMMAND_TIMEOUT_MS};
 pub use error::Error;
 pub use handle::AppHandle;
 pub(crate) use handle::UserEvent;

@@ -11,6 +11,13 @@ use super::envelope::ok_or_error;
 use super::handler::{decode_args, Handler};
 use crate::{AppHandle, Error};
 
+/// The command namespace the shell reserves for itself.
+///
+/// A name under this prefix belongs to a builtin, so an app replacing one is
+/// deliberate rather than a collision, which is why registration treats it
+/// differently from everything else.
+const BUILTIN_PREFIX: &str = "__kiln_";
+
 impl super::registry::Registry {
     /// Register a handler that runs on the UI thread. Registering the same name
     /// twice replaces it.
@@ -30,6 +37,17 @@ impl super::registry::Registry {
     /// since only the survivor is left in the map.
     fn insert_handler(&mut self, method: &str, handler: Handler) {
         if self.handlers.contains_key(method) {
+            // A duplicate is a bug in the app, not a feature, so a test that
+            // registers one should fail rather than pass while quietly losing a
+            // handler. The shell's own namespace is exempt: that is where an app
+            // legitimately replaces a builtin, and `register_builtins` runs after
+            // the app's commands so it is the builtin that wins there.
+            debug_assert!(
+                method.starts_with(BUILTIN_PREFIX),
+                "command `{method}` was registered twice; the first handler is gone. \
+                 Prefix plugin commands with the plugin name, and check \
+                 `has_command` before claiming a name the app may already use.",
+            );
             crate::diagnostics::record(
                 crate::diagnostics::Kind::App,
                 "command registered twice",
