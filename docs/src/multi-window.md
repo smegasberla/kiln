@@ -28,9 +28,10 @@ let label = app.open_window(WindowOptions {
     ..Default::default()
 })?;
 
-// The window does not exist yet: creation happens on the UI thread. The label is
-// already reserved, so this is safe to send now and delivered on `on_ready`.
-app.emit_to(Some(&label), "settings:open", serde_json::json!(null));
+// The window does not exist yet: creation happens on the UI thread. Do not emit
+// to it here. Emit from `on_ready`, which is the first moment the page can
+// receive anything.
+app.emit_to(Some(&label), "settings:open", serde_json::json!(null)); // DROPPED
 ```
 
 `open_window` returns the resolved label rather than `()`. Two reasons, both
@@ -44,10 +45,29 @@ practical:
 From the page, `__voussoir_open_window` answers `{"label": "..."}` for the same
 reason.
 
-**The timing rule is worth internalising:** the label exists immediately, the
-window does not. Emitting to it before it loads is safe because the shell queues
-the event and delivers it when that window is ready. Calling `windows()` right
-after may not include it yet, because `windows()` reports what exists.
+**The timing rule is worth internalising, because getting it wrong is silent.**
+The label exists immediately and is already listed by `windows()`, which counts a
+window from the moment it is *requested*. The window itself, and its page, do not
+exist yet.
+
+An `emit` is delivered by evaluating a script in each matching webview as the
+event is processed, and the shim's hook is a no-op guard (`window.__voussoir_emit&&`).
+So an event emitted before the page has installed its listener is **dropped, with
+no error**. There is no queue behind it.
+
+That is why `on_ready` exists and why this is the one ordering rule in the API:
+
+```rust
+// Wrong: emitted during setup, before the page exists. Vanishes.
+app.emit_to(Some("settings"), "settings:open", json!(null));
+
+// Right: emitted from the hook that fires once the page can listen.
+App::new().on_ready(|app, label| {
+    if label == "settings" {
+        app.emit_to(Some(label), "settings:open", json!(null));
+    }
+})
+```
 
 ## Listing and closing
 
