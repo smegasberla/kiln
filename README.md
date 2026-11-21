@@ -1,17 +1,43 @@
+<div align="center">
+
+<img src="brand/voussoir.png" alt="Voussoir" width="140" height="140">
+
 # Voussoir
 
-*A voussoir is the wedge-shaped stone an arch is built from, and the one at the
+**A desktop and mobile app framework where the shipped artifact is a Rust binary.**
+One window, the operating system's own webview, and a single JSON bridge between
+Rust and the page.
+
+[![CI](https://github.com/smegasberla/voussoir/actions/workflows/ci.yml/badge.svg)](https://github.com/smegasberla/voussoir/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Android%20%7C%20iOS-lightgrey.svg)](#platform-support)
+
+</div>
+
+---
+
+> ### Built with AI
+>
+> This project was written with AI assistance, and this is stated here rather
+> than buried. The code was largely produced by AI and is held to checks that
+> run without asking anyone's opinion: `cargo test`, `bun test`, and
+> `scripts/verify.ts` against a real window on the real IPC path, in CI on six
+> targets. Read the claims below as claims that are *checked* rather than as a
+> CV: the numbers are reproducible from a checkout, and where something is
+> unverified this README says so.
+
+A *voussoir* is the wedge-shaped stone an arch is built from, and the one at the
 crown is the keystone that locks the rest in place. This project is that
 arrangement: a thin load-bearing shell holding a page and native code together,
-and holding nothing else.*
+and holding nothing else.
 
-A desktop app framework where **the shipped app is a Rust binary** and **Bun is
-build-time tooling**. One window, the operating system's own webview, and a
-single generic JSON bridge between Rust and the page.
+## Why
 
-It is built directly on [`wry`](https://github.com/tauri-apps/wry) (webview) and
-[`tao`](https://github.com/tauri-apps/tao) (windowing) — the same low-level
-crates Tauri sits on — but not on Tauri itself:
+Most desktop shells sit on one side or the other of a line. Electron ships a
+browser. Tauri is a full application platform, with plugins, capability files and
+a build step per feature. Voussoir aims at the narrow middle: **the whole runtime
+is three direct dependencies**, and everything optional is a cargo feature a
+minimal app does not pay for.
 
 ```
 voussoir 0.2.0
@@ -20,100 +46,64 @@ voussoir 0.2.0
 └── wry
 ```
 
-That is the whole dependency list of the minimal shell. Optional capabilities
-are cargo features, so a minimal app links none of them:
-
-| Feature | Adds | Why it is opt-in |
-| --- | --- | --- |
-| `menu` | `muda`, `gtk` | native menu bar with cut/copy/paste and quit |
-| `tray` | `tray-icon` | system tray icon (implies `menu`) |
-| `dialogs` | `rfd` | native open/save/folder dialogs |
-| `updater` | `ureq` + rustls | update checks against your JSON endpoint |
-| `devtools` | `wry/devtools` | devtools in release builds |
-| `full` | all but `tray` | menu + dialogs + updater + devtools |
-
-`voussoir init` scaffolds with `full`. Building with no features gives the 785 KB
-minimal shell; with `full` it is ~2.4 MB. An app that calls `.tray(...)` adds
-`"tray"` to that list itself. The Android example in this repo does exactly
-that, because its tray is what proves the notification path on a device.
-
-## What gets shipped
-
-`voussoir build` produces one executable with the frontend compiled into it. There
-is no Chromium, no Node, no Bun, no V8, and no `node_modules` in the artifact.
-The webview is the OS's:
+It is built directly on [`wry`](https://github.com/tauri-apps/wry) (webview) and
+[`tao`](https://github.com/tauri-apps/tao) (windowing), the same low-level crates
+Tauri sits on, but not on Tauri itself. With no features it is a **785 KB**
+binary; the `full` set is **~2.4 MB**. The frontend is compiled into the
+executable, so the artifact contains no Chromium, no Node, no Bun, no V8 and no
+`node_modules`. The webview is the OS's own:
 
 | Platform | Webview |
 | --- | --- |
-| Linux | WebKitGTK (`libwebkit2gtk-4.1`) |
+| Linux | WebKitGTK 4.1 |
 | macOS | WKWebView |
 | Windows | WebView2 |
+| Android | `WebView`, via wry's IPC handler |
+| iOS | WKWebView, via `WKURLSchemeHandler` |
 
-A sample, not a guarantee: measured 2026-11-19 on one Linux x64 machine,
-release profile, `strip` on, with `bun scripts/bench.ts` (the script flags its
-own noisy runs — re-run it on a quiet machine before quoting these):
+## Quickstart
 
-| | Bare `wry` + `tao` | Voussoir shell |
-| --- | --- | --- |
-| Median cold start (to page-load finished) | ~376 ms | ~323 ms (**−14.1%**) |
-| Binary size, minimal shell | 743 KB | 848 KB |
-| Binary size, `full` features | — | 2.4 MB |
-| Direct dependencies | 2 | 3 portable (4 on Linux) |
-
-`bun scripts/bench.ts` and `bun scripts/verify.ts` reproduce those numbers and
-assert the rest of the guarantees. `bun scripts/bench.ts --dispatch` measures the
-async dispatch paths instead, and its result is recorded in
-[the benchmark chapter](docs/src/benchmarks.md). The verifier runs 12 checks and
-exits non-zero if any fails: shell unit tests, embedded round-trip + `emit`, `voussoir init`,
-`voussoir build`, binary size, no JS runtime embedded, OS webview only, the app
-surviving launch, dev-mode cross-origin invoke, the compiled CLI working with
-neither Bun nor Node on `PATH`, handler panic containment, remote
-script/fetch/eval blocking, and navigation lockdown.
-
-The last three run against `probe/`, a fixture app whose page loads from the
-binary's own embedded assets (so the production policy applies, not the relaxed
-dev one) and reports back over IPC. It calls a command that panics on purpose and
-then a healthy one to prove the window survived.
-
-Those numbers are for the *shipped binary*, not the CLI. The CLI is a separate
-program that only developers install, and it is never on the user's machine.
-
-## Layout of a project
-
-```
-myapp/
-  voussoir.json              name, window size, entry page, optional command allowlist
-  index.html             bundled by Bun (TS, JSX, CSS, HTML entries all work)
-  src/main.ts            frontend, plain TypeScript
-  src/style.css
-  tsconfig.json
-  native/Cargo.toml
-  native/src/main.rs     windows, shell-service commands, the release loop
-  native/commands/src/lib.rs  your commands: one table, hot-reloadable in dev
-  native/src/assets.rs   generated by the CLI, do not edit
+```sh
+voussoir init myapp
+cd myapp
+voussoir dev
 ```
 
-`voussoir dev` starts Bun's dev server in-process (HMR, TypeScript, bundling — no
-webpack, no vite, no babel config) and launches the Rust shell pointed at it.
-HMR comes from importing the entry HTML: Bun serves the transformed page and
-watches everything it pulls in, so TS and CSS changes reload without touching
-Rust. The server lives in the CLI process because the distributed CLI is a
-compiled binary with no `.ts` files on disk to spawn. `voussoir build`
-bundles to `dist/`, generates the asset table, and runs `cargo build --release`.
+`voussoir dev` starts Bun's dev server in-process and launches the shell against
+it. Editing a `.ts` or `.css` file reloads the page; editing a command rebuilds
+only that crate and swaps the new library into the running window, keeping the
+last good one if the build fails.
 
-Rust commands hot-reload too: `voussoir dev` watches `native/commands/src`,
-rebuilds *only* that crate, and swaps the resulting library into the running
-shell — no process restart, no lost window state, and a failed build keeps the
-last good library while the compiler error stays on screen. Every swap prints
-its rebuild-to-reload latency; `voussoir dev --verbose` also records it, together with
-slow commands and refused navigations, so it survives the terminal scrolling. Release builds never load anything dynamically:
-the same command table links statically into the binary, behind a cargo
-feature `voussoir build --release` does not enable. Two rules come with this:
-statics inside the commands crate do not survive a reload (keep persistent
-state in the shell, passed in the payload), and hot reload is desktop-only —
-mobile platforms restrict loading dynamic code.
+```sh
+voussoir build --size             # release binary with the frontend inside
+voussoir package --icon icon.png  # AppImage / .app / .zip
+voussoir doctor                   # toolchain and project checks
+```
 
-## The IPC contract
+Getting the CLI onto a machine, dependencies included:
+
+```sh
+# Linux, macOS, FreeBSD, NetBSD, OpenBSD
+./install.sh                          # from a checkout, builds your tree
+curl -fsSL https://raw.githubusercontent.com/smegasberla/voussoir/master/install.sh | sh
+```
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File install.ps1
+irm https://raw.githubusercontent.com/smegasberla/voussoir/master/install.ps1 | iex
+```
+
+Flags: `--prefix` / `-Prefix`, `--no-deps` / `-NoDeps`, `--repo` / `-Repo`. Every
+dependency step is skipped when the tool is already present, and a failed package
+install warns instead of aborting, so `voussoir doctor` can report the gap by
+name.
+
+The compiled CLI needs neither Bun nor Node on `PATH`: `bun build --compile`
+embeds the runtime it was built with. Voussoir is not on crates.io yet, so these
+scripts and a checkout are the only supported ways to get it.
+
+## The contract
 
 One endpoint, one envelope, in both directions:
 
@@ -126,13 +116,12 @@ response: {"ok": <json>}
 
 `kind` is one of `unknown` (unregistered, or withheld by an allowlist), `payload`
 (the request did not match the handler's argument type), `handler` (the handler
-returned `Err`), `panic` (the handler panicked; the app kept running), or
+returned `Err`), `panic` (the handler panicked; the app kept running) or
 `runtime` (the webview or event loop failed). A page branches on the kind instead
-of matching message text, and `method` says which command failed even when the
-call came from a nested helper. Older clients that only read a string error still
-work: the release notes are the only place the shape is promised.
+of matching message text, and `method` names the command that failed even when
+the call came from a nested helper.
 
-The page gets a tiny shim installed before any of its own scripts run:
+The page gets a shim before any of its own scripts run:
 
 ```ts
 const greeting = await window.voussoir.invoke<string>("greet", { name: "you" });
@@ -152,467 +141,190 @@ fn greet(payload: &Value) -> Result<Value, String> {
 }
 ```
 
-Release links that table into the binary; `voussoir dev` hot-reloads it. A
-command that needs the app itself (opening a window, for example) is
-registered on `App` in `main.rs` instead, with `.command("name", …)`, and
-stays static in both modes.
+A release links that table into the binary; `voussoir dev` hot-reloads it. A
+command that needs the app itself, such as opening a window, is registered on
+`App` in `main.rs` with `.command("name", …)` and stays static in both modes.
+`tap.emit("count", json!(1))` pushes the other way through the event loop proxy,
+so it is thread-safe and never touches the webview off the UI thread.
 
-`tap.emit("count", json!(1))` pushes the other way, through the event loop proxy
-and `evaluate_script`, so it is thread-safe and never touches the webview off the
-UI thread.
-
-### Why the custom protocol and not `window.ipc.postMessage`
-
-wry's IPC handler is fire-and-forget on every platform: it gives you no way to
-return a value. Building a `-> json` bridge on top of it needs a second hop and
-`evaluate_script`, which means serializing every reply into JavaScript source and
-parsing it back. A `POST` to the custom protocol returns the response directly.
-Both were probed on WebKitGTK before the shell was written; the protocol route
-round-trips, so it is the one used.
-
-On Linux this requires wry's `linux-body` feature, because WebKitGTK only
-delivers request bodies when that is enabled. Voussoir enables it.
-
-### Why there is no ACL file
-
-The whitelist is the set of handlers compiled into the binary (plus, in
-`voussoir dev` only, the hot-reloaded library built from that same table). If a
-command was not registered in Rust, no page can reach it — there is no
-capability file, no permissions directory, and no runtime permission surface
-to misconfigure. A `commands` array in `voussoir.json` can narrow that set
-further, which is useful for a strict production build; it can never widen
-it. The `windows` map narrows it per window label, for windows that render
-content you would not trust with the whole surface.
-
-## Hot reload (dev only)
-
-`voussoir dev` builds your `native/commands` crate as a cdylib and swaps it into
-the running shell; release links the same crate as an rlib, so nothing dynamic
-ships. The dylib boundary is fixed at three symbols: `voussoir_dispatch` (UTF-8
-in, `{"ok":…}`/`{"error":…}` out, panics caught inside), `voussoir_free`, and
-`voussoir_methods` (the command names this build serves). A panic in a hot command
-is an error envelope and a living window, exactly like the static path; a
-failed rebuild keeps the last good library and prints the compiler error.
-
-Two rules: statics inside the commands crate do not survive a reload, and hot
-reload is desktop-only, since mobile platforms restrict loading dynamic code.
-
-The first rule has a fix rather than only a warning. `voussoir::state` is a
-shell-owned store that outlives every library swap:
-
-```rust
-#[cfg(feature = "hot-reload")]
-fn bump() -> u64 {
-    let n = voussoir::state::get("count").and_then(|v| v.as_u64()).unwrap_or(0) + 1;
-    voussoir::state::set("count", voussoir::serde_json::json!(n));
-    n
-}
-```
-
-It is a plain in-process `serde_json` map, so it also works as scratch state in a
-release build, and `voussoir::state::reload_generation()` tells reloaded code which
-generation of the library is live. The watcher polls every 250 ms, so a save
-becomes visible up to a quarter second later; each swap prints
-`reloaded gen N … X ms`. Each swap
-prints `reloaded gen N … X ms` (build included; the harness measures
-edit-to-visible separately). The release guarantee is checked, not asserted:
-`cargo tree -p voussoir --depth 1` shows no `libloading` edge and the shell size
-check is unchanged.
-
-## Configuration
-
-One file, eight-ish keys, all optional:
-
-```json
-{
-  "name": "Notes",
-  "title": "Notes",
-  "width": 900,
-  "height": 680,
-  "entry": "index.html",
-  "commands": ["greet", "save"],
-  "windows": { "untrusted": { "commands": ["greet"] } }
-}
-```
-
-It is `include_str!`-ed into the binary. A shipped app does not read config from
-disk, so it cannot be redirected by a writable working directory.
-
-The optional `windows` map narrows the command surface per window, keyed by
-window label. A window named there can only call what is in *both* its list and
-the global `commands` list, so an entry can only ever narrow, never widen — a
-window that renders untrusted content (a markdown preview, an embedded OAuth
-page) can be given a reduced surface without forking the app. The label comes
-from the webview the request arrived on, not from anything the page could send.
-`verify.ts` proves the narrowed path: a second window with an empty list gets
-`unknown command` for what the main window can still call.
-
-## Guarantees (and how they are proved)
-
-These are not aspirational; each one is asserted by `scripts/verify.ts` against a
-real window on the real IPC path.
-
-**A panicking command does not kill the app.** Handlers run inside wry's FFI
-callback, where unwinding across the C boundary aborts the process. Every handler
-is wrapped in `catch_unwind`, so a bug in one command returns
-`{"error":"command panicked: ..."}` to the page and the window keeps working with
-its unsaved state. `panic = "abort"` is deliberately *not* set in the release
-profile, because it would make this impossible.
-
-**The page cannot leave.** A navigation handler allows only the app origin, the
-dev-server origin in debug builds, and `about:blank`. `location.href = "https://example.com"`
-is refused. The injected `window.voussoir` bridge is also origin-scoped and tears
-itself down if the document ever becomes foreign, so navigation is not the only
-thing standing between a remote page and your commands.
-
-**The page cannot pull in remote code.** Every response carries a
-`Content-Security-Policy` with `script-src 'self'`, `object-src 'none'`,
-`base-uri 'none'`, `frame-ancestors 'none'`, plus `X-Content-Type-Options: nosniff`
-and `Referrer-Policy: no-referrer`. A remote `<script>`, a remote `fetch`, and
-`eval` are all blocked in release builds. Dev mode relaxes only what Bun's HMR
-needs (inline + eval scripts, `ws:`, loopback) and never opens the internet.
-
-**Commands can be typed.** `command_typed` takes an argument type and a reply
-type, deserializes before the body runs, and rejects a wrong shape as
-`kind: "payload"` instead of silently defaulting a field. The raw
-`.command(name, |app, Value|)` form stays the base layer and is unchanged.
+Typed commands are one derive away. The re-export is what keeps an app on a
+single dependency:
 
 ```rust
 #[derive(voussoir::serde::Deserialize)]
 #[serde(crate = "voussoir::serde")]
 struct ShiftArgs { #[serde(default)] delta: i64 }
 
-app.command_typed("shift", |app, args: ShiftArgs| {
+app.command_typed("shift", |_app, args: ShiftArgs| {
     Ok(json!({ "value": args.delta }))
 });
 ```
 
-`#[serde(crate = "voussoir::serde")]` is what keeps an app down to one dependency: the
-derive macro has to name `serde`, and `voussoir` re-exports it.
+### Why a custom protocol
 
-**Slow work does not freeze the window.** `async_command` runs handlers on a
-worker thread and replies when done; with the `rt` feature, `async_fn` takes a
-real `async fn` and runs its future on one shared runtime instead of a thread per
-call, so a thousand in-flight requests cost a thousand tasks rather than a
-thousand stacks. Sync `command` stays available for cheap lookups. Native dialogs
-are async for exactly this reason.
+wry's IPC handler is fire-and-forget on every platform: it returns no value.
+Building a request/response bridge on top of it needs a second hop through
+`evaluate_script`, which means serializing every reply into JavaScript and losing
+the error type on the way. A `POST` to a registered scheme handler has a body and
+a response, so the reply is the reply.
 
-**Settings persist with no crate of your own.** The `storage` feature (part of
-`full`) adds `storage.get|set|delete|keys|path`, a JSON file in the platform data
-directory written with an atomic rename so a crash mid-save cannot truncate it.
-No writable data directory (and every other failure) comes back as an error
-envelope the page can handle rather than a silently empty store.
+### What is deliberately absent
 
-**Lifecycle hooks are first-class.** `on_ready(|app, window_label| …)` fires
-exactly once per window, including windows opened later, and is the first moment
-`emit_to` is safe for that window. `on_window_close(|app, window_label| …)` fires
-once as a window goes away, which is where per-window state should be persisted.
-Both are guarded against duplicate platform events, so "once" is a property of the
-code and not of the webview's event habits.
+- **No plugin system.** A plugin is a crate that calls `emit` and registers
+  commands; the core needs nothing for that to work.
+- **No ACL or capability files.** Registered handlers are the allowlist, decided
+  at compile time. `voussoir.json` can narrow it per window, and only narrow.
+- **No codegen macro.** `app.command("name", fn)` instead of `#[tauri::command]`
+  plus `invoke_handler![generate!]`.
+- **No upload anywhere.** A panic hook writes to a local ring buffer readable
+  through `__voussoir_reports`. Nothing leaves the machine.
 
-**Crashes leave a trace.** A panic hook records every panic with its location to
-an optional log file and an in-memory ring buffer readable through
-`__voussoir_reports`. Nothing is uploaded anywhere.
+## What is guaranteed
 
-## Multi-window
+Each of these is asserted by `scripts/verify.ts` against a real window on the
+real IPC path, not by inspection.
 
-Windows are addressed by label. `__voussoir_open_window` (and `AppHandle::open_window`)
-take `{label, title, width, height, entry}`; creation happens on the UI thread
-because tao handles are not `Send`. `emit_to(Some("settings"), ...)` targets one
-window; `emit(...)` targets all. The app exits when the last window closes.
-
-A label can also carry a narrower command allowlist: put the label under `windows`
-in `voussoir.json` (see Configuration) and that window can call only the listed
-commands. The label is resolved by the shell from the calling webview, so a page
-cannot claim a different window's permissions by sending a label of its own.
-
-A window opened at runtime carries its own lane, declared where it is opened:
-
-```rust
-let label = app.open_window(WindowOptions {
-    title: Some("Preview".into()),
-    allowlist: Some(vec!["greet".into()]),   // this window only
-    ..Default::default()
-})?;
-app.emit_to(Some(&label), "document", json!({ "path": "notes.md" }));
-```
-
-`open_window` returns the label and the built-in `__voussoir_open_window` answers
-`{"label": "..."}`, so a page can address the window it just created instead of
-guessing a name. An unnamed window gets a distinct label (`index.html`,
-`index.html-2`, …), and `voussoir.windows()` lists the open ones in the order they
-opened. A runtime lane only ever narrows: the global `commands` list is applied
-first, so a window cannot be handed a command the app withheld.
-
-## Built-in commands
-
-| Command | Kind | Purpose |
-| --- | --- | --- |
-| `__voussoir_version` | sync | app name + shell version |
-| `__voussoir_reports` | sync | recent crash/error records |
-| `__voussoir_open_window` | sync | open a window from JSON options; answers `{label}` |
-| `__voussoir_windows` | sync | open window labels, in opening order |
-| `__voussoir_close_window` | sync | close by `label` |
-| `__voussoir_devtools` | sync | open devtools (release needs `devtools`) |
-| `__voussoir_tray_tooltip` | sync | retitle the tray (`tray`) |
-| `__voussoir_tray_checked` | sync | tick a tray check item (`tray`) |
-| `__voussoir_tray_popup` | sync | raise the tray menu from the page (`tray`) |
-| `__voussoir_menu_checked` | sync | tick a menu item (`menu`) |
-| `dialog.open` / `.open_many` / `.save` / `.folder` | async | native dialogs (`dialogs`) |
-| `update.check` | async | compare against `update.url` (`updater`) |
-
-All of them respect the `commands` allowlist: naming one in `voussoir.json` is enough
-to keep it, and leaving it out removes it.
-
-## How this differs from Tauri
-
-| | Tauri v2 | Voussoir |
-| --- | --- | --- |
-| Runtime dependencies | `tauri`, `tauri-runtime`, `tauri-runtime-wry`, `wry`, `tao`, plus plugins | `wry`, `tao`, `serde_json` |
-| IPC | IPC handler plus a channel protocol, capability files, permissions | one POST endpoint, `{"ok"\|"error"}` envelope |
-| Allowlisting | JSON capability and ACL files, compiled by `tauri-build` | compile-time: registered handlers only |
-| Command registration | `#[tauri::command]` proc macro + `invoke_handler![generate!]` codegen | `app.command("name", fn)`, no codegen |
-| Build step | `tauri-build` codegen, `tauri-cli`, plugin scaffolding | `bun build`, one generated `assets.rs` |
-| Frontend bundler | whatever you configure, integrated by `tauri-cli` | Bun's built-in bundler; no config |
-| Multi-window, tray, menus, updater | supported | supported, as opt-in features |
-| Crash reporting | plugin / sentry | panic hook + local ring buffer, no upload |
-| Panic in a command | aborts the app by default | contained, reported to the page as an error |
-| Mobile | supported | Android: supported. iOS: supported on the simulator — `voussoir ios build\|run\|verify`, green in CI since run 44788618663; device builds need signing, which stays with the app owner |
-
-The tradeoff is deliberate: Tauri is a full application platform, Voussoir is the
-core shell with nothing speculative bolted on. What was cut, and what would bring
-it back:
-
-- **Plugins** — no plugin system. A plugin is a crate that calls `emit` and
-  registers commands; nothing needs to exist in the core for that.
-- **Notifications, global shortcuts, deep links, single-instance** — not present.
-  Each needs platform-specific code that is not justified until an app asks.
-- **Auto-install updates** — `update.check` reports; downloading, verifying, and
-  replacing a running binary needs code signing to be meaningful and is an app
-  decision.
-- **Plugins** — a plugin is a crate that registers commands and emits events;
-  the core needs nothing for that.
-- **`#[command]` sugar** — would add `syn`, `quote`, and `proc-macro2` and a
-  recompile-per-signature-change, to replace one line of builder code.
-
-## Packaging and signing
-
-`voussoir package` builds and wraps the app in the format users on that platform
-actually install:
-
-| Platform | Output |
+| Guarantee | How |
 | --- | --- |
-| Linux | `.AppImage` — one file, no install, no root |
-| macOS | `.app` bundle with `Info.plist` |
-| Windows | `.exe` in a `.zip`, with the WebView2 requirement noted |
+| A panicking command does not kill the app | every handler is wrapped in `catch_unwind`; the page gets a `panic` error and the window keeps its unsaved state |
+| Slow work does not freeze the window | `async_command` runs on a worker thread; with `rt`, `async_fn` runs futures on one shared runtime rather than a thread per call |
+| Settings persist without a crate of your own | `storage.*` writes JSON with an atomic rename, so a crash mid-save cannot truncate it |
+| Lifecycle hooks fire once | `on_ready` and `on_window_close` are guarded against duplicate platform events |
+| Crashes leave a trace | a panic hook records the location to an optional log file and a ring buffer |
 
-An icon is optional: `--icon icon.png` uses yours, and without one the packager
-draws a default so the build never fails on missing artwork.
+## Features
 
-Signing is **not** attempted. It needs credentials the tool cannot invent, and a
-package that looks signed but isn't is worse than an honestly unsigned one.
-`voussoir package` prints the exact command for the platform instead. CI does the
-same: it builds and uploads artifacts on every run, and signs/notarizes only when
-the corresponding secrets exist.
+Optional capabilities are cargo features, so a minimal app links none of them.
 
-```sh
-voussoir package --icon icon.png
-```
+| Feature | Adds | Why it is opt-in |
+| --- | --- | --- |
+| `menu` | `muda` | native menu bar with cut/copy/paste and quit |
+| `tray` | `tray-icon` | system tray icon (implies `menu`) |
+| `dialogs` | `rfd` | native open/save/folder dialogs |
+| `updater` | `ureq` + rustls | update checks against your JSON endpoint |
+| `devtools` | `wry/devtools` | devtools in release builds |
+| `storage` | — | JSON settings file in the platform data directory |
+| `rt` | `tokio` (scheduler only) | real `async fn` commands on a shared runtime |
+| `full` | several of the above | menu + dialogs + updater + devtools + storage |
+
+`voussoir init` scaffolds with `full`. The Android example in this repository adds
+`tray` on top, because its notification is what proves that path on a device.
+`rt` and `hot-reload` stay out of `full` on purpose: a synchronous app should not
+pay for a scheduler, and a released shell never loads code dynamically.
 
 ## Platform support
 
 | Platform | Build | Tests | Notes |
 | --- | --- | --- | --- |
 | Linux x86_64 | yes | yes | WebKitGTK 4.1 |
-| Windows x86_64 | `cargo check` clean | yes (CI) | WebView2, preinstalled on Win10 2020+/11 |
+| Windows x86_64 | `cargo check` clean | yes (CI) | WebView2, preinstalled on Win10 2020+ and 11 |
 | macOS x86_64 / arm64 | `cargo check` clean | yes (CI) | WKWebView |
 | FreeBSD | CI (VM) | CI (VM) | GTK 3 + WebKit2GTK, same code path as Linux |
-| NetBSD | `cargo check` | graph only | unverified at runtime |
-| Android arm64 / x86_64 | yes | yes (emulator, CI) | wry's IPC handler, same commands and security policy |
-| iOS aarch64 (simulator) | yes | yes (simulator, CI) | WKWebView via wry's `WKURLSchemeHandler`: the desktop origin and policy, no branch |
+| NetBSD | `cargo check` | graph only | **unverified at runtime** |
+| Android arm64 / x86_64 | yes | yes (emulator, CI) | wry's IPC handler, same commands and policy |
+| iOS aarch64 (simulator) | yes | yes (simulator, CI) | desktop origin and policy, no platform branch |
 
-BSD works because wry and tao already treat it as a webkitgtk/GTK platform: two
-things blocked it (tao's default `dbus` feature and a Linux-only `gtk`
-dependency) and both are fixed. The remaining cost is that the `-sys` crates need
-GTK and WebKit installed on the *target*, so it builds and runs on BSD, not as a
-cross-compile from Linux.
+BSD works because wry and tao already treat it as a webkitgtk/GTK platform. Two
+things blocked it, tao's default `dbus` feature and a Linux-only `gtk`
+dependency, and both are fixed. The remaining cost is that the `-sys` crates need
+GTK and WebKit on the target, so it builds and runs on BSD rather than
+cross-compiling from Linux.
 
-`voussoir init` scaffolds both shells, so a project already contains its Android
-Gradle project and activity: nothing under `android/` is generated at build time
-except the Kotlin that wry writes, which is git-ignored.
+**Android** is a separate crate, `voussoir-android`, because the platform is
+genuinely different. The activity owns the event loop, and `invoke` cannot use the
+custom protocol: `WebResourceRequest` carries no body, so wry would deliver every
+payload as `null`. Android therefore uses wry's IPC handler and resolves the
+page's promise from Rust. The envelope, registry, allowlist and security policy
+are shared through a transport seam, so app code is identical everywhere. CI runs
+the instrumentation suite on an emulator, then launches the app with no
+instrumentation attached and fails on a `FATAL EXCEPTION` or an
+`UnsatisfiedLinkError`.
 
-Android is a separate crate, `voussoir-android`, because the platform is genuinely
-different. The activity owns the event loop, and `invoke` cannot use the custom
-protocol: `WebResourceRequest` carries no body, so wry would deliver every payload
-as `null`. Android therefore uses wry's IPC handler and resolves the page's promise
-from Rust. The envelope, registry, allowlist and security policy are shared through
-a transport seam, so app code is identical. The `android` job in
-`.github/workflows/ci.yml` runs the instrumentation suite on an emulator, then
-launches the app with no instrumentation attached and fails on a `FATAL
-EXCEPTION` or an `UnsatisfiedLinkError`.
+**iOS** keeps the custom-scheme transport, since `WKURLSchemeHandler` intercepts
+`voussoir://localhost` the way the desktop does, so the origin and policy are the
+desktop ones byte for byte; the only mobile branch in `security.rs` is Android's.
+What changes is who owns the process: there is no Rust `main`, because the event
+loop must own the main thread. Swift's `main.swift` calls the staticlib's
+exported `main_rs` first, and tao calls `UIApplicationMain` from inside it.
+`voussoir ios build|run|verify` mirror the Android commands; `--target device`
+builds unsigned, since installing on hardware needs the app owner's provisioning
+profile.
 
-The activity template is split by concern rather than kept as one file:
-`MainActivity` holds the natives and the lifecycle, `VoussoirDialogs` the file picker
-and its URI-to-path resolution, `VoussoirMenu` the `PopupMenu` build and click
-dispatch, `VoussoirTray` the notification, `VoussoirHttp` the blocking `GET`.
+## Packaging
 
-iOS is the same story with a different ownership shape. The platform keeps its
-custom-scheme transport (`WKURLSchemeHandler` intercepts `voussoir://localhost` the
-way the desktop does), so the origin and security policy are the desktop ones
-byte for byte — the only mobile branch in `security.rs` is Android's. What
-changes is who owns the process: the event loop must own the main thread, so
-there is no Rust `main`; Swift's `main.swift` calls the staticlib's exported
-`main_rs` as the first thing the process does, and tao calls `UIApplicationMain`
-from inside it. `voussoir init` scaffolds the `ios/` shell — the staticlib crate, an
-XcodeGen `project.yml` the app owns, the `Info.plist`, and the one-symbol
-bridging header — and `voussoir ios build|run|verify` mirror the android commands:
-`build` cross-compiles the staticlib, stages it, and runs `xcodebuild` for the
-simulator (`--target device` builds unsigned; installing on hardware needs the
-app owner's provisioning profile, which stays theirs). The `ios` CI job builds
-and verifies on a booted simulator; `verify` asserts the console shows the Rust
-entry marker and the `greet` reply, the full round trip.
+`voussoir package` wraps a build in the format users on that platform install:
 
-Menus, dialogs, tray, and the updater's endpoint fetch report honestly on iOS
-(theirs cannot exist there) while the update comparison logic stays shared, and
-the UIKit suspend/resume callbacks feed the same `lifecycle` events Android's
-activity callbacks do. The desktop-only feature footnotes in the table above
-apply to iOS as they do to Android.
+| Platform | Output |
+| --- | --- |
+| Linux | `.AppImage`, one file, no install, no root |
+| macOS | `.app` bundle with `Info.plist` |
+| Windows | `.exe` in a `.zip`, with the WebView2 requirement noted |
 
-`voussoir init` scaffolds instrumentation tests in two layers, because the two answer
-different questions. `VoussoirMenuTest` and `VoussoirDialogsTest` assert pure data
-translation — a menu id round-tripping, an intent being built, extensions mapping
-to MIME types — which needs no window and no provider. `VoussoirDialogsDeviceTest`,
-`VoussoirTrayDeviceTest` and `VoussoirHttpDeviceTest` drive the real round trips: the
-system picker answering with a `content://` URI that must become a path, a
-notification that appears only when `POST_NOTIFICATIONS` is held, and a TLS
-request through the system trust store with `update.check` on top of it. The
-second layer is where "it compiles and the symbol resolves" stops being a claim
-about working software.
+An icon is optional: `--icon icon.png` uses yours, and without one the packager
+draws a default so a build never fails on missing artwork.
 
-`VoussoirDeviceSupport` is their shared plumbing rather than a test: the shell starts
-its Rust event loop from `ProcessLifecycleOwner`, which runs once per process, so
-a second `ActivityScenario.launch` gets an activity whose WebView has no page. The
-device tests therefore share one activity, launch it after granting the
-notification permission (an OS prompt in front of the app pauses the WebView, so a
-page that was not yet loaded never finishes loading), and drive system UI through
-the `UiAutomation` instrumentation already owns instead of adding UiAutomator.
+Signing is **not** attempted. It needs credentials the tool cannot invent, and a
+package that looks signed but is not is worse than an honestly unsigned one.
+`voussoir package` prints the exact command for the platform instead. CI builds
+and uploads artifacts on every run, and signs or notarizes only when the
+corresponding secrets exist.
 
-iOS: the bootstrap crate (`voussoir-ios`), the platform gates, and now the build
-tooling are in place (IOS-PLAN.md Phases I-1 to I-3). `voussoir init` writes an
-`ios/` shell — a Rust staticlib whose `main_rs` Swift calls first, an XcodeGen
-`project.yml` you own, and a bridging header with exactly one symbol — and
-`voussoir ios build|run|verify` mirror the android commands: `build` cross-compiles
-the staticlib, stages it and runs `xcodebuild` for the simulator (or `--target
-device`, unsigned); `run` boots and drives a simulator over `simctl`; `verify`
-asserts the app reaches its Rust entry. Command parity is now three-way.
-The Phase I-4 CI job that proves this now passes: the simulator job boots the
-app, waits for its Rust entry, and drives a command round-trip (run 44788618663
-onward). What is still unverified is anything the simulator job does not script,
-and a device build, which CI does not attempt.
+## Compatibility
 
-`cargo check` for Windows and macOS runs in this repo. macOS cannot be *fully*
-compiled off a Mac (its Objective-C shims need the Apple SDK), so `ci.yml`
-builds and tests both natively on GitHub runners. Treat "compiles" and "runs"
-as different claims: both engines now run the verification harness in CI —
-WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows — and all three
-assert the same guarantees. What CI cannot do is exercise them by hand, so an
-interaction CI does not script is still unverified on Windows and macOS.
+The crate is 0.x, so [Cargo's 0.x rules](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html)
+already permit a minor bump to break. On top of that, this is promised:
 
-## Compatibility policy
+**Breaking** (needs a 0.x bump and a `CHANGELOG.md` entry): command names and the
+`{"ok"|"error"}` envelope; `App` and `AppHandle` public signatures; the
+`voussoir.json` schema; the `window.voussoir` shim (`invoke`, `listen` and their
+argument shapes); the meaning of an existing cargo feature.
 
-The crate is 0.x, so [Cargo's 0.x rules](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html) already allow any minor bump to break. What this project promises on top of that:
+**Not breaking**: internal module layout; new opt-in features, built-in commands
+or `voussoir.json` keys; patch bumps.
 
-**Breaking changes** (require a major-ish 0.x bump and a CHANGELOG entry under a `###` heading): command names and the IPC envelope `{"ok"|"error"}`; the `App`/`AppHandle` public signatures; the `voussoir.json` schema; the `window.voussoir` shim surface (`invoke`, `listen`, and their argument shapes); the meaning of an existing cargo feature.
-
-**Not breaking**: internal module layout; new opt-in features, built-in commands, or `voussoir.json` keys (additive); patch bumps, which add no API change.
-
-Every user-visible change is recorded in `CHANGELOG.md` (Keep a Changelog format), so the question "is this upgrade safe for my app?" is answerable from the changelog plus the lists above.
-
-## Install / use
-
-One script installs the dependencies (system webview, Git, Bun, Rust), builds
-the CLI, and puts `voussoir` on PATH:
-
-```sh
-# Linux, macOS, FreeBSD, NetBSD, OpenBSD
-./install.sh                          # from a checkout (builds your tree)
-curl -fsSL https://raw.githubusercontent.com/smegasberla/voussoir/master/install.sh | sh   # from anywhere
-```
-
-```powershell
-# Windows
-powershell -ExecutionPolicy Bypass -File install.ps1          # from a checkout
-irm https://raw.githubusercontent.com/smegasberla/voussoir/master/install.ps1 | iex       # from anywhere
-```
-
-Flags: `--prefix`/`-Prefix` (install location), `--no-deps`/`-NoDeps` (skip
-dependency installation), `--repo`/`-Repo` (clone URL). Every dependency step
-is skipped when the tool is already present, and a failed package install
-warns instead of aborting, so `voussoir doctor` reports any remaining gap by
-name.
-
-Manual equivalent — Requires Rust, Bun, and the platform webview (Linux:
-`webkit2gtk-4.1`).
-
-```sh
-# from this repo
-cd cli && bun install && bun run build     # -> cli/dist/voussoir (compiled, no Bun needed to run it)
-
-voussoir init myapp
-cd myapp
-voussoir dev                                   # Bun dev server + Rust shell
-voussoir android build                         # APK, no Gradle files to write
-voussoir android run                           # install and follow logs
-voussoir build --size                          # release binary with the frontend inside
-voussoir package --icon icon.png               # AppImage / .app / .zip
-voussoir doctor                                # toolchain and project checks
-```
-
-The compiled CLI has no Bun or Node runtime dependency: run it with both off
-`PATH` and it still works, because `bun build --compile` embeds the runtime it
-was built with into the CLI binary — a developer machine, not the user's.
+Every user-visible change goes into `CHANGELOG.md` in Keep a Changelog format, so
+"is this upgrade safe for my app?" is answerable from the changelog plus the lists
+above.
 
 ## Repository
 
 ```
-PLAN.md              the phase plan and the acceptance checks per phase
-voussoir/                runtime shell crate (what ships)
-    examples/hello.rs   minimal app: embedded assets, round-trip, emit
-    examples/studio.rs  full-featured: menus, tray, dialogs, updater, multi-window
-probe/               test fixture: commands that panic on purpose, for verify.ts
-baseline/            bare wry+tao app: the measurement baseline, plus the
-                     transport/dev-origin probes that chose the design
-cli/                 Bun CLI (dev tooling only)
-  template/          scaffold files, inlined into the CLI at compile time
-  src/commands/package.ts   AppImage / .app / .zip generation
-  src/icon.ts        PNG encoder and default icon (no image dependency)
-.github/workflows/   CI (3 platforms) and release (packaging + optional signing)
-examples/counter/    a real CLI-scaffolded app, kept in-tree and buildable
-examples/scratch/    a notebook app for both platforms: one shared command list,
-                     per-note markdown files, menu bar on desktop, PopupMenu and
-                     drawer on Android
-scripts/verify.ts    12 end-to-end checks (the acceptance gates)
-scripts/bench.ts     cold-start comparison, plus `--dispatch` for async dispatch
-docs/                the mdBook: `voussoir docs` validates and builds it
+voussoir/              runtime shell crate (what ships)
+  examples/hello.rs    minimal app: embedded assets, round-trip, emit
+  examples/studio.rs   full-featured: menus, tray, dialogs, updater, multi-window
+voussoir-android/      Android platform crate
+voussoir-ios/          iOS bootstrap crate
+probe/                 test fixture: commands that panic on purpose, for verify.ts
+baseline/              bare wry+tao app: the measurement baseline
+cli/                   Bun CLI, dev tooling only, never in the artifact
+  template/            scaffold files, inlined into the CLI at compile time
+  src/icon.ts          PNG encoder and default icon, no image dependency
+brand/                 the mark: voussoir.svg plus PNG renders
+docs/                  the mdBook, built by `voussoir docs`
+scripts/verify.ts      end-to-end checks, and the source of the numbers above
 ```
 
-The book in `docs/` is generated from the same material as this README plus the
-inline rustdoc, and is the place to point someone who wants a narrative rather
-than a reference: "Your first app", "Commands & payloads", "Security model",
-"Multi-window", "Packaging", "Diagnostics". `voussoir docs --check` validates the
-structure (every chapter listed, every link real) and runs in CI without mdBook
-installed; `voussoir docs` renders it when mdBook is on `PATH`.
+The book in `docs/` is the narrative version: "Your first app", "Commands &
+payloads", "Security model", "Multi-window", "Packaging", "Diagnostics".
+`voussoir docs --check` validates its structure and every link in CI without
+mdBook installed; `voussoir docs` renders it when mdBook is on `PATH`.
+
+## Contributing
+
+The gates CI runs are `cargo test`, `bun test` in `cli/`, and
+`scripts/verify.ts`. A change to the shell should also keep
+`cargo clippy --all-targets -- -D warnings` and `cargo fmt --all --check` clean.
+A bug report with a reproduction is worth more than a feature request; this
+project says no to features on purpose.
 
 ## License
 
-Dual-licensed under either
+Dual-licensed, at your option:
 
 - [Apache License, Version 2.0](LICENSE-APACHE)
 - [MIT license](LICENSE-MIT)
 
-at your option. `MIT OR Apache-2.0` is what the crate declares, so a downstream
-app can depend on it under either without asking.
-
-Unless you state otherwise, any contribution you intentionally submit for
-inclusion in this work shall be dual-licensed as above, with no additional
-terms or conditions.
+The crate declares `MIT OR Apache-2.0`, so a downstream app can depend on it
+under either without asking. Unless you state otherwise, any contribution you
+intentionally submit for inclusion is dual-licensed as above, with no additional
+terms.
