@@ -8,6 +8,32 @@ There is no published package yet. `cargo install voussoir` and `npm i -g
 voussoir` do not work, and any guide that suggests them is describing a future
 release. Until then there are two ways in: the install script, or a checkout.
 
+## Theory: why an install script instead of a package
+
+A package manager solves three problems at once: it knows the dependency graph,
+it verifies what it installs, and it can remove what it added. Until there are
+packages, a shell script has to stand in for all three, and being honest about
+which part it fakes is the difference between a useful installer and a mess.
+
+What the script actually does:
+
+| Promise | Script | Package manager |
+| --- | --- | --- |
+| Find dependencies | asks the OS package manager, skips what exists | resolves the graph |
+| Verify what it installed | clones the public repo over TLS, builds from source | checksums and signatures |
+| Remove it | you delete a file and a `PATH` line | `remove` |
+
+The middle row is the interesting trade: building from source means the binary
+you run was produced from code you can read, and it means nobody has signed
+anything. That is the current state of this project, stated rather than implied,
+and it is why the uninstall section is three commands rather than one.
+
+**Why it installs the webview for you** is the same reasoning in a smaller form:
+the first failure a new user hits is a missing WebKitGTK, and it surfaces two
+minutes into a build from a file they have never opened. Installing it up front,
+and warning rather than aborting when the package manager refuses, turns that into
+a line in `doctor`'s report.
+
 ## The install script
 
 One script installs the system webview, Git, Bun and Rust, builds the CLI from
