@@ -1,0 +1,31 @@
+[package]
+name = "kiln-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+description = "libFuzzer harness for the untrusted-input parsers"
+
+# Its own workspace on purpose: the fuzz crate needs `libfuzzer-sys`, which the
+# shipping crate must never depend on, and `cargo fuzz` rewrites this manifest.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+kiln = { path = "../kiln", features = ["full", "rt", "storage"] }
+
+[[bin]]
+name = "envelope"
+path = "fuzz_targets/envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "path"
+path = "fuzz_targets/path.rs"
+test = false
+doc = false
+bench = false

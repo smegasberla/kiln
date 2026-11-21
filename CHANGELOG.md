@@ -9,6 +9,36 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
 
 ### Added
 
+- Worker-thread commands are bounded. `add_async` spawns one thread per call, and
+  a page looping on one slow allowlisted command could reserve stacks until the
+  process died; that page is inside the threat model, since the shell assumes the
+  webview renders untrusted content. The registry now holds a permit for each
+  running worker (default: the machine's parallelism, at least four, changeable
+  with `Registry::set_async_limit`), refuses past the limit instead of spawning,
+  and releases the permit on return or unwind so a panic cannot leak a slot. The
+  page sees a new `Error::Busy` with `kind: "busy"`, which means "retry shortly,
+  nothing ran"; `Registry::async_limit` and `async_inflight` expose the state for
+  diagnostics and tests.
+
+- `window.kiln.pageOrigin` (shim protocol 3): the origin the page is actually
+  served from. Windows rewrites the app origin to a host form, so a page that built
+  an absolute URL from a literal was correct on four targets and broken on one.
+  Combined with the existing `protocol` number, the honest feature test is
+  `kiln.protocol >= 3` with a relative URL as the fallback.
+
+- A transport conformance test over the IPC seam, plus a fuzz target for the
+  envelope parsers. The two transports already share `transport::respond`; the
+  test now runs nine cases (round-trip, absent body, typed reply, malformed typed
+  payload, handler error, panic, unknown command, withheld command, refusal of a
+  malformed body) through both paths and requires identical bodies, so a drift
+  shows up on a Linux run instead of as a red Android or iOS job.
+
+- `fuzz/` (libFuzzer, nightly) with `envelope` and `path` targets, and a
+  deterministic stand-in that runs on stable with every `cargo test`: a fixed-seed
+  mutational loop over all three untrusted-input parsers. CI reports coverage with
+  `cargo llvm-cov`; the threshold is deliberately not a gate yet, because a bound
+  picked before a published number is a guess.
+
 - `kiln dev --verbose`: structured diagnostics for development. Records each hot
   library swap with its rebuild-to-reload latency, every dispatch at or above
   50 ms, refused navigations, dropped bridge messages, and handler panics, keeps
@@ -182,6 +212,21 @@ described under [Compatibility](../README.md#compatibility-policy) in the README
   the moving `continuous` tag, and runs `cargo test --workspace` verbatim now
   that `kiln-android`'s dependencies are target-gated to Android.
 
+### Fixed
+
+- `method_from_path` panicked on a multi-byte path. It decoded `%XX` escapes by
+  slicing the path `&str` at byte offsets, so `/__kiln/%` followed by any
+  multi-byte character landed inside a char boundary and aborted the request
+  thread. It now decodes bytes, refuses a result that is not valid UTF-8, and has
+  three regression tests plus a fuzz target.
+
+- Lock poisoning no longer takes the shell down. Fifteen non-test `unwrap()` sites
+  across `platform.rs` and `reporting.rs` panicked if a mutex had been poisoned by
+  an earlier panic; they now recover the guard, because the data behind them is
+  plain and consistent after a panic. The remaining response-builder sites in
+  `dispatch.rs` use `expect` with the invariant written down, and `rt.rs`'s runtime
+  construction documents why a lazy panic is the right report there. Six
+  documented `expect` calls remain outside tests, none on a reachable failure path.
 ## [0.1.0]
 
 First published version.

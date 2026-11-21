@@ -110,7 +110,12 @@ performance decision the contract asks you to make.
 ```
 
 `async_command` takes a `Value` and spawns a thread per call; `async_fn` takes a
-typed argument and submits a task to one shared multi-threaded runtime. For a
+typed argument and submits a task to one shared multi-threaded runtime. Because a
+thread per call reserves a stack, `async_command` is bounded: past the limit (the
+machine's parallelism, at least four) a call is refused with `kind: "busy"`
+instead of spawning. That is what stops a page looping on one slow allowlisted
+command from reserving memory until the process dies, and it is why a page should
+treat `busy` as "retry shortly" rather than as a bug. For a
 handful of concurrent commands the difference is noise, and
 `bun scripts/bench.ts --dispatch` measures it rather than guessing. Use `async_fn`
 when the handler awaits; use `async_command` when it merely blocks.

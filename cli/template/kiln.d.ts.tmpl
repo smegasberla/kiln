@@ -4,16 +4,21 @@ declare global {
     kiln: {
       /** Call a Rust command. Rejects if the handler errored or is unknown.
        *  The rejection is an Error whose `kind` names the failure class:
-       *  "panic" | "handler" | "payload" | "unknown" | "runtime". */
+       *  "panic" | "handler" | "payload" | "unknown" | "busy" | "runtime".
+       *  "busy" means every worker slot was taken: retry shortly, nothing ran. */
       invoke<T = unknown>(method: string, payload?: unknown): Promise<T>;
       /** Subscribe to a Rust -> JS event. Returns an unsubscribe function. */
       listen<T = unknown>(event: string, fn: (payload: T) => void): () => void;
       /** Which platform this page is running on. Use it to hide affordances that
        *  cannot work there, rather than offering buttons that error. */
       platform: "linux" | "windows" | "macos" | "bsd" | "android" | "ios";
+      /** The origin this page is actually served from. Windows rewrites it to a
+       *  host form, so build absolute URLs from this, never from a literal. */
+      pageOrigin: string;
       /** The shim protocol this shell implements, not its package version.
        *  Feature-detect with `kiln.protocol >= N` and degrade in one place
-       *  instead of probing for methods. 2 adds `windows`, `tray` and `menu`. */
+       *  instead of probing for methods. 2 adds `windows`, `tray` and `menu`;
+       *  3 adds `pageOrigin`. */
       protocol: number;
       /** The open window labels, in the order they opened. Ask it instead of
        *  remembering every label the page ever requested. */

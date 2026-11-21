@@ -83,7 +83,7 @@ pub(crate) fn serve_async(
     }
 
     if request.method() == "OPTIONS" {
-        responder.respond(builder.status(204).body(Cow::Borrowed(&[][..])).unwrap());
+        responder.respond(builder.status(204).body(Cow::Borrowed(&[][..])).expect(STATIC_RESPONSE));
         return;
     }
 
@@ -115,7 +115,7 @@ pub(crate) fn serve_async(
                     .header(header::CONTENT_TYPE, "application/json")
                     .status(200)
                     .body(Cow::Owned(body.into_bytes()))
-                    .unwrap(),
+                    .expect(STATIC_RESPONSE),
             );
         });
         return;
@@ -126,18 +126,25 @@ pub(crate) fn serve_async(
             .header(header::CONTENT_TYPE, content_type(name))
             .status(200)
             .body(bytes)
-            .unwrap(),
+            .expect(STATIC_RESPONSE),
         None => builder
             .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
             .status(404)
             .body(Cow::Borrowed(b"not found".as_slice()))
-            .unwrap(),
+            .expect(STATIC_RESPONSE),
     };
     responder.respond(response);
 }
 
 /// Headers every response carries. CSP is the important one: without it a page
 /// could pull a remote script into a context that holds the IPC bridge.
+/// The only way `http::Response::builder().body(_)` can fail is an invalid
+/// status or a malformed header value. Every response in this file uses a
+/// literal status and literal header names, so the failure is unreachable; saying
+/// so once here is what keeps the calls below from being an untriaged `unwrap`
+/// that a future edit could turn into a request-thread panic.
+const STATIC_RESPONSE: &str = "kiln: a response with a literal status and headers cannot fail";
+
 fn base_headers(dev: bool) -> wry::http::response::Builder {
     Response::builder()
         .header(header::CONTENT_SECURITY_POLICY, content_security_policy(dev))
@@ -162,5 +169,5 @@ fn json_error(
         .header(header::CONTENT_TYPE, "application/json")
         .status(status)
         .body(Cow::Owned(body.into_bytes()))
-        .unwrap()
+        .expect(STATIC_RESPONSE)
 }

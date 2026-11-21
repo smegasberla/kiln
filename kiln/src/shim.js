@@ -149,6 +149,11 @@
     tray,
     menu,
     platform: "__PLATFORM__",
+    // The origin this page is actually served from. On Windows it is the
+    // rewritten host form, because WebView2 cannot intercept a custom scheme, so
+    // a page that builds an absolute URL from a literal is correct on four
+    // targets and broken on one. Read it here instead of assuming.
+    pageOrigin: "__PAGE_ORIGIN__",
     protocol: __SHIM_PROTOCOL__,
   };
 })();

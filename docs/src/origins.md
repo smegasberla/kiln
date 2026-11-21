@@ -20,7 +20,9 @@ This is the one place a cross-platform app can notice the platform in its own
 URLs. Two consequences:
 
 - A page that hard-codes `kiln://localhost/asset.png` in HTML gets a 404 on
-  Windows. Use relative URLs, which is what every example does.
+  Windows. Use relative URLs, or read `kiln.pageOrigin` when an absolute URL is
+  genuinely needed: it carries the spelling this page was actually served from,
+  so the same code is correct on every target.
 - `kiln.platform === "windows"` is available when a page genuinely needs the
   branch, but it should be rare: the shim's own `invoke` already talks to the right
   endpoint on both.
@@ -50,4 +52,10 @@ mobile platform where the insecure-by-default `http://` workaround is not needed
 ## What to write in a page
 
 Relative URLs, and `window.kiln.invoke`. Both work on every platform, and neither
-requires the page to know which origin it is on.
+requires the page to know which origin it is on. When you cannot avoid an absolute
+URL, build it from `kiln.pageOrigin` rather than from a literal; that member exists
+so the rewritten spelling stays an implementation detail instead of something every
+page has to know.
+
+`kiln.pageOrigin` arrived in shim protocol 3, so the honest feature test is
+`kiln.protocol >= 3` with a relative URL as the fallback.

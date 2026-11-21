@@ -39,7 +39,9 @@ struct Entry {
 /// Call once from `main` before `App::run`. Without it, reports are kept in
 /// memory only and readable via the `__kiln_report` command.
 pub fn set_log_file(path: impl Into<PathBuf>) {
-    *LOG_FILE.lock().unwrap() = Some(path.into());
+    *LOG_FILE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(path.into());
 }
 
 /// Install a sink that receives every record, in addition to the in-memory
@@ -53,7 +55,9 @@ pub fn set_reporter<F>(reporter: F)
 where
     F: Fn(&str) + Send + Sync + 'static,
 {
-    *REPORTER.lock().unwrap() = Some(Box::new(reporter));
+    *REPORTER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(reporter));
 }
 
 /// Append one line, rotating the file instead of growing past `MAX_LOG_BYTES`.

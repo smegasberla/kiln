@@ -147,6 +147,11 @@ fn main() {
 
 fn build_registry() -> Registry {
     let mut registry = Registry::new();
+    // The benchmark deliberately exceeds the shipping limit at its highest
+    // concurrency level: it is measuring what a pool would cost, not what the
+    // default refuses. Without this the 512-way run would be answered with
+    // `busy` envelopes and the timings would measure the guard instead.
+    registry.set_async_limit(usize::MAX);
 
     // No work: the floor. Anything slower than this is the transport's cost.
     registry.add("sync", |_app, _payload| Ok(json!("sync")));

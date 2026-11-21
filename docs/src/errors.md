@@ -13,7 +13,7 @@ try {
   await window.kiln.invoke("save", { path });
 } catch (error) {
   const { kind, method, message } = error as {
-    kind: "unknown" | "payload" | "handler" | "panic" | "runtime";
+    kind: "unknown" | "payload" | "handler" | "panic" | "busy" | "runtime";
     method: string;
     message: string;
   };
@@ -30,6 +30,7 @@ try {
 | `payload` | the request did not match the typed argument | a bug in the page; log it |
 | `handler` | the handler returned `Err` | show the message; it is meant for a user |
 | `panic` | the handler panicked | show the message, keep the window; report it |
+| `busy` | every worker-thread slot was taken | retry shortly; nothing was started |
 | `runtime` | the webview or event loop failed | fatal for the window; offer a restart |
 
 `unknown` covers both a missing command and a denied one on purpose. A page must

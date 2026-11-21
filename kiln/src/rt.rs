@@ -40,6 +40,11 @@ fn runtime() -> &'static tokio::runtime::Runtime {
             .thread_name("kiln-rt")
             .enable_all()
             .build()
+            // Building a multi-thread runtime against the OS thread API has no
+            // recoverable failure here: if it cannot be created the app has no
+            // way to run an `async_fn` command at all, and a lazy panic with this
+            // message is a better report than a command that silently never
+            // answers. It is the one place in the crate where that trade is right.
             .expect("kiln: could not build the async runtime")
     })
 }

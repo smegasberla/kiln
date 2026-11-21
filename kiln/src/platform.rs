@@ -18,6 +18,18 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::{AppHandle, Registry};
 
+/// Take a lock, ignoring poisoning.
+///
+/// These statics hold plain data (a queue of lifecycle states, the current
+/// activity, the pending pickers), so a panic while one was held leaves them
+/// consistent. Propagating the poison would instead make the shell permanently
+/// unusable after one unrelated panic, which is worse than continuing: the
+/// `unwrap` this replaces panicked in exactly that case, and in a library a
+/// single poisoned mutex should not be able to take down the app.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 static HANDLE: OnceLock<AppHandle> = OnceLock::new();
 static REGISTRY: OnceLock<Arc<Registry>> = OnceLock::new();
 
@@ -109,7 +121,7 @@ static PAGE_LOADED: AtomicBool = AtomicBool::new(false);
 /// better served by the page receiving it than by it silently vanishing. The page
 /// hears it as `kiln.listen("lifecycle", ({ state }) => ...)`.
 pub fn lifecycle(state: &str) {
-    LIFECYCLE.lock().unwrap().record(state);
+    lock(&LIFECYCLE).record(state);
     if PAGE_LOADED.load(Ordering::Acquire) {
         deliver_lifecycle();
     }
@@ -127,7 +139,7 @@ pub fn page_loaded() {
 /// Send the queued states to the page, or keep them if there is no page yet.
 fn deliver_lifecycle() {
     let Some(handle) = handle() else { return };
-    for state in LIFECYCLE.lock().unwrap().drain() {
+    for state in lock(&LIFECYCLE).drain() {
         handle.emit("lifecycle", serde_json::json!({ "state": state }));
     }
 }
@@ -239,12 +251,12 @@ mod android {
     /// Called from the app's activity-create hook, on the UI thread, with the
     /// activity alive. Runs once per activity instance, not once per process.
     pub fn init_activity(activity: GlobalRef) {
-        *ACTIVITY.lock().unwrap() = Some(activity);
+        *lock(&ACTIVITY) = Some(activity);
     }
 
     /// The activity currently in front, if the hook has run.
     fn activity() -> Option<GlobalRef> {
-        ACTIVITY.lock().unwrap().clone()
+        lock(&ACTIVITY).clone()
     }
 
     /// Run `work` with the Java VM attached to this thread.
@@ -324,7 +336,7 @@ mod android {
     pub fn pick_dialog(request: &str) -> Result<Option<String>, String> {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
-        PENDING.lock().unwrap().push((id, sender));
+        lock(&PENDING).push((id, sender));
 
         let asked = with_activity(|env, activity| {
             let request = env.new_string(request).ok()?;
@@ -347,7 +359,7 @@ mod android {
         };
         // Drop the entry whether it was answered or not: a timeout leaves it
         // behind, and `complete_dialog` has already removed an answered one.
-        PENDING.lock().unwrap().retain(|(pending, _)| *pending != id);
+        lock(&PENDING).retain(|(pending, _)| *pending != id);
         answer
     }
 
@@ -372,7 +384,7 @@ mod android {
 
     fn finish_dialog(id: u64, answer: Result<Option<String>, String>) {
         let waiting = {
-            let mut pending = PENDING.lock().unwrap();
+            let mut pending = lock(&PENDING);
             pending
                 .iter()
                 .position(|(pending_id, _)| *pending_id == id)

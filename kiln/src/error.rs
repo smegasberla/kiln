@@ -11,6 +11,12 @@ pub enum Error {
     Payload(String),
     /// A handler panicked. The app keeps running; the page gets this message.
     Panic(String),
+    /// Every worker-thread command slot was already taken.
+    ///
+    /// Carries the limit so the message can name it. The request was refused
+    /// before any work started, so the page can retry rather than recover from
+    /// a half-finished operation.
+    Busy(usize),
     /// The webview or event loop failed.
     Runtime(String),
 }
@@ -22,6 +28,10 @@ impl fmt::Display for Error {
             Error::Handler(m) => f.write_str(m),
             Error::Payload(m) => write!(f, "invalid payload: {m}"),
             Error::Panic(m) => write!(f, "command panicked: {m}"),
+            Error::Busy(limit) => write!(
+                f,
+                "too many commands running (at most {limit} at once); try again"
+            ),
             Error::Runtime(m) => write!(f, "runtime error: {m}"),
         }
     }
@@ -38,6 +48,7 @@ impl Error {
             Error::Handler(_) => "handler",
             Error::Payload(_) => "payload",
             Error::Panic(_) => "panic",
+            Error::Busy(_) => "busy",
             Error::Runtime(_) => "runtime",
         }
     }

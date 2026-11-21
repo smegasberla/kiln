@@ -65,6 +65,15 @@ jobs:
       - name: Clippy
         run: cargo clippy -p kiln --features full,rt,storage --all-targets -- -D warnings
 
+      # Reported rather than gated on the first run: a threshold picked before
+      # there is a published number is a guess, and a guess that fails CI on an
+      # honest change gets deleted rather than fixed. Once the baseline is in the
+      # log, set `--fail-under-lines` to just under it and this becomes a gate.
+      - name: Coverage
+        run: |
+          cargo install cargo-llvm-cov --locked --quiet
+          cargo llvm-cov -p kiln --features full,rt,storage --lib --summary-only
+
       - name: Typecheck and test CLI
         working-directory: cli
         run: |

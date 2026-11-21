@@ -19,6 +19,7 @@
 
 use std::collections::HashMap;
 use std::panic::{self, AssertUnwindSafe};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::Value;
 
@@ -69,6 +70,18 @@ pub struct Registry {
     /// on. Behind an `Arc` so an async dispatch can record from its worker
     /// thread without borrowing the registry.
     latency: std::sync::Arc<std::sync::Mutex<HashMap<String, Vec<u64>>>>,
+    /// How many worker-thread commands may be running at once.
+    ///
+    /// Without a bound, each `add_async` call reserves a thread stack, so a page
+    /// that loops on one slow allowlisted command could reserve memory until the
+    /// process dies. That page is inside the threat model: the shell assumes the
+    /// webview renders untrusted content. Past the limit a call is refused with
+    /// [`Error::Busy`] instead of spawning, which keeps the app alive and tells
+    /// the page to back off.
+    worker_limit: usize,
+    /// How many are running now. Behind an `Arc` so the permit a worker holds can
+    /// release itself on drop, including when the handler panics.
+    worker_inflight: std::sync::Arc<AtomicUsize>,
 }
 
 impl Default for Registry {
@@ -84,9 +97,31 @@ impl Registry {
             allow: None,
             latency: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
             window_allow: std::sync::Arc::new(std::sync::RwLock::new(HashMap::new())),
+            worker_limit: default_worker_limit(),
+            worker_inflight: std::sync::Arc::new(AtomicUsize::new(0)),
             #[cfg(feature = "hot-reload")]
             hot: None,
         }
+    }
+
+    /// Change how many `add_async` commands may run at once.
+    ///
+    /// The default is the machine's parallelism, at least four. Raise it when the
+    /// commands are I/O-bound and a burst of concurrent calls is normal; lower it
+    /// on a memory-constrained target. A value of 0 is treated as 1, because a
+    /// limit of zero would make every async command permanently uncallable.
+    pub fn set_async_limit(&mut self, limit: usize) {
+        self.worker_limit = limit.max(1);
+    }
+
+    /// The current worker-thread limit, for diagnostics and tests.
+    pub fn async_limit(&self) -> usize {
+        self.worker_limit
+    }
+
+    /// How many worker-thread commands are running right now.
+    pub fn async_inflight(&self) -> usize {
+        self.worker_inflight.load(Ordering::SeqCst)
     }
 
     /// Attach the hot-reloaded commands library (`kiln dev`). Static handlers
@@ -358,18 +393,60 @@ impl Registry {
                 done(ok_or_error(method, outcome))
             }
             Some(Handler::Async(handler)) => {
+                // Refused rather than queued: a queued request still holds the
+                // page's promise open and still costs a thread once a slot frees,
+                // so under a flood the honest answer is "busy, retry" and the
+                // bound stays a bound.
+                let Some(permit) = claim_worker_slot(&self.worker_inflight, self.worker_limit)
+                else {
+                    return done(error_envelope_for(method, &Error::Busy(self.worker_limit)));
+                };
                 let handler = std::sync::Arc::clone(handler);
                 let handle = handle.clone();
                 let method = method.to_owned();
                 let samples = std::sync::Arc::clone(&self.latency);
-                std::thread::spawn(move || {
-                    let started = timed.then(std::time::Instant::now);
-                    let outcome = run_isolated_async(&handler, handle, payload);
-                    if let Some(started) = started {
-                        record_latency(&samples, &method, started.elapsed());
+                // The callback has to move into the thread, but a thread that
+                // cannot be created must still answer the page. Holding it behind
+                // an `Arc<Mutex<Option<_>>>` lets the failed-spawn path take it
+                // back: the closure is dropped without running, so the slot still
+                // holds it.
+                let answer: std::sync::Arc<std::sync::Mutex<Option<F>>> =
+                    std::sync::Arc::new(std::sync::Mutex::new(Some(done)));
+                let in_thread = std::sync::Arc::clone(&answer);
+                let method_for_error = method.clone();
+                let spawned = std::thread::Builder::new()
+                    .name(format!("kiln:{method}"))
+                    .spawn(move || {
+                        // Held for the whole handler: dropped on return or unwind,
+                        // so a panic cannot leak a slot.
+                        let _permit = permit;
+                        let started = timed.then(std::time::Instant::now);
+                        let outcome = run_isolated_async(&handler, handle, payload);
+                        if let Some(started) = started {
+                            record_latency(&samples, &method, started.elapsed());
+                        }
+                        if let Some(answer) = in_thread
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .take()
+                        {
+                            answer(ok_or_error(&method, outcome));
+                        }
+                    });
+                // A thread that cannot be created is the same failure as
+                // saturation, and answering keeps the page's promise resolvable.
+                if let Err(error) = spawned {
+                    if let Some(answer) = answer
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .take()
+                    {
+                        answer(error_envelope_for(
+                            &method_for_error,
+                            &Error::Runtime(format!("could not start a worker thread: {error}")),
+                        ));
                     }
-                    done(ok_or_error(&method, outcome));
-                });
+                }
             }
             #[cfg(feature = "rt")]
             Some(Handler::Deferred(handler)) => {
@@ -604,6 +681,57 @@ fn record_latency(
     }
 }
 
+/// How many worker-thread commands may run at once by default.
+///
+/// Tied to the machine rather than a constant: a four-core laptop and a 32-core
+/// workstation should not refuse the same burst. The floor of four keeps the
+/// bound from serialising ordinary I/O on a small target, and there is no upper
+/// cap because the limit is only a memory guard, not a throttle.
+fn default_worker_limit() -> usize {
+    std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4)
+        .max(4)
+}
+
+/// A worker slot, released on drop.
+///
+/// Drop rather than an explicit release is what makes the bound honest: a
+/// handler that returns, unwinds, or fails at thread spawn all free their slot
+/// the same way, so the count cannot drift upward and silently converge on
+/// "everything is busy".
+struct WorkerSlot(std::sync::Arc<AtomicUsize>);
+
+impl Drop for WorkerSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Take a worker slot, or `None` when every slot is already in use.
+///
+/// A compare-exchange loop rather than a mutex: the counter is touched once at
+/// the start of a command and once at the end, and a contended atomic is far
+/// cheaper than a contended lock on a path that is meant to be spawned hundreds
+/// of times at once.
+fn claim_worker_slot(inflight: &std::sync::Arc<AtomicUsize>, limit: usize) -> Option<WorkerSlot> {
+    let mut current = inflight.load(Ordering::SeqCst);
+    loop {
+        if current >= limit {
+            return None;
+        }
+        match inflight.compare_exchange_weak(
+            current,
+            current + 1,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => return Some(WorkerSlot(std::sync::Arc::clone(inflight))),
+            Err(observed) => current = observed,
+        }
+    }
+}
+
 fn report_panic(payload: &(dyn std::any::Any + Send)) -> Error {
     let message = panic_message(payload);
     crate::diagnostics::record(
@@ -629,28 +757,45 @@ pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 /// Extract the method name from an endpoint path, decoding `%XX` escapes.
 ///
 /// Returns `None` for anything outside the endpoint namespace so the caller can
-/// fall through to static asset serving.
+/// fall through to static asset serving, and for a path that is not valid UTF-8
+/// after decoding: no command can have such a name, and the alternative is
+/// passing a lossy string to the registry.
+///
+/// Decoding works on bytes, not on the `&str`. Slicing the string by index looks
+/// equivalent for ASCII and panics on anything else, because a byte offset can
+/// land inside a multi-byte character: `/__kiln/%€` used to abort the handler
+/// thread from inside the request path.
 pub fn method_from_path(path: &str) -> Option<String> {
     let raw = path.strip_prefix(ENDPOINT_PREFIX)?;
     if raw.is_empty() {
         return None;
     }
-    let mut out = String::with_capacity(raw.len());
     let bytes = raw.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
+        // `%XX` needs two bytes after the sign; a trailing `%4` is a literal.
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let hex = &raw[i + 1..i + 3];
-            if let Ok(byte) = u8::from_str_radix(hex, 16) {
-                out.push(byte as char);
+            if let (Some(high), Some(low)) = (hex_value(bytes[i + 1]), hex_value(bytes[i + 2])) {
+                out.push(high << 4 | low);
                 i += 3;
                 continue;
             }
         }
-        out.push(bytes[i] as char);
+        out.push(bytes[i]);
         i += 1;
     }
-    Some(out)
+    String::from_utf8(out).ok()
+}
+
+/// One hex digit, in either case.
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -1218,6 +1363,101 @@ mod tests {
     }
 
     #[test]
+    fn async_commands_are_refused_past_the_limit() {
+        let mut reg = Registry::new();
+        reg.set_async_limit(1);
+
+        // Channels rather than sleeps: the first call can only be refused once
+        // its slot is provably taken, and `started` is what proves it.
+        let (started_tx, started_rx) = mpsc::channel();
+        let started_tx = std::sync::Arc::new(std::sync::Mutex::new(started_tx));
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let release_rx = std::sync::Arc::new(std::sync::Mutex::new(release_rx));
+
+        reg.add_async("slow", move |_h, _p| {
+            started_tx.lock().expect("fresh lock").send(()).expect("test listening");
+            release_rx.lock().expect("fresh lock").recv().expect("test releasing");
+            Ok(json!("first"))
+        });
+
+        let (tx, rx) = mpsc::channel();
+        reg.dispatch_deferred(&empty_handle(), "slow", Value::Null, move |body| {
+            let _ = tx.send(body);
+        });
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the first call must start");
+        assert_eq!(reg.async_inflight(), 1);
+
+        // The only slot is taken, so the second call is answered instead of
+        // spawning. This is the DoS guard: without it the call would reserve
+        // another thread stack.
+        let body = reg.dispatch(&empty_handle(), "slow", Value::Null);
+        let parsed: Value = serde_json::from_str(&body).expect("envelope");
+        assert_eq!(parsed["error"]["kind"], "busy");
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .expect("message is text")
+                .contains("at most 1"),
+            "the refusal should name the limit: {body}"
+        );
+
+        release_tx.send(()).expect("test releasing");
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(5)).expect("reply"),
+            r#"{"ok":"first"}"#
+        );
+        assert_eq!(reg.async_inflight(), 0, "the slot must come back");
+    }
+
+    #[test]
+    fn a_panicking_worker_does_not_leak_its_slot() {
+        let mut reg = Registry::new();
+        reg.set_async_limit(1);
+        reg.add_async("boom", |_h, _p| panic!("async kaboom"));
+
+        let body = reg.dispatch(&empty_handle(), "boom", Value::Null);
+        assert!(body.contains("panic"), "the page gets the panic envelope: {body}");
+        assert_eq!(
+            reg.async_inflight(),
+            0,
+            "the permit is dropped on unwind, so one panic cannot wedge the app"
+        );
+    }
+
+    #[test]
+    fn a_limit_of_zero_is_treated_as_one() {
+        let mut reg = Registry::new();
+        reg.set_async_limit(0);
+        assert_eq!(
+            reg.async_limit(),
+            1,
+            "a zero limit would make every async command permanently uncallable"
+        );
+    }
+
+    #[test]
+    fn the_default_limit_keeps_ordinary_io_parallel() {
+        assert!(
+            Registry::new().async_limit() >= 4,
+            "the floor is four, so a two-core target still overlaps I/O"
+        );
+    }
+
+    #[test]
+    fn the_worker_limit_does_not_gate_sync_commands() {
+        let mut reg = Registry::new();
+        reg.set_async_limit(1);
+        reg.add("ok", |_h, _p| Ok(json!("fine")));
+        assert_eq!(
+            reg.dispatch(&empty_handle(), "ok", Value::Null),
+            r#"{"ok":"fine"}"#,
+            "the bound is about thread stacks, not about the command surface"
+        );
+    }
+
+    #[test]
     fn a_panicking_async_handler_is_isolated_too() {
         let mut reg = Registry::new();
         reg.add_async("boom", |_h, _p| panic!("async kaboom"));
@@ -1251,5 +1491,172 @@ mod tests {
         assert_eq!(method_from_path("/__kiln/"), None);
         assert_eq!(method_from_path("/index.html"), None);
         assert_eq!(method_from_path("/"), None);
+    }
+
+    #[test]
+    fn a_multibyte_path_does_not_panic_the_decoder() {
+        // Slicing the path string by byte offset used to land inside `€` and
+        // abort the request-handling thread. The command cannot exist, so the
+        // contract is "no command", not "panic".
+        assert_eq!(method_from_path("/__kiln/%\u{20ac}").as_deref(), Some("%€"));
+        assert_eq!(method_from_path("/__kiln/\u{20ac}").as_deref(), Some("€"));
+        assert_eq!(method_from_path("/__kiln/%"), Some("%".to_owned()));
+        assert_eq!(method_from_path("/__kiln/%4"), Some("%4".to_owned()));
+        assert_eq!(method_from_path("/__kiln/a%zz"), Some("a%zz".to_owned()));
+    }
+
+    #[test]
+    fn an_encoded_stand_in_for_an_unknown_method_is_refused_not_panicked() {
+        // A path that decodes to a name nobody registered answers `unknown`
+        // through the normal envelope, including a name with escaped bytes.
+        let mut reg = Registry::new();
+        reg.add("greet", |_h, _p| Ok(json!("hi")));
+        let method = method_from_path("/__kiln/%67reet").expect("decodes to greet");
+        assert_eq!(method, "greet");
+        assert_eq!(
+            reg.dispatch(&empty_handle(), &method, Value::Null),
+            r#"{"ok":"hi"}"#
+        );
+
+        let missing = method_from_path("/__kiln/%00nope").expect("decodes");
+        let body = reg.dispatch(&empty_handle(), &missing, Value::Null);
+        assert!(body.contains(r#""kind":"unknown""#), "{body}");
+    }
+
+    #[test]
+    fn a_path_that_decodes_to_invalid_utf8_is_refused() {
+        assert_eq!(method_from_path("/__kiln/%ff"), None);
+        assert_eq!(method_from_path("/__kiln/%c3"), None);
+    }
+}
+
+#[cfg(test)]
+mod fuzz {
+    //! A deterministic stand-in for `cargo fuzz`.
+    //!
+    //! `fuzz/` holds the libFuzzer harness for long runs, but it needs nightly and
+    //! a nightly-only dependency, so it cannot run on every push. This module is
+    //! the part that always runs: a fixed-seed mutational loop over the three
+    //! parsers that take untrusted input. It is not a substitute for coverage
+    //! guidance, it is the cheap version that would have caught the multi-byte
+    //! `%XX` panic in `method_from_path` on the first iteration.
+    //!
+    //! Determinism is the point: a failure reproduces with the same seed on any
+    //! machine, so a CI failure is actionable rather than "try again".
+
+    use super::*;
+
+    /// Small, fast, and platform-independent: xorshift64 rather than anything
+    /// drawing from the OS, so a seed means the same corpus everywhere.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        fn below(&mut self, bound: usize) -> usize {
+            if bound == 0 {
+                0
+            } else {
+                (self.next() % bound as u64) as usize
+            }
+        }
+    }
+
+    /// Byte values chosen to reach the interesting edges, not a uniform spread:
+    /// escapes, sign bytes, quotes, braces, NUL, and multi-byte UTF-8 starts.
+    const ALPHABET: &[u8] = b"%{}[]\":,null0123456789abcXYZ \t\n/\\\x00\xc3\xa9\xe2\x82\xac";
+
+    fn corpus(rng: &mut Rng) -> Vec<u8> {
+        let len = rng.below(48);
+        (0..len).map(|_| ALPHABET[rng.below(ALPHABET.len())]).collect()
+    }
+
+    #[test]
+    fn the_path_decoder_never_panics_and_never_invents_a_command() {
+        let mut rng = Rng(0x5eed_1234);
+        for _ in 0..20_000 {
+            let raw = corpus(&mut rng);
+            let Ok(text) = std::str::from_utf8(&raw) else {
+                continue;
+            };
+            let path = format!("/__kiln/{text}");
+            // The property is total: any input, an `Option`, never a panic.
+            if let Some(method) = method_from_path(&path) {
+                assert!(!method.is_empty(), "an empty method is not a command");
+                // Idempotence holds only when there is nothing left to decode:
+                // a name that still contains `%` is re-interpreted on the next
+                // pass, which is correct (the escape is real) and not a function
+                // of the decoder being sloppy. None of these may panic either way.
+                if !method.contains('%') {
+                    assert_eq!(
+                        method_from_path(&format!("/__kiln/{method}")),
+                        Some(method),
+                        "a name with no escapes must decode to itself"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_payload_parser_accepts_or_refuses_but_never_panics() {
+        let mut rng = Rng(0xdec0_de01);
+        for _ in 0..20_000 {
+            let raw = corpus(&mut rng);
+            match crate::transport::parse_payload(&raw) {
+                Ok(value) => {
+                    // Whatever it parsed as must re-serialize to valid JSON, or
+                    // the reply built from it would break the page's parser.
+                    assert!(serde_json::to_string(&value).is_ok());
+                }
+                Err(message) => assert!(!message.is_empty(), "a refusal must say why"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_bridge_parser_accepts_or_refuses_but_never_panics() {
+        let mut rng = Rng(0x0110_1010);
+        for _ in 0..20_000 {
+            let raw = corpus(&mut rng);
+            let Ok(text) = std::str::from_utf8(&raw) else {
+                continue;
+            };
+            match crate::transport::parse_message(text) {
+                Ok((method, _payload)) => {
+                    assert!(!method.is_empty(), "an empty method is not a command")
+                }
+                Err(message) => assert!(!message.is_empty(), "a refusal must say why"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_decoded_path_that_reaches_the_registry_always_gets_an_envelope() {
+        // The whole path, not just the parser: junk in, a JSON envelope out.
+        let mut reg = Registry::new();
+        reg.add("greet", |_h, _p| Ok(serde_json::json!("hi")));
+        let handle = AppHandle::detached_for_tests();
+        let mut rng = Rng(0xfeed_face);
+        for _ in 0..2_000 {
+            let raw = corpus(&mut rng);
+            let Ok(text) = std::str::from_utf8(&raw) else {
+                continue;
+            };
+            let path = format!("/__kiln/{text}");
+            let Some(method) = method_from_path(&path) else {
+                continue;
+            };
+            let body = reg.dispatch(&handle, &method, Value::Null);
+            assert!(
+                body.starts_with("{\"ok\"") || body.starts_with("{\"error\""),
+                "not an envelope for {method:?}: {body}"
+            );
+        }
     }
 }

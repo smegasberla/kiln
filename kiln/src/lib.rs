@@ -124,7 +124,10 @@ const SHIM: &str = include_str!("shim.js");
 ///
 /// Bumping it is a documented change: it happens when the shim gains a member
 /// or changes one's meaning, never for an internal fix.
-pub const SHIM_PROTOCOL: u32 = 2;
+///
+/// 3 added `pageOrigin`, so a page that wants the real spelling of its own origin
+/// asks `protocol >= 3` and falls back to a relative URL on an older shell.
+pub const SHIM_PROTOCOL: u32 = 3;
 
 /// The invoke endpoint.
 ///
@@ -1198,6 +1201,7 @@ fn build_shim(dev_origin: Option<&str>) -> String {
     SHIM.replace("__INVOKE_BASE__", invoke_base(dev_origin.is_some()))
         .replace("__ALLOWED_ORIGINS__", &allowed)
         .replace("__BRIDGE__", if bridge { "true" } else { "false" })
+        .replace("__PAGE_ORIGIN__", PAGE_ORIGIN)
         .replace("__PLATFORM__", platform_name())
         .replace("__SHIM_PROTOCOL__", &SHIM_PROTOCOL.to_string())
 }
@@ -1510,7 +1514,7 @@ mod tests {
         let shim = build_shim(None);
         // A page opens a window, then needs the list of what is open and the
         // ability to tick a tray or menu item without re-declaring anything.
-        for member in ["windows", "tray", "menu"] {
+        for member in ["windows", "tray", "menu", "pageOrigin"] {
             assert!(shim.contains(member), "the shim must expose {member}");
         }
         assert!(shim.contains("__kiln_windows"));
@@ -1596,6 +1600,100 @@ mod tests {
         let (method, payload) = transport::parse_message(r#"{"method":"m"}"#).unwrap();
         assert_eq!(method, "m");
         assert_eq!(payload, Value::Null);
+    }
+
+    #[derive(serde::Deserialize)]
+    struct ConformanceArgs {
+        n: u32,
+    }
+
+    /// The same requests through both transports, side by side.
+    ///
+    /// The transports already share `transport::respond`, so this guards the
+    /// seam rather than reimplementing it: every case goes through the desktop
+    /// protocol path and the mobile bridge path and must produce an identical
+    /// body. Before this, a per-platform CI job going red was the first signal
+    /// that the two had drifted.
+    #[test]
+    fn the_two_transports_answer_identically() {
+        let handle = AppHandle::detached_for_tests();
+
+        let mut registry = Registry::new();
+        registry.add("echo", |_app, payload| Ok(payload));
+        registry.add("fail", |_app, _payload| {
+            Err(Error::Handler("nope".to_owned()))
+        });
+        registry.add("boom", |_app, _payload| panic!("conformance boom"));
+        registry.add_typed("typed", |_app, args: ConformanceArgs| Ok(json!(args.n)));
+        registry.add("withheld", |_app, _payload| Ok(json!("secret")));
+        registry.set_allowlist(Some(
+            ["echo", "fail", "boom", "typed"]
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
+        ));
+
+        let cases: &[(&str, &str, &[u8], &str)] = &[
+            ("a payload round-trips", "echo", br#"{"a":1}"#, r#"{"ok":{"a":1}}"#),
+            ("an absent body is null", "echo", b"", r#"{"ok":null}"#),
+            ("a typed reply keeps its shape", "typed", br#"{"n":7}"#, r#"{"ok":7}"#),
+            (
+                "a malformed typed payload is a payload error",
+                "typed",
+                br#"{"n":"x"}"#,
+                r#""kind":"payload""#,
+            ),
+            ("a handler error is an envelope", "fail", b"", r#""kind":"handler""#),
+            ("a panic is contained", "boom", b"", r#""kind":"panic""#),
+            ("an unknown command is unknown", "nope", b"", r#""kind":"unknown""#),
+            (
+                "a withheld command is unknown too, not forbidden",
+                "withheld",
+                b"",
+                r#""kind":"unknown""#,
+            ),
+        ];
+
+        for (label, method, body, expected) in cases {
+            let payload = transport::parse_payload(body).expect("the case body must parse");
+            let via_protocol = transport::respond(&registry, &handle, method, payload.clone());
+
+            let message = json!({ "method": method, "payload": payload }).to_string();
+            let (bridged_method, bridged_payload) =
+                transport::parse_message(&message).expect("the bridge message must parse");
+            let via_bridge =
+                transport::respond(&registry, &handle, &bridged_method, bridged_payload);
+
+            assert_eq!(via_protocol, via_bridge, "{label}: transports disagree");
+            assert!(
+                via_protocol.contains(expected),
+                "{label}: expected {expected} in {via_protocol}"
+            );
+        }
+    }
+
+    /// A malformed body is an HTTP 400 on the desktop transport and a dropped
+    /// message on the bridge (there is no status code over `postMessage`). Both
+    /// must refuse rather than dispatch something.
+    #[test]
+    fn a_malformed_body_is_refused_on_both_transports() {
+        assert!(transport::parse_payload(b"not json").is_err());
+        assert!(transport::parse_message("not json").is_err());
+        assert!(transport::parse_message(r#"{"payload":{}}"#).is_err());
+    }
+
+    /// The origin the shim reports must be one the navigation policy accepts.
+    ///
+    /// `pageOrigin` exists so a page need not guess the spelling, which matters
+    /// because Windows rewrites it. If the shim reported an origin the policy
+    /// refuses, every absolute URL a page built would be blocked.
+    #[test]
+    fn the_reported_page_origin_is_navigable() {
+        assert!(
+            security::navigation_allowed(&format!("{PAGE_ORIGIN}/"), None),
+            "the shim reports {PAGE_ORIGIN}, which the policy must accept"
+        );
+        assert!(build_shim(None).contains(&format!("\"{PAGE_ORIGIN}\"")));
     }
 
     #[test]
