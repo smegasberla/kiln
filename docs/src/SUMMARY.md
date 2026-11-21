@@ -9,6 +9,7 @@ window.
 If you only read one chapter, read "Commands & payloads". Everything else follows
 from it.
 
+- [Concepts](concepts.md)
 - [Installing Voussoir](install.md)
 - [Your first app](first-app.md)
   - [How a project is laid out](layout.md)
