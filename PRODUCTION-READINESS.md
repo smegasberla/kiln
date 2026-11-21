@@ -231,10 +231,11 @@ addressed; finding 3 is now fixed by the per-window allowlist (2026-11-19).
 
 Caveats kept honest: finding 2's fix is CI-only and proves itself the first time
 the Windows and macOS jobs run. macOS has: its `End-to-end verification` step passed
-in run 44788618663, so the WKWebView harness is green on real hardware; the Windows
-job of that run was still running when this was written, so WebView2 is the one
-engine whose e2e result is not yet recorded. The Android CSP exception that
-finding 1's fix documented was later
+in run 44788618663, so the WKWebView harness is green on real hardware. WebView2 is
+the one engine whose e2e result is not yet recorded: the Windows job of that run sat
+queued behind fifteen superseded runs, was cancelled with them, and its re-run had
+not reached the verdict when this line was last written. The Android CSP exception
+that finding 1's fix documented was later
 removed after the emulator measurement recorded under C2, so that caveat is
 closed.
 
