@@ -103,7 +103,12 @@ the app, not of the framework. Two habits:
 - **Handler messages are for users.** "The file could not be saved: permission
   denied" beats "os error 13".
 - **Detail goes in the log.** If you need the raw error, record it with
-  `app.report_log`, or print it in development. Do not paste both into one string.
+  `voussoir::reporting::record(&format!("{e}"), "save")`, which lands in the report
+  buffer and on stderr. Do not paste both into one string.
+
+`App::report_log(path)` is a different thing and worth not confusing with it: it
+chooses *where* reports are written. Without it, reports are still kept in memory
+and readable through `__voussoir_reports`; they are just not persisted.
 
 ## Retrying: the only kind worth retrying
 
