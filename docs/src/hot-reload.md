@@ -3,7 +3,7 @@
 Hot reload is desktop-only and development-only. A release binary never loads a
 dynamically linked command library; the same table that was hot-reloaded links
 statically. That is checked, not asserted: `cargo tree -p voussoir --depth 1` shows no
-`libloading` edge in a release build, and `verify.ts` looks for the absence.
+`libloading` edge in a release build, and `scripts/verify-hot.ts` looks for the absence.
 
 ## What reloads
 
